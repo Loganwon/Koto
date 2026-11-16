@@ -27,7 +27,6 @@ Koto Morning Brief Service — 晨间简报
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import threading
@@ -148,7 +147,7 @@ class MorningBriefService:
             sections.append(memory_section)
 
         # 5. 生产力摘要
-        productivity_section = self._section_productivity(now)
+        productivity_section = ""
         if productivity_section:
             sections.append(productivity_section)
 
@@ -216,7 +215,7 @@ class MorningBriefService:
     def _section_calendar(self, now: datetime) -> str:
         """今日日程。"""
         try:
-            from web.calendar_manager import CalendarManager
+            from app.core.services.calendar_manager import CalendarManager
 
             cm = CalendarManager()
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -280,7 +279,7 @@ class MorningBriefService:
     def _section_reminders(self, now: datetime) -> str:
         """今日及逾期的提醒。"""
         try:
-            from web.reminder_manager import get_reminder_manager
+            from app.core.services.reminder_manager import get_reminder_manager
 
             rm = get_reminder_manager()
             today_end = now.replace(hour=23, minute=59, second=59)
@@ -304,13 +303,13 @@ class MorningBriefService:
     def _section_memory(self) -> str:
         """昨日/近期记忆洞察。"""
         try:
-            mem_path = (
-                Path(__file__).parent.parent.parent.parent / "config" / "memory.json"
-            )
+            from app.core.config.atomic_json_store import load_json_document
+            from app.core.services.memory_manager import _default_memory_path
+
+            mem_path = Path(_default_memory_path())
             if not mem_path.exists():
                 return ""
-            with open(mem_path, "r", encoding="utf-8") as f:
-                memories = json.load(f)
+            memories = load_json_document(mem_path, default=[])
             if not memories:
                 return ""
             # 取最近 24h 内的记忆
@@ -332,49 +331,12 @@ class MorningBriefService:
             logger.debug(f"[MorningBrief] 记忆获取跳过: {exc}")
             return ""
 
-    def _section_productivity(self, now: datetime) -> str:
-        """基于 ShadowWatcher 的生产力洞察。"""
-        try:
-            from app.core.monitoring.shadow_watcher import get_shadow_watcher
-
-            watcher = get_shadow_watcher()
-            obs = watcher.get_observations()
-            if not obs:
-                return ""
-
-            lines: List[str] = []
-
-            # 高频话题 Top 3
-            topics: Dict[str, int] = obs.get("topics", {})
-            if topics:
-                top3 = sorted(topics.items(), key=lambda x: x[1], reverse=True)[:3]
-                topic_strs = "、".join(f"**{k}**" for k, _ in top3)
-                lines.append(f"- 近期最关注话题：{topic_strs}")
-
-            # 最活跃时段
-            active_hours: Dict[str, int] = obs.get("active_hours", {})
-            if active_hours:
-                peak_hour = max(active_hours, key=lambda h: active_hours[h])
-                lines.append(f"- 你的高效时段通常是 **{peak_hour}:00** 前后")
-
-            # 连续使用天数
-            streak: int = obs.get("streak", 0)
-            if streak > 1:
-                lines.append(f"- 连续使用 **{streak} 天** 🔥，保持住！")
-
-            if not lines:
-                return ""
-            return "## 📊 生产力参考\n\n" + "\n".join(lines) + "\n"
-        except Exception as exc:
-            logger.debug(f"[MorningBrief] ShadowWatcher 获取跳过: {exc}")
-            return ""
-
     def _generate_motivation(self, now: datetime) -> str:
         """调用 LLM 生成一句今日激励语（限 30 字内）。"""
         try:
-            from app.core.agent.factory import create_agent
+            from app.core.agent.kernel_agent_service import get_kernel_agent
 
-            agent = create_agent()
+            agent = get_kernel_agent()
             weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
                 now.weekday()
             ]

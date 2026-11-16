@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from app.core.llm.model_mode import normalize_model_mode
@@ -95,14 +96,13 @@ def test_health_and_painter_surfaces_do_not_invoke_archived_provider() -> None:
 def test_legacy_interactions_models_fail_closed_at_the_web_compatibility_boundary() -> (
     None
 ):
-    source = _read("web/app.py")
+    web_app = _read("web/app.py")
+    gateway = _read("app/core/llm/runtime_gateway.py")
 
-    tracked_models_start = source.index("class _TrackedModels:")
-    tracked_models_end = source.index("class _ClientProxy:")
-    tracked_models = source[tracked_models_start:tracked_models_end]
-    assert "Fail closed: archived models" in tracked_models
-    assert "Interactions API 已归档" in tracked_models
-    assert "text = _call_interactions_api_sync" not in tracked_models
+    assert "class _TrackedModels:" not in web_app
+    assert "class _ClientProxy:" not in web_app
+    assert "SDK 工具声明不能通过通用模型网关执行" in gateway
+    assert "当前模型网关不接受 SDK 二进制 Part" in gateway
 
 
 def test_web_app_does_not_keep_a_google_client_construction_escape_hatch() -> None:
@@ -131,7 +131,7 @@ def test_chat_error_guidance_does_not_send_users_to_archived_gemini_setup() -> N
         )
     ]
 
-    assert "gemini_config.env" not in error_guidance
+    assert "deepseek_config.env" not in error_guidance
     assert "aistudio.google.com" not in error_guidance
     assert "Google AI Studio" not in error_guidance
     assert "DeepSeek API 密钥" in error_guidance
@@ -139,18 +139,56 @@ def test_chat_error_guidance_does_not_send_users_to_archived_gemini_setup() -> N
 
 
 def test_ppt_research_does_not_keep_a_direct_interactions_api_escape_hatch() -> None:
-    source = _read("web/web_searcher.py")
+    source = _read("web/knowledge/web_searcher.py")
 
     assert '"create_research_client"' not in source
     assert '"_poll_interaction"' not in source
 
 
-def test_release_manifest_does_not_collect_archived_provider() -> None:
-    spec = _read("koto.spec").lower()
-    requirements = _read("config/requirements.txt").lower()
+def test_release_manifest_does_not_collect_archived_provider(tmp_path) -> None:
+    from scripts.packaging_privacy import safe_config_files
 
-    assert "    'gemini_config.env'," not in spec
-    assert "app.core.llm.gemini" not in spec
+    spec_source = _read("koto.spec")
+    spec = spec_source.lower()
+    requirements = _read("config/requirements.txt").lower()
+    tree = ast.parse(spec_source)
+
+    def assigned_strings(name: str) -> set[str]:
+        assignment = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in node.targets
+            )
+        )
+        return {
+            element.value
+            for element in assignment.value.elts
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        }
+
+    archived_modules = {
+        "app.core.llm.gemini",
+        "app.core.llm.gemini_config",
+    }
+    explicit_hiddenimports = assigned_strings("hiddenimports")
+    discovery_excludes = assigned_strings("_INTERNAL_DISCOVERY_EXCLUDES")
+
+    config = tmp_path / "config"
+    config.mkdir()
+    for filename in (
+        "gemini_config.env",
+        "gemini_config.env.example",
+        "deepseek_config.env",
+    ):
+        (config / filename).write_text("synthetic-private-config", encoding="utf-8")
+    (config / "route_ownership.json").write_text("{}", encoding="utf-8")
+    assert {path.name for path in safe_config_files(config)} == {"route_ownership.json"}
+    assert "safe_config_files(src_dir)" in spec_source
+    assert archived_modules.isdisjoint(explicit_hiddenimports)
+    assert archived_modules <= discovery_excludes
     assert "google-genai" not in requirements
     assert "('gemini.py', 'gemini_config.py')" in spec
 
@@ -191,7 +229,6 @@ def test_active_goal_and_workflow_paths_do_not_import_gemini_provider() -> None:
     active_paths = (
         "app/core/goal/goal_manager.py",
         "app/core/goal/goal_job_handler.py",
-        "app/core/workflow_engine.py",
     )
     for path in active_paths:
         source = _read(path)

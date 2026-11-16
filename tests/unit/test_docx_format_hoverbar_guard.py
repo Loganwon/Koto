@@ -1,9 +1,11 @@
 import re
 from pathlib import Path
 
+from tests.source_graph import partition_aware_root
+
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return partition_aware_root()
 
 
 def _workspace_runtime_sources() -> str:
@@ -26,8 +28,8 @@ def test_docx_tooltip_buttons_keep_editor_focus():
         _repo_root() / "web" / "templates" / "_workspace_selection_toolbar.html"
     ).read_text(encoding="utf-8")
     assert "{% include '_workspace_selection_toolbar.html' %}" in shell_html
-    assert re.search(r'<div\s+id="wa-pdf-tooltip"', tooltip_html)
-    assert tooltip_html.count('onmousedown="event.preventDefault()"') >= 6
+    assert re.search(r'<div\s+id="wa-selection-toolbar"', tooltip_html)
+    assert tooltip_html.count('data-koto-event-mousedown="h_prevent_default"') >= 6
 
 
 def test_docx_hoverbar_has_font_controls():
@@ -164,11 +166,20 @@ def test_docx_tiptap_package_defines_runtime_build_script():
     package_json = (_repo_root() / "web" / "tiptap-editor" / "package.json").read_text(
         encoding="utf-8"
     )
+    build_script = (
+        _repo_root() / "web" / "tiptap-editor" / "build-assets.mjs"
+    ).read_text(encoding="utf-8")
 
     assert '"scripts"' in package_json
+    assert '"build": "node build-assets.mjs' in package_json
+    assert "entryPoints: [resolve(editorRoot, 'koto-docx-editor.js')]" in build_script
+    assert "bundle: true" in build_script
+    assert "'tiptap-docx-bundle.js'" in build_script
+    assert "globalName: 'KotoDocxEditorLib'" in build_script
+    assert "minify: true" in build_script
+    assert "sourcemap: true" in build_script
     assert (
-        '"build": "esbuild koto-docx-editor.js --bundle --outfile=../static/js/tiptap-docx-bundle.js --format=iife --global-name=KotoDocxEditorLib --minify --sourcemap"'
-        in package_json
+        "normalize-sourcemap.mjs ../static/js/tiptap-docx-bundle.js.map" in package_json
     )
 
 
@@ -215,7 +226,10 @@ def test_docx_workspace_shell_uses_shared_tiptap_mount_and_no_slate_selection_fa
     assert (
         "async function _mountDocx(tab: TabInfo, data: any): Promise<void>" in shell_js
     )
-    assert "new (window as any).KotoDocxEditorLib.KotoTipTapEditor()" in shell_js
+    assert (
+        "new (window as any).KotoDocxEditorLib.KotoTipTapEditor(editorSession)"
+        in shell_js
+    )
     assert "await _mountDocx(tab, data);" in shell_js
     assert "state.activeEditor.editor.selection" not in shell_js
     assert "Legacy Slate fallback (unused — kept for safety)" not in shell_js
@@ -341,12 +355,12 @@ def test_docx_review_mode_keeps_native_selection_for_comment_launcher():
     show_end = js.index("export function _kotoDocxSelectionChanged", show_start)
     show_fn = js[show_start:show_end]
 
-    assert show_fn.index("if (_isReviewCommentModeEnabled())") < show_fn.index(
+    assert show_fn.index("if (isReviewCommentModeEnabled())") < show_fn.index(
         "_getDocxSelectionPayload({ includeOverlay: false, allowStaleFallback: false })"
     )
     assert "_syncDocxHoverBarFromRibbon" in js
     assert "_dispatchDocxRibbonClick" in js
-    assert "(window as any)._ttPickColor" in js
+    assert "getFeatureRegistry()._ttPickColor" in js
 
 
 def test_docx_body_selection_prefers_live_native_selection_rects():

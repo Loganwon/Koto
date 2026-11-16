@@ -21,7 +21,7 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
 
-from web.chat_runtime_services import get_brain, get_model_map, get_session_manager
+from web.runtime_context import service_registry
 
 _logger = logging.getLogger("koto.routes.sessions")
 
@@ -33,7 +33,7 @@ _TITLE_PREFIX_RE = re.compile(r"^(?:标题|任务标题|历史标题)\s*[:：]\s
 
 
 def _get_session_manager():
-    return get_session_manager()
+    return service_registry.session_manager
 
 
 def _session_filename(session_name: str) -> str:
@@ -379,6 +379,10 @@ def _is_mock_workspace_history(history: list[object]) -> bool:
 
 def _task_status_label(status: object) -> str:
     normalized = str(status or "").strip().lower()
+    if normalized == "no_file_change":
+        normalized = "write_not_performed"
+    if normalized == "needs_attention":
+        normalized = "quality_gate_failed"
     if normalized in {"done", "completed", "verified", "success", "succeeded"}:
         return "completed"
     if normalized in {"streaming", "running", "pending", "queued", "processing"}:
@@ -395,9 +399,12 @@ def _task_status_label(status: object) -> str:
         "blocked",
         "write_blocked",
         "tool_gap",
-        "no_file_change",
+        "write_not_performed",
         "model_unavailable",
+        "model_timeout",
+        "model_error",
         "quality_gate_failed",
+        "context_summary_fallback",
     }:
         return "failed"
     return normalized
@@ -715,11 +722,11 @@ def delete_session(session_name: str) -> Response:
 
 
 def _get_brain():
-    return get_brain()
+    return service_registry.brain
 
 
 def _get_model_map():
-    return get_model_map()
+    return service_registry.model_map
 
 
 @sessions_bp.route("/api/sessions/<session_name>/rename", methods=["PATCH"])

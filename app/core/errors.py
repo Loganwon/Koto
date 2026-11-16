@@ -58,33 +58,6 @@ class ModelTimeoutError(LLMProviderError):
     error_code = "MODEL_TIMEOUT"
 
 
-# Skill errors
-
-
-class SkillError(KotoError):
-    """Base for skill-related failures."""
-
-    error_code = "SKILL_ERROR"
-
-
-class SkillNotFoundError(SkillError):
-    """Requested skill not found."""
-
-    error_code = "SKILL_NOT_FOUND"
-
-
-class SkillExecutionError(SkillError):
-    """Skill execution failed."""
-
-    error_code = "SKILL_EXECUTION_ERROR"
-
-
-class SkillLoadError(SkillError):
-    """Skill could not be loaded."""
-
-    error_code = "SKILL_LOAD_ERROR"
-
-
 # Auth errors
 
 

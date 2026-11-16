@@ -11,7 +11,6 @@ Koto OpsEventBus — 运维事件总线
   "job_failed"             — 后台作业执行失败
   "job_recovered"          — 崩溃恢复重排了挂起作业
   "scheduler_skipped"      — 调度触发器触发失败
-  "skill_disabled"         — 某技能被系统自动禁用
   "dependency_unhealthy"   — 依赖服务不可达（模型 / Ollama / 文件系统）
   "model_fallback"         — AI 模型降级到备选模型
   "remediation_triggered"  — 自愈策略被激活

@@ -10,25 +10,135 @@ from pathlib import Path
 _runtime_lock = threading.Lock()
 _runtime_thread: threading.Thread | None = None
 _runtime_started = False
+_model_runtime_lock = threading.Lock()
+_model_runtime_threads: tuple[threading.Thread, ...] = ()
+_model_runtime_started = False
+_proxy_warmup_lock = threading.Lock()
+_proxy_warmup_thread: threading.Thread | None = None
+
+
+def _background_runtime_disabled() -> bool:
+    return os.environ.get("KOTO_SKIP_BACKGROUND_RUNTIME", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _run_model_runtime(logger: Logger, initialize, refresh) -> None:
+    """Initialize model state before entering its long-running refresh loop."""
+    try:
+        initialize()
+    except Exception:
+        logger.exception("[ModelManager] initialization failed")
+    try:
+        refresh()
+    except Exception:
+        logger.exception("[ModelManager] refresh loop stopped unexpectedly")
+
+
+def start_model_runtime(
+    logger: Logger,
+    initialize_model_manager,
+    refresh_model_manager,
+) -> tuple[threading.Thread, ...]:
+    """Start model discovery/refresh once, unless this is a safe import probe."""
+    global _model_runtime_started, _model_runtime_threads
+
+    with _model_runtime_lock:
+        if _model_runtime_started:
+            return _model_runtime_threads
+        _model_runtime_started = True
+        if _background_runtime_disabled():
+            logger.info("[ModelManager] 后台模型运行时已按安全导入配置跳过")
+            return ()
+
+        thread = threading.Thread(
+            target=_run_model_runtime,
+            args=(logger, initialize_model_manager, refresh_model_manager),
+            name="ModelManagerRuntime",
+            daemon=True,
+        )
+        thread.start()
+        _model_runtime_threads = (thread,)
+        return _model_runtime_threads
+
+
+def start_proxy_warmup(logger: Logger, warmup) -> threading.Thread | None:
+    """Warm proxy discovery once without polluting safe application imports."""
+    global _proxy_warmup_thread
+
+    with _proxy_warmup_lock:
+        if _proxy_warmup_thread is not None:
+            return _proxy_warmup_thread
+        if _background_runtime_disabled():
+            logger.info("[Proxy] 后台代理预热已按安全导入配置跳过")
+            return None
+        thread = threading.Thread(
+            target=warmup,
+            name="ProxyWarmup",
+            daemon=True,
+        )
+        thread.start()
+        _proxy_warmup_thread = thread
+        return thread
+
+
+def _start_managed_services(logger: Logger) -> dict[str, str]:
+    """Start executable services under the shared runtime lifecycle.
+
+    Every component is isolated and reported so one optional integration
+    cannot prevent the core application from becoming available.
+    """
+    state: dict[str, str] = {}
+    starters = (
+        (
+            "clipboard",
+            lambda: __import__(
+                "app.core.services.clipboard_manager", fromlist=["get_clipboard_manager"]
+            ).get_clipboard_manager().start_monitoring(),
+        ),
+    )
+    for name, starter in starters:
+        try:
+            starter()
+            state[name] = "running"
+        except Exception as exc:
+            state[name] = f"degraded: {exc}"
+            logger.warning("[Runtime:%s] startup degraded: %s", name, exc)
+
+    try:
+        module = __import__(
+            "app.core.services.auto_catalog_scheduler", fromlist=["get_auto_catalog_scheduler"]
+        )
+        auto_catalog = module.get_auto_catalog_scheduler()
+        if auto_catalog.is_auto_catalog_enabled():
+            auto_catalog._register_scheduled_task()
+            state["auto_catalog"] = "running"
+        else:
+            state["auto_catalog"] = "disabled"
+    except Exception as exc:
+        state["auto_catalog"] = f"degraded: {exc}"
+        logger.warning("[Runtime:auto_catalog] startup degraded: %s", exc)
+    return state
 
 
 def initialize_background_runtime(
     logger: Logger,
     get_workspace_root,
 ) -> None:
-    """Warm up long-running subsystems so jobs, triggers, and ops are live after startup."""
+    """Warm up supported long-running subsystems after startup."""
     try:
         time.sleep(1)
 
-        from app.core.jobs.job_runner import get_job_runner
-        from app.core.jobs.trigger_registry import get_trigger_registry
-        from app.core.ops.ops_event_bus import get_ops_bus
-        from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+        managed_services = _start_managed_services(logger)
+        logger.info("[Runtime] managed services: %s", managed_services)
 
+        from app.core.jobs.job_runner import get_job_runner
+        from app.core.ops.ops_event_bus import get_ops_bus
         get_ops_bus()
         runner = get_job_runner()
-        registry = get_trigger_registry()
-        bindings = get_skill_binding_manager()
 
         try:
             from app.core.goal.goal_job_handler import register_goal_handler
@@ -77,7 +187,7 @@ def initialize_background_runtime(
             logger.warning(f"[FileHub] ⚠️ 文件模块初始化失败（非致命）: {exc}")
 
         try:
-            from web.work_file_library import get_work_file_library
+            from web.files.work_file_library import get_work_file_library
 
             work_file_library = get_work_file_library()
             if not work_file_library.is_indexed():
@@ -92,32 +202,8 @@ def initialize_background_runtime(
 
         logger.info(
             "[Runtime] ✅ 后台运行时已启动: "
-            f"job_runner={runner is not None}, "
-            f"triggers={len(registry.list_all())}, "
-            f"bindings={len(bindings.list_bindings())}"
+            f"job_runner={runner is not None}"
         )
-
-        try:
-            from app.core.learning.distill_manager import DistillManager
-            from app.core.learning.shadow_tracer import ShadowTracer, TraceEvent
-
-            def _on_training_ready(event: str, skill_id: str, count: int):
-                if event == TraceEvent.TRAINING_READY:
-                    logger.debug(
-                        f"[Flywheel] 🚀 skill={skill_id} 已积累 {count} 条优质记录，自动提交 LoRA 训练..."
-                    )
-                    try:
-                        job_id = DistillManager.instance().submit(skill_id)
-                        logger.info(
-                            f"[Flywheel] ✅ 训练任务已提交 job_id={job_id} skill={skill_id}"
-                        )
-                    except Exception as submit_exc:
-                        logger.warning(f"[Flywheel] ⚠️ 自动提交训练失败: {submit_exc}")
-
-            ShadowTracer.add_listener(_on_training_ready)
-            logger.info("[Flywheel] ✅ 数据飞轮监听器已注册（ShadowTracer → DistillManager）")
-        except Exception as exc:
-            logger.warning(f"[Flywheel] ⚠️ 飞轮监听器注册失败（非致命）: {exc}")
 
         try:
             from app.core.services.telegram_bot import get_telegram_bot
@@ -162,12 +248,7 @@ def start_background_runtime(logger: Logger, get_workspace_root) -> threading.Th
             logger.debug("[Runtime] 后台运行时已请求启动，跳过重复启动")
             return _runtime_thread
 
-        if os.environ.get("KOTO_SKIP_BACKGROUND_RUNTIME", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }:
+        if _background_runtime_disabled():
             # Import and diagnostic probes must not start watchers, schedulers,
             # or external integrations merely to verify that the app imports.
             thread = threading.Thread(

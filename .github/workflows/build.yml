@@ -25,13 +25,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Set up Node.js 20
+      - name: Check source publication hygiene
+        run: python scripts/source_publish_hygiene.py --check
+
+      - name: Set up Node.js 22.19
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.19'
           cache: 'npm'
           cache-dependency-path: |
             web/package-lock.json
+            web/tiptap-editor/package-lock.json
             web/univer-editor/package-lock.json
 
       - name: Cache pip dependencies
@@ -47,7 +51,7 @@ jobs:
         run: |
           python -m venv .venv
           .\.venv\Scripts\pip install --upgrade pip wheel
-          .\.venv\Scripts\pip install pyinstaller
+          .\.venv\Scripts\pip install -r config\build-requirements.lock
 
           # Use lockfile for reproducible builds; excludes voice/gunicorn for packaging
           $lockContent = Get-Content config\requirements.lock
@@ -69,54 +73,31 @@ jobs:
           .\.venv\Scripts\pip install -r .venv\core_reqs.txt
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::pip install failed"; exit 1 }
 
-          .\.venv\Scripts\pip install PyAudio
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::warning::PyAudio install failed, voice will degrade at runtime"
-          }
-
-      - name: Build frontend assets
+      - name: Audit frontend dependencies
         shell: pwsh
         run: |
           npm ci --prefix web
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend npm ci failed"; exit 1 }
           npm audit --prefix web --audit-level=high
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend dependency audit failed"; exit 1 }
-          npm run build --prefix web
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend build failed"; exit 1 }
+          npm ci --prefix web/tiptap-editor
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend npm ci failed"; exit 1 }
+          npm audit --prefix web/tiptap-editor --audit-level=high
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend dependency audit failed"; exit 1 }
           npm ci --prefix web/univer-editor
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend npm ci failed"; exit 1 }
           npm audit --prefix web/univer-editor --audit-level=high
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend dependency audit failed"; exit 1 }
-          npm run build --prefix web/univer-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend build failed"; exit 1 }
-
-      - name: Build with PyInstaller
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path logs | Out-Null
-          .\.venv\Scripts\pyinstaller.exe koto.spec --clean -y *> logs\build_latest.log
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::PyInstaller build failed. Last 60 lines:"
-            Get-Content logs\build_latest.log -Tail 60
-            exit 1
-          }
-          Write-Host "Build OK -> dist\Koto\Koto.exe"
 
       - name: Determine version
+        id: release-version
         shell: pwsh
         run: |
           $v = (Get-Content VERSION -Raw -ErrorAction SilentlyContinue).Trim()
           if (-not $v) { $v = Get-Date -Format "yyyy.MM.dd" }
           "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Version: $v"
-
-      - name: Assemble portable package
-        shell: pwsh
-        env:
-          PYTHONIOENCODING: utf-8
-        run: |
-          .\.venv\Scripts\python.exe src\deploy_portable.py --allow-missing-installer
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::deploy_portable.py failed"; exit 1 }
 
       - name: Install Inno Setup (if missing)
         shell: pwsh
@@ -127,40 +108,32 @@ jobs:
             if ($LASTEXITCODE -ne 0) { choco install innosetup -y --no-progress }
           }
 
-      - name: Build installer (Inno Setup)
+      - name: Build Windows artifacts through canonical pipeline
         shell: pwsh
         run: |
-          $iscc = (& .\scripts\resolve_inno_setup.ps1 -Quiet) | Select-Object -First 1
-          if (-not $iscc -or -not (Test-Path $iscc)) { Write-Host "::error::Inno Setup 6 not found"; exit 1 }
-          & $iscc /DAppVersion=$env:VERSION koto_installer.iss
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Inno Setup build failed"; exit 1 }
-          $setupName = "Koto_v$($env:VERSION)_Setup.exe"
-          $sizeMB = [math]::Round((Get-Item "dist\$setupName").Length / 1MB, 1)
-          Write-Host "Installer: $setupName ($sizeMB MB)"
+          .\Build_Release.ps1 -Version $env:VERSION -AllowUnsigned
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Canonical Windows release build failed"; exit 1 }
 
-      - name: Create ZIP archive
+      - name: Verify exact release candidate
         shell: pwsh
         run: |
-          $zipName = "Koto_v$($env:VERSION)_Windows.zip"
-          Compress-Archive -Path "dist\Koto_Portable\*" -DestinationPath "dist\$zipName" -CompressionLevel Optimal
-          Write-Host "Created: dist\$zipName"
+          .\.venv\Scripts\python.exe scripts\verify_release_candidate.py --version $env:VERSION --dist-dir dist --expected-git-revision $env:GITHUB_SHA --source-root . --allow-ineligible
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Release candidate verification failed"; exit 1 }
 
-      - name: Generate release manifest and SHA-256 checksums
-        shell: pwsh
-        run: |
-          .\.venv\Scripts\python.exe scripts\write_release_manifest.py `
-            --version $env:VERSION `
-            --output "dist\Koto_v$($env:VERSION)_release-manifest.json" `
-            --hash-output "dist\Koto_v$($env:VERSION)_SHA256SUMS.txt" `
-            "dist\Koto_v$($env:VERSION)_Setup.exe" `
-            "dist\Koto_v$($env:VERSION)_Windows.zip"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Release manifest generation failed"; exit 1 }
+      - name: Upload release build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koto-windows-build-logs
+          path: logs/*.log
+          retention-days: 7
 
       - name: Run installer E2E test
         shell: pwsh
         run: |
-          $setup = Get-Item "dist\Koto_v*_Setup.exe" | Select-Object -First 1
-          if (-not $setup) { Write-Host "::error::Setup EXE not found"; exit 1 }
+          $setupPath = "dist\Koto_v$($env:VERSION)_Setup.exe"
+          if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) { Write-Host "::error::Setup EXE not found: $setupPath"; exit 1 }
+          $setup = Get-Item -LiteralPath $setupPath
           Write-Host "Testing installer: $($setup.FullName)"
           & tests\installer\test_installer_e2e.ps1 `
             -SetupExe $setup.FullName `
@@ -172,8 +145,9 @@ jobs:
       - name: Run portable E2E test
         shell: pwsh
         run: |
-          $zip = Get-Item "dist\Koto_v*_Windows.zip" | Select-Object -First 1
-          if (-not $zip) { Write-Host "::error::ZIP not found; portable E2E is required for build artifacts"; exit 1 }
+          $zipPath = "dist\Koto_v$($env:VERSION)_Windows.zip"
+          if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) { Write-Host "::error::ZIP not found: $zipPath"; exit 1 }
+          $zip = Get-Item -LiteralPath $zipPath
           Write-Host "Testing portable: $($zip.FullName)"
           & tests\installer\test_portable_e2e.ps1 `
             -ZipFile $zip.FullName `
@@ -186,8 +160,8 @@ jobs:
         with:
           name: koto-windows-build
           path: |
-            dist/Koto_v*_Setup.exe
-            dist/Koto_v*_Windows.zip
-            dist/Koto_v*_release-manifest.json
-            dist/Koto_v*_SHA256SUMS.txt
+            dist/Koto_v${{ steps.release-version.outputs.version }}_Setup.exe
+            dist/Koto_v${{ steps.release-version.outputs.version }}_Windows.zip
+            dist/Koto_v${{ steps.release-version.outputs.version }}_release-manifest.json
+            dist/Koto_v${{ steps.release-version.outputs.version }}_SHA256SUMS.txt
           retention-days: 14

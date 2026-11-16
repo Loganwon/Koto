@@ -7,7 +7,7 @@
 支持 DeepSeek 与本地模型扩展。
 
 核心能力：
-- 调用 client.models.list() 自动发现 API 可用模型列表
+- 通过运行时网关自动发现 API 可用模型列表
 - 基于能力矩阵为每个任务类型评分，选择最优模型
 - TTL 缓存（默认 6 小时），避免频繁 API 调用
 - 新模型加入 API 后自动感知并路由，无需手动维护
@@ -737,19 +737,12 @@ class ModelManager:
                 return list(page)
             except TypeError as exc:
                 raise RuntimeError(
-                    "client.models.list() returned a non-iterable response"
+                    "LLM gateway list_models() returned a non-iterable response"
                 ) from exc
 
         model_ids: List[str] = []
-        try:
-            # google-genai SDK: client.models.list() 返回 Model 对象的迭代器
-            page = self._client.models.list(config={"page_size": 200})
-            for model in _coerce_list_response(page):
-                _append_model(model, model_ids)
-        except TypeError:
-            # 部分 SDK 版本 list() 不接受 config 参数
-            for model in _coerce_list_response(self._client.models.list()):
-                _append_model(model, model_ids)
+        for model in _coerce_list_response(self._client.list_models()):
+            _append_model(model, model_ids)
 
         logger.info(f"[ModelManager] API 返回 {len(model_ids)} 个可用模型")
         return model_ids

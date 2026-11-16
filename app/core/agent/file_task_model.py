@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.core.agent.file_task_contract import FileTaskRequest
+from app.core.agent.kernel import ModelResponse
 from app.core.llm.model_mode import normalize_model_mode
 from app.core.llm.model_selection import (
     get_configured_cloud_model,
@@ -27,20 +28,6 @@ _LOCAL_FILE_TASK_LLM_CALL_TIMEOUT = float(
 _LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS = max(
     128, int(os.getenv("KOTO_LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS", "1536"))
 )
-
-
-def _runtime_model_map() -> Dict[str, Any]:
-    try:
-        from web import runtime_context
-    except Exception:
-        return {}
-    try:
-        model_map = runtime_context.get_model_map()
-    except Exception:
-        return {}
-    if isinstance(model_map, dict) and model_map:
-        return model_map
-    return {}
 
 
 class FileTaskModelClient:
@@ -66,6 +53,54 @@ class FileTaskModelClient:
         return self._call_native(
             request=request, messages=messages, system=system, tools=tools
         )
+
+    def for_request(self, request: FileTaskRequest) -> "FileTaskModelGateway":
+        """Bind a file request to the canonical Kernel ModelGateway protocol."""
+
+        return FileTaskModelGateway(self, request)
+
+    def stream_call(self, *, request, messages, system, tools, cancel_check=None):
+        """Use native cloud streaming; local tool adapters retain their API."""
+        if (
+            getattr(self.call, "__func__", None) is not _DEFAULT_FILE_TASK_CALL
+            or getattr(self._call_native, "__func__", None)
+            is not _DEFAULT_FILE_TASK_NATIVE
+        ):
+            return self.call(
+                request=request, messages=messages, system=system, tools=tools
+            )
+        mode = normalize_model_mode(request.model_mode, default="deepseek")
+        if mode == "local":
+            return self._call_local(
+                request=request, messages=messages, system=system, tools=tools
+            )
+        return self._call_cloud(
+            request=request,
+            messages=messages,
+            system=system,
+            tools=tools,
+            stream=True,
+            cancel_check=cancel_check,
+        )
+
+    def context_options(self, request, options=None):
+        resolved = dict(options or {})
+        if normalize_model_mode(request.model_mode, default="deepseek") != "local":
+            return resolved
+        from app.core.llm.ollama_llm_provider import resolve_ollama_context_options
+
+        requested = dict(request.options or {})
+        for key in (
+            "num_ctx",
+            "context_window_tokens",
+            "context_window",
+            "reserved_output_tokens",
+            "options",
+        ):
+            if key in requested:
+                resolved[key] = requested[key]
+        resolved["num_predict"] = _LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS
+        return resolve_ollama_context_options(resolved)
 
     def _call_native(
         self,
@@ -126,6 +161,8 @@ class FileTaskModelClient:
         messages: List[Dict[str, Any]],
         system: str,
         tools: List[Dict[str, Any]],
+        stream: bool = False,
+        cancel_check: Any = None,
     ) -> Dict[str, Any]:
         from app.core.llm.provider_factory import get_llm_provider
 
@@ -144,9 +181,10 @@ class FileTaskModelClient:
                 task_type="FILE_TASK",
                 system_instruction=system,
                 tools=tools if tools else None,
-                stream=False,
+                stream=stream,
                 call_timeout=_FILE_TASK_LLM_CALL_TIMEOUT,
                 temperature=0.2,
+                _cancel_check=cancel_check,
             )
         except ImportError:
             return provider.generate_content(
@@ -154,9 +192,10 @@ class FileTaskModelClient:
                 model=model_id,
                 system_instruction=system,
                 tools=tools if tools else None,
-                stream=False,
+                stream=stream,
                 call_timeout=_FILE_TASK_LLM_CALL_TIMEOUT,
                 temperature=0.2,
+                _cancel_check=cancel_check,
             )
 
     def _call_local(
@@ -181,6 +220,7 @@ class FileTaskModelClient:
             _LOCAL_FILE_TASK_LLM_CALL_TIMEOUT,
         )
         provider = OllamaLLMProvider(model=model_id or None)
+        limits = self.context_options(request)
         return provider.generate_content(
             prompt=messages,
             model=model_id or None,
@@ -191,6 +231,7 @@ class FileTaskModelClient:
             temperature=0.2,
             think=False,
             num_predict=_LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS,
+            num_ctx=limits["num_ctx"],
         )
 
     @staticmethod
@@ -229,11 +270,6 @@ class FileTaskModelClient:
         ignored = {"auto", "cloud", "local", "deepseek", "ollama"}
         if requested and requested.lower() not in ignored:
             return requested
-        model_map = _runtime_model_map()
-        for task_key in ("FILE_TASK", "CHAT"):
-            model_from_app = str(model_map.get(task_key) or "").strip()
-            if model_from_app:
-                return model_from_app
         return get_configured_cloud_model(
             task_type="FILE_TASK",
             fallback_model=self._default_model,
@@ -255,3 +291,51 @@ class FileTaskModelClient:
             return bool(is_ollama_alive())
         except Exception:
             return False
+
+
+_DEFAULT_FILE_TASK_CALL = FileTaskModelClient.call
+_DEFAULT_FILE_TASK_NATIVE = FileTaskModelClient._call_native
+
+
+class FileTaskModelGateway:
+    """Request-bound ModelGateway used by the file-task policy runtime."""
+
+    def __init__(self, client: FileTaskModelClient, request: FileTaskRequest) -> None:
+        self._client = client
+        self._request = request
+
+    def context_options(self, options=None):
+        return self._client.context_options(self._request, options)
+
+    def generate(
+        self,
+        *,
+        messages,
+        system: str,
+        tools,
+        model_id: str = "",
+        options=None,
+    ) -> ModelResponse:
+        raw = self._client.call(
+            request=self._request,
+            messages=list(messages),
+            system=system,
+            tools=list(tools),
+        )
+        return ModelResponse.from_raw(raw, strict=False)
+
+    def generate_stream(self, *, messages, system, tools, model_id="", options=None):
+        from app.core.agent.kernel.model import iter_model_stream
+
+        yield from iter_model_stream(
+            self._client.stream_call(
+                request=self._request,
+                messages=list(messages),
+                system=system,
+                tools=list(tools),
+                cancel_check=(options or {}).get("_cancel_check"),
+            )
+        )
+
+
+__all__ = ["FileTaskModelClient", "FileTaskModelGateway"]

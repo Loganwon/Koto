@@ -23,7 +23,6 @@ def build_file_task_runtime_messages(
     intent_plan: FileTaskIntentPlan,
     known_tool_gap: dict[str, Any] | None,
     recipe_skeleton: dict[str, Any] | None,
-    execution_brief_schema: dict[str, Any],
 ) -> list[dict[str, Any]]:
     skeleton = recipe_skeleton or build_recipe_skeleton(
         request,
@@ -42,5 +41,4 @@ def build_file_task_runtime_messages(
         capability_profiles=build_request_capability_profiles(request),
         followup_context=followup_context(request),
         recipe_skeleton=skeleton,
-        execution_brief_schema=execution_brief_schema,
     )

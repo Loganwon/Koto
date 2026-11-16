@@ -40,7 +40,7 @@
    👉 docs/TRIGGER_PARAMETERS_GUIDE.md
    
 💻 第三步：查看源代码
-   👉 web/proactive_trigger.py (参数管理)
+   👉 app/core/services/proactive_trigger.py (参数管理)
    👉 web/app.py (API 端点)
    👉 web/src/app/ (已迁移至模块化主应用) (前端逻辑)
 

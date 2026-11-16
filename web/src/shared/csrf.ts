@@ -1,3 +1,5 @@
+import { getFeatureRegistry } from './feature-registry';
+
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
 
 let refreshPromise: Promise<string> | null = null;
@@ -55,7 +57,7 @@ function _withCsrfHeaders(headersInit?: HeadersInit, token?: string): Headers {
 }
 
 export async function csrfFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const shared = (window as any).WA?._csrfFetch || (window as any)._csrfFetch;
+  const shared = getFeatureRegistry()?._csrfFetch || getFeatureRegistry()._csrfFetch;
   if (typeof shared === 'function') return shared(url, options);
 
   const method = String(options.method || 'GET').toUpperCase();

@@ -25,7 +25,7 @@ def test_file_actions_does_not_install_a_second_file_row_click_delegate():
 
 
 def test_tree_rows_route_click_and_drag_to_the_single_public_owner():
-    assert "getWorkspaceApi" in FS_TREE
+    assert "getFeatureRegistry" in FS_TREE
     assert 'data-wa-file-draggable="true"' in FS_TREE
     assert 'data-wa-file-action="open"' in FS_TREE
     assert 'data-wa-file-action="send-ai"' in FS_TREE

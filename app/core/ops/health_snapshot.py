@@ -105,7 +105,7 @@ class HealthSnapshot:
         checks["scheduler"] = self._check_scheduler()
 
         # ── 5. 技能系统 ───────────────────────────────────────────────────────
-        checks["skills"] = self._check_skills()
+        checks["addons"] = self._check_addons()
 
         # ── 6. 最近运维事件 ───────────────────────────────────────────────────
         checks["ops_events"] = self._check_ops_events()
@@ -242,19 +242,26 @@ class HealthSnapshot:
         except Exception as exc:
             return {"status": _DEGRADED, "message": f"调度器不可用: {exc}", "value": {}}
 
-    def _check_skills(self) -> Dict:
+    def _check_addons(self) -> Dict:
         try:
-            from app.core.skills.skill_manager import SkillManager
+            from app.core.agent.addons import addon_system_snapshot
 
-            SkillManager._ensure_init()
-            total = len(SkillManager._def_registry)
-            enabled = sum(
-                1 for s in SkillManager._registry.values() if s.get("enabled", False)
+            snapshot = addon_system_snapshot()
+            total = int(snapshot["total"])
+            enabled = int(snapshot["enabled"])
+            admitted = int(snapshot["admitted"])
+            blocked = sum(
+                1 for addon in snapshot["addons"] if addon.get("state") == "blocked"
             )
             return {
-                "status": _HEALTHY,
-                "message": f"技能 {enabled}/{total} 已激活",
-                "value": {"total": total, "enabled": enabled},
+                "status": _DEGRADED if blocked else _HEALTHY,
+                "message": f"Addon 已登记 {total}，已启用 {enabled}，已准入 {admitted}",
+                "value": {
+                    "total": total,
+                    "enabled": enabled,
+                    "admitted": admitted,
+                    "blocked": blocked,
+                },
             }
         except Exception as exc:
             return {"status": _DEGRADED, "message": str(exc), "value": {}}

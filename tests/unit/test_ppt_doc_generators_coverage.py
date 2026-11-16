@@ -194,50 +194,50 @@ class TestPptGenerator:
 
 @pytest.mark.unit
 class TestDocumentGenerator:
-    """Tests for web.document_generator module-level functions."""
+    """Tests for app.core.services.document_generator module-level functions."""
 
     # -- helper functions ------------------------------------------------
 
     def test_split_lines(self):
-        from web.document_generator import _split_lines
+        from app.core.services.document_generator import _split_lines
 
         lines = _split_lines("line1\nline2  \nline3")
         assert lines == ["line1", "line2", "line3"]
 
     def test_is_cjk_char_true(self):
-        from web.document_generator import _is_cjk_char
+        from app.core.services.document_generator import _is_cjk_char
 
         assert _is_cjk_char("中") is True
 
     def test_is_cjk_char_false(self):
-        from web.document_generator import _is_cjk_char
+        from app.core.services.document_generator import _is_cjk_char
 
         assert _is_cjk_char("A") is False
 
     def test_join_text_lines_cjk_no_space(self):
-        from web.document_generator import _join_text_lines
+        from app.core.services.document_generator import _join_text_lines
 
         result = _join_text_lines("中文", "内容")
         assert result == "中文内容"
 
     def test_join_text_lines_latin_has_space(self):
-        from web.document_generator import _join_text_lines
+        from app.core.services.document_generator import _join_text_lines
 
         result = _join_text_lines("hello", "world")
         assert result == "hello world"
 
     def test_join_text_lines_empty_prev(self):
-        from web.document_generator import _join_text_lines
+        from app.core.services.document_generator import _join_text_lines
 
         assert _join_text_lines("", "text") == "text"
 
     def test_join_text_lines_empty_curr(self):
-        from web.document_generator import _join_text_lines
+        from app.core.services.document_generator import _join_text_lines
 
         assert _join_text_lines("text", "") == "text"
 
     def test_normalize_markdown_lines_code_block(self):
-        from web.document_generator import _normalize_markdown_lines
+        from app.core.services.document_generator import _normalize_markdown_lines
 
         text = "before\n```\ncode here\n```\nafter"
         lines = _normalize_markdown_lines(text)
@@ -245,14 +245,14 @@ class TestDocumentGenerator:
         assert "code here" in lines
 
     def test_normalize_markdown_lines_heading(self):
-        from web.document_generator import _normalize_markdown_lines
+        from app.core.services.document_generator import _normalize_markdown_lines
 
         text = "# Heading\nparagraph text"
         lines = _normalize_markdown_lines(text)
         assert any("# Heading" in l for l in lines)
 
     def test_normalize_markdown_collapses_blank_lines(self):
-        from web.document_generator import _normalize_markdown_lines
+        from app.core.services.document_generator import _normalize_markdown_lines
 
         text = "line1\n\n\n\nline2"
         lines = _normalize_markdown_lines(text)
@@ -268,22 +268,22 @@ class TestDocumentGenerator:
         assert max_blank <= 1
 
     def test_extract_title_from_content_h1(self):
-        from web.document_generator import _extract_title_from_content
+        from app.core.services.document_generator import _extract_title_from_content
 
         assert _extract_title_from_content("# My Title\ncontent") == "My Title"
 
     def test_extract_title_from_content_h2(self):
-        from web.document_generator import _extract_title_from_content
+        from app.core.services.document_generator import _extract_title_from_content
 
         assert _extract_title_from_content("## Sub Title\ncontent") == "Sub Title"
 
     def test_extract_title_returns_none_for_plain(self):
-        from web.document_generator import _extract_title_from_content
+        from app.core.services.document_generator import _extract_title_from_content
 
         assert _extract_title_from_content("just plain text") is None
 
     def test_sanitize_filename(self):
-        from web.document_generator import _sanitize_filename
+        from app.core.services.document_generator import _sanitize_filename
 
         result = _sanitize_filename('My Doc: "Test" / Report')
         assert ":" not in result
@@ -291,7 +291,7 @@ class TestDocumentGenerator:
         assert "/" not in result
 
     def test_sanitize_filename_length_limit(self):
-        from web.document_generator import _sanitize_filename
+        from app.core.services.document_generator import _sanitize_filename
 
         long_name = "a" * 100
         assert len(_sanitize_filename(long_name)) <= 50
@@ -299,7 +299,7 @@ class TestDocumentGenerator:
     # -- save_docx -------------------------------------------------------
 
     def test_save_docx_creates_file(self, tmp_dir):
-        from web.document_generator import save_docx
+        from app.core.services.document_generator import save_docx
 
         path = save_docx(
             "# Test\nHello world",
@@ -311,49 +311,49 @@ class TestDocumentGenerator:
         assert path.endswith(".docx")
 
     def test_save_docx_with_bullet_list(self, tmp_dir):
-        from web.document_generator import save_docx
+        from app.core.services.document_generator import save_docx
 
         md = "# Title\n- Item 1\n- Item 2\n- Item 3"
         path = save_docx(md, title="Bullets", output_dir=tmp_dir, filename="bullets")
         assert os.path.exists(path)
 
     def test_save_docx_with_code_block(self, tmp_dir):
-        from web.document_generator import save_docx
+        from app.core.services.document_generator import save_docx
 
         md = "# Code\n```python\nprint('hi')\n```\nEnd."
         path = save_docx(md, title="Code", output_dir=tmp_dir, filename="code")
         assert os.path.exists(path)
 
     def test_save_docx_auto_title_extraction(self, tmp_dir):
-        from web.document_generator import save_docx
+        from app.core.services.document_generator import save_docx
 
         md = "# Auto Title\nSome body"
         path = save_docx(md, title=None, output_dir=tmp_dir, filename="auto_title")
         assert os.path.exists(path)
 
     def test_save_docx_with_bold_italic(self, tmp_dir):
-        from web.document_generator import save_docx
+        from app.core.services.document_generator import save_docx
 
         md = "Normal **bold** and *italic* text"
         path = save_docx(md, title="Fmt", output_dir=tmp_dir, filename="fmt")
         assert os.path.exists(path)
 
     def test_save_docx_with_numbered_list(self, tmp_dir):
-        from web.document_generator import save_docx
+        from app.core.services.document_generator import save_docx
 
         md = "# Lists\n1. First\n2. Second"
         path = save_docx(md, title="Nums", output_dir=tmp_dir, filename="nums")
         assert os.path.exists(path)
 
     def test_save_docx_with_blockquote(self, tmp_dir):
-        from web.document_generator import save_docx
+        from app.core.services.document_generator import save_docx
 
         md = "> This is a quote\nNormal text"
         path = save_docx(md, title="Quote", output_dir=tmp_dir, filename="quote")
         assert os.path.exists(path)
 
     def test_save_docx_with_separator(self, tmp_dir):
-        from web.document_generator import save_docx
+        from app.core.services.document_generator import save_docx
 
         md = "Before\n---\nAfter"
         path = save_docx(md, title="Sep", output_dir=tmp_dir, filename="sep")

@@ -3,8 +3,7 @@
 """
 Miscellaneous API blueprint.
 
-Extracts notes, reminders, calendar, clipboard, search, data-pipeline,
-code-generation, and file-network routes from web/app.py.
+Notes, reminders, calendar, clipboard and search routes.
 """
 
 import logging
@@ -23,9 +22,9 @@ misc_api_bp = Blueprint("misc_api", __name__)
 
 
 def _get_workspace_dir():
-    from web.runtime_context import get_workspace_dir
+    from web.runtime_context import service_registry
 
-    return get_workspace_dir()
+    return service_registry.workspace_dir
 
 
 # ========================= Notes API =========================
@@ -51,7 +50,7 @@ def add_note() -> Response:
 
 @misc_api_bp.route("/api/notes/list", methods=["GET"])
 def list_notes() -> Response:
-    """列出最近笔记"""
+    """列出最近笔记（补齐完整内容与标题，供前端列表直接渲染）"""
     from note_manager import get_note_manager
 
     limit = int(request.args.get("limit", 20))
@@ -60,7 +59,27 @@ def list_notes() -> Response:
     note_manager = get_note_manager()
     notes = note_manager.get_recent_notes(limit)
 
-    return jsonify({"notes": notes})
+    hydrated = []
+    for entry in notes:
+        if not isinstance(entry, dict):
+            continue
+        note = note_manager.get_note(entry.get("id") or "")
+        if not isinstance(note, dict):
+            continue
+        merged = dict(entry)
+        merged.update(note)
+        content = merged.get("content") or ""
+        title = (merged.get("title") or "").strip()
+        if not title:
+            first_line = next((ln.strip() for ln in content.splitlines() if ln.strip()), "")
+            title = first_line[:50] if first_line else "\u65e0\u6807\u9898\u7b14\u8bb0"
+        merged["title"] = title
+        merged["content"] = content
+        if category and merged.get("category") != category:
+            continue
+        hydrated.append(merged)
+
+    return jsonify({"notes": hydrated})
 
 
 @misc_api_bp.route("/api/notes/search", methods=["GET"])
@@ -86,6 +105,25 @@ def delete_note(note_id: str) -> Response:
     return jsonify({"success": success})
 
 
+@misc_api_bp.route("/api/notes/<note_id>", methods=["PUT"])
+def update_note(note_id: str) -> Response:
+    """更新现有笔记"""
+    from note_manager import get_note_manager
+
+    data = request.json or {}
+    note_manager = get_note_manager()
+    updated = note_manager.update_note(
+        note_id,
+        content=data.get("content", ""),
+        tags=data.get("tags"),
+        category=data.get("category"),
+        title=data.get("title"),
+    )
+    if updated is None:
+        return jsonify({"success": False, "error": "笔记不存在或更新失败"}), 404
+    return jsonify({"success": True, "note": updated})
+
+
 # ========================= Reminders API =========================
 
 
@@ -97,7 +135,7 @@ def add_reminder() -> Response:
     """
     from datetime import datetime
 
-    from reminder_manager import get_reminder_manager
+    from app.core.services.reminder_manager import get_reminder_manager
 
     data = request.json or {}
     title = data.get("title") or "提醒"
@@ -128,7 +166,7 @@ def add_reminder() -> Response:
 @misc_api_bp.route("/api/reminders/list", methods=["GET"])
 def list_reminders_api() -> Response:
     """列出所有提醒"""
-    from reminder_manager import get_reminder_manager
+    from app.core.services.reminder_manager import get_reminder_manager
 
     mgr = get_reminder_manager()
     return jsonify({"reminders": mgr.list_reminders()})
@@ -137,7 +175,7 @@ def list_reminders_api() -> Response:
 @misc_api_bp.route("/api/reminders/<reminder_id>", methods=["DELETE"])
 def cancel_reminder(reminder_id: str) -> Response:
     """取消提醒"""
-    from reminder_manager import get_reminder_manager
+    from app.core.services.reminder_manager import get_reminder_manager
 
     mgr = get_reminder_manager()
     ok = mgr.cancel_reminder(reminder_id)
@@ -154,7 +192,7 @@ def add_calendar_event() -> Response:
     """
     from datetime import datetime
 
-    from calendar_manager import get_calendar_manager
+    from app.core.services.calendar_manager import get_calendar_manager
 
     data = request.json or {}
     title = data.get("title") or "日程"
@@ -185,7 +223,7 @@ def add_calendar_event() -> Response:
 
 @misc_api_bp.route("/api/calendar/list", methods=["GET"])
 def list_calendar_events() -> Response:
-    from calendar_manager import get_calendar_manager
+    from app.core.services.calendar_manager import get_calendar_manager
 
     limit = int(request.args.get("limit", 100))
     mgr = get_calendar_manager()
@@ -194,7 +232,7 @@ def list_calendar_events() -> Response:
 
 @misc_api_bp.route("/api/calendar/<event_id>", methods=["DELETE"])
 def delete_calendar_event(event_id: str) -> Response:
-    from calendar_manager import get_calendar_manager
+    from app.core.services.calendar_manager import get_calendar_manager
 
     mgr = get_calendar_manager()
     ok = mgr.delete_event(event_id)
@@ -288,7 +326,7 @@ def search_all() -> Response:
               type: integer
               description: Total number of results
     """
-    from search_engine import get_search_engine
+    from app.core.services.search_engine import get_search_engine
 
     query = request.args.get("query", "")
     max_results = int(request.args.get("max_results", 50))
@@ -302,7 +340,7 @@ def search_all() -> Response:
 @misc_api_bp.route("/api/search/files", methods=["GET"])
 def search_files() -> Response:
     """搜索文件"""
-    from search_engine import get_search_engine
+    from app.core.services.search_engine import get_search_engine
 
     query = request.args.get("query", "")
     max_results = int(request.args.get("max_results", 20))
@@ -314,208 +352,3 @@ def search_files() -> Response:
 
 
 # ========================= Data Pipeline API =========================
-
-
-@misc_api_bp.route("/api/data/extract-transform", methods=["POST"])
-def data_extract_transform() -> Response:
-    """数据提取与转换 - 场景1：跨应用数据搬运"""
-    try:
-        from datetime import datetime
-
-        data = request.json
-        source_type = data.get("source_type", "wechat_contact")
-        source_data = data.get("source_data")
-        target_format = data.get("target_format", "excel")
-        output_filename = data.get(
-            "output_filename", f'提取数据_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-        )
-
-        if target_format == "excel":
-            ext = ".xlsx"
-        elif target_format == "csv":
-            ext = ".csv"
-        else:
-            ext = ".json"
-
-        output_path = os.path.join(
-            _get_workspace_dir(), "documents", f"{output_filename}{ext}"
-        )
-
-        from web.data_pipeline import CrossAppDataPipeline
-
-        pipeline = CrossAppDataPipeline()
-        result = pipeline.run_pipeline(
-            source_type, source_data, target_format, output_path
-        )
-
-        return jsonify(result)
-
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-# ========================= Code Generation API =========================
-
-
-@misc_api_bp.route("/api/code/generate", methods=["POST"])
-def code_generate() -> Response:
-    """代码生成 - 场景2：帮助用户完成编程任务"""
-    try:
-        data = request.json
-        template_name = data.get("template_name")
-        description = data.get("description")
-        language = data.get("language", "python")
-        output_filename = data.get("output_filename")
-
-        from web.code_generator import CodeGenerator
-
-        generator = CodeGenerator()
-
-        output_path = None
-        if output_filename:
-            output_path = os.path.join(_get_workspace_dir(), "code", output_filename)
-
-        if template_name:
-            result = generator.generate(
-                template_name, output_path, **data.get("params", {})
-            )
-        elif description:
-            result = generator.generate_from_description(description, language)
-        else:
-            return (
-                jsonify(
-                    {"success": False, "error": "需要提供template_name或description"}
-                ),
-                400,
-            )
-
-        return jsonify(result)
-
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@misc_api_bp.route("/api/code/templates", methods=["GET"])
-def code_templates() -> Response:
-    """获取可用代码模板列表"""
-    try:
-        from web.code_generator import CodeGenerator
-
-        generator = CodeGenerator()
-
-        language = request.args.get("language")
-        templates = generator.list_templates(language)
-
-        return jsonify(
-            {"success": True, "templates": templates, "count": len(templates)}
-        )
-
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-# ========================= File Network API =========================
-
-
-@misc_api_bp.route("/api/file-network/search", methods=["POST"])
-def file_network_search() -> Response:
-    """多维查询文件
-
-    请求参数:
-        query: 文本搜索查询（可选）
-        file_type: 文件类型（docx, pdf等，可选）
-        tags: 标签列表（可选）
-        operation: 处理操作（annotate, edit等，可选）
-        date_from: 开始日期（ISO格式，可选）
-        date_to: 结束日期（ISO格式，可选）
-        limit: 返回数量限制（默认50）
-    """
-    try:
-        from web.processed_file_network import get_file_network
-
-        data = request.json or {}
-        file_network = get_file_network()
-
-        result = file_network.search_files(
-            query=data.get("query"),
-            file_type=data.get("file_type"),
-            tags=data.get("tags"),
-            operation=data.get("operation"),
-            date_from=data.get("date_from"),
-            date_to=data.get("date_to"),
-            limit=data.get("limit", 50),
-        )
-
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@misc_api_bp.route("/api/file-network/network", methods=["POST"])
-def file_network_get_network() -> Response:
-    """获取文件关系网络
-
-    请求参数:
-        file_id: 文件ID
-        depth: 关系深度（1=直接关系，2=二级关系，默认2）
-    """
-    try:
-        from web.processed_file_network import get_file_network
-
-        data = request.json
-        file_id = data.get("file_id")
-        depth = data.get("depth", 2)
-
-        if not file_id:
-            return jsonify({"success": False, "error": "缺少file_id参数"}), 400
-
-        file_network = get_file_network()
-        result = file_network.get_file_network(file_id, depth)
-
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@misc_api_bp.route("/api/file-network/statistics", methods=["GET"])
-def file_network_statistics() -> Response:
-    """获取文件网络统计信息"""
-    try:
-        from web.processed_file_network import get_file_network
-
-        file_network = get_file_network()
-        result = file_network.get_statistics()
-
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@misc_api_bp.route("/api/file-network/register", methods=["POST"])
-def file_network_register() -> Response:
-    """手动注册文件到网络
-
-    请求参数:
-        file_path: 文件路径
-        tags: 标签列表（可选）
-        extract_snippets: 是否提取文本片段（默认true）
-    """
-    try:
-        from web.processed_file_network import get_file_network
-
-        data = request.json
-        file_path = data.get("file_path")
-
-        if not file_path:
-            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
-
-        file_network = get_file_network()
-        result = file_network.register_file(
-            file_path=file_path,
-            tags=data.get("tags"),
-            extract_snippets=data.get("extract_snippets", True),
-        )
-
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500

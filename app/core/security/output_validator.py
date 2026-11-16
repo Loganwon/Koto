@@ -10,7 +10,7 @@
 ────
 云端 LLM 返回结果后，本模块在本地对输出进行质量验收：
 
-1. 格式验收  — 对照 Skill.OutputSpec 检查格式是否符合约定
+1. 格式验收  — 检查输出格式是否符合调用方约定
 2. 完整性验收 — 检测截断、空输出、重复、模型拒绝等异常
 3. 安全验收  — 检测响应中是否意外回显了 PII 占位符或内部 Prompt
 4. 重试决策  — 返回结构化结果，调用方决定是否触发重试/格式化
@@ -29,7 +29,6 @@
 
     result: ValidationResult = OutputValidator.validate(
         text=llm_response,
-        skill_id="summarize_doc",        # 可选，有 Skill 时做格式验收
         original_prompt=user_input,       # 可选，用于检测 prompt 注入回显
     )
 
@@ -70,14 +69,12 @@ class ValidationResult:
         text         : 验收（和可能格式化）后的最终文本
         original_text: LLM 返回的原始文本
         reasons      : 触发该 action 的原因列表
-        skill_id     : 对应的 Skill ID（如果有）
     """
 
     action: str  # PASS | WARN | REFORMAT | RETRY | BLOCK
     text: str
     original_text: str
     reasons: List[str] = field(default_factory=list)
-    skill_id: Optional[str] = None
 
     @property
     def passed(self) -> bool:
@@ -386,10 +383,14 @@ class OutputValidator:
                 response_mime_type="application/json",
             )
 
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="koto-output-judge",
+        )
+        future = executor.submit(_call)
+        timed_out = False
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_call)
-                response = future.result(timeout=cls._judge_timeout)
+            response = future.result(timeout=cls._judge_timeout)
 
             import json
 
@@ -409,6 +410,8 @@ class OutputValidator:
             return None
 
         except concurrent.futures.TimeoutError:
+            timed_out = True
+            future.cancel()
             logger.debug(
                 "[OutputValidator] LLM judge 超时 (%.0fs)，已跳过", cls._judge_timeout
             )
@@ -416,12 +419,15 @@ class OutputValidator:
         except Exception as e:
             logger.debug("[OutputValidator] LLM judge 异常（跳过）: %s", e)
             return None
+        finally:
+            # The judge is advisory and read-only.  Never turn its timeout into
+            # an additional wait during executor shutdown.
+            executor.shutdown(wait=not timed_out, cancel_futures=timed_out)
 
     @classmethod
     def validate(
         cls,
         text: str,
-        skill_id: Optional[str] = None,
         original_prompt: Optional[str] = None,
     ) -> ValidationResult:
         """
@@ -429,16 +435,13 @@ class OutputValidator:
 
         Args:
             text           : LLM 返回的原始文本
-            skill_id       : 对应的 Skill ID（用于查 OutputSpec），可为 None
             original_prompt: 用户的原始请求（用于检测 prompt 回显），可为 None
 
         Returns:
             ValidationResult 对象
         """
         logger.debug(
-            "[OutputValidator] validate() text_len=%d skill_id=%s",
-            len(text) if text else 0,
-            skill_id,
+            "[OutputValidator] validate() text_len=%d", len(text) if text else 0
         )
 
         raw_text = text or ""
@@ -450,7 +453,6 @@ class OutputValidator:
                 text=raw_text,
                 original_text=raw_text,
                 reasons=["LLM 返回空响应"],
-                skill_id=skill_id,
             )
 
         reasons: List[str] = []
@@ -469,7 +471,6 @@ class OutputValidator:
                 text="⚠️ 响应包含内部系统标记，已拦截。",
                 original_text=raw_text,
                 reasons=leak_reasons,
-                skill_id=skill_id,
             )
 
         # ── 0. 清理本地模型格式标记 ──────────────────────────────
@@ -494,7 +495,6 @@ class OutputValidator:
                 text=current_text,
                 original_text=raw_text,
                 reasons=[],
-                skill_id=skill_id,
             )
 
         # ── 1. 安全检测：内部信息泄露（BLOCK）───────────────────
@@ -506,7 +506,6 @@ class OutputValidator:
                 text="⚠️ 响应包含内部信息泄露，已拦截。",
                 original_text=raw_text,
                 reasons=leak_reasons,
-                skill_id=skill_id,
             )
         # ── 1.5 安全检测：有害内容指引 ─────────────────────────
         harmful_reasons = cls._check_harmful(text)
@@ -517,7 +516,6 @@ class OutputValidator:
                 text="⚠️ 回复包含有害内容指引，已被安全策略拦截。",
                 original_text=raw_text,
                 reasons=harmful_reasons,
-                skill_id=skill_id,
             )
         # ── 2. 完整性检测：模型拒绝 ────────────────────────────────
         if cls._is_refusal(text):
@@ -531,7 +529,6 @@ class OutputValidator:
                 text=text,
                 original_text=raw_text,
                 reasons=reasons,
-                skill_id=skill_id,
             )
 
         # ── 2.5 实时数据规则：代码替代嗅探 ───────────────────────
@@ -550,7 +547,6 @@ class OutputValidator:
                 text=fix_prompt,
                 original_text=raw_text,
                 reasons=reasons,
-                skill_id=skill_id,
             )
 
         # ── 2.6 实时无能力响应检测 ────────────────────────────────
@@ -567,7 +563,6 @@ class OutputValidator:
                 text=fix_prompt,
                 original_text=raw_text,
                 reasons=reasons,
-                skill_id=skill_id,
             )
 
         # ── 3. 完整性检测：截断 ─────────────────────────────────────
@@ -580,7 +575,6 @@ class OutputValidator:
                 text=text,
                 original_text=raw_text,
                 reasons=reasons,
-                skill_id=skill_id,
             )
 
         # ── 4. 完整性检测：异常重复 ─────────────────────────────────
@@ -596,28 +590,9 @@ class OutputValidator:
                 text=text,
                 original_text=raw_text,
                 reasons=reasons,
-                skill_id=skill_id,
             )
 
-        # ── 5. Skill OutputSpec 格式验收 ───────────────────────────
-        if skill_id:
-            format_result = cls._validate_skill_spec(text, skill_id)
-            if format_result:
-                action, formatted_text, spec_reason = format_result
-                reasons.append(spec_reason)
-                if action == "REFORMAT":
-                    logger.info(
-                        f"[OutputValidator] 🔧 自动格式化 [{skill_id}]: {spec_reason}"
-                    )
-                return ValidationResult(
-                    action=action,
-                    text=formatted_text,
-                    original_text=raw_text,
-                    reasons=reasons,
-                    skill_id=skill_id,
-                )
-
-        # ── 7. LLM 语义质量判断（可选，规则全部通过后才触发）─────────
+        # ── 5. LLM 语义质量判断（可选，规则全部通过后才触发）─────────
         if original_prompt and len(text) >= cls._judge_min_len:
             judge_result = cls._llm_judge(text, original_prompt)
             if judge_result:
@@ -628,28 +603,25 @@ class OutputValidator:
                     text=current_text,
                     original_text=raw_text,
                     reasons=[reason],
-                    skill_id=skill_id,
                 )
 
-        # ── 8. 通过 ─────────────────────────────────────────────────
-        logger.debug("[OutputValidator] action=PASS skill_id=%s", skill_id)
+        # ── 6. 通过 ─────────────────────────────────────────────────
+        logger.debug("[OutputValidator] action=PASS")
         return ValidationResult(
             action="PASS",
             text=current_text,
             original_text=raw_text,
             reasons=[],
-            skill_id=skill_id,
         )
 
     @classmethod
     def validate_fast(
         cls,
         text: str,
-        skill_id: Optional[str] = None,
         original_prompt: Optional[str] = None,
     ) -> ValidationResult:
         """Run local deterministic validation without the optional LLM judge."""
-        return cls.validate(text=text, skill_id=skill_id, original_prompt=None)
+        return cls.validate(text=text, original_prompt=None)
 
     @classmethod
     def validate_judge_async(
@@ -668,7 +640,6 @@ class OutputValidator:
             try:
                 result = cls.validate(
                     text=text,
-                    skill_id=None,
                     original_prompt=original_prompt,
                 )
                 if callback:
@@ -739,38 +710,3 @@ class OutputValidator:
         if count >= _REPETITION_THRESHOLD:
             return f"检测到异常重复内容（'{most_common[:30]}...' 重复 {count} 次）"
         return None
-
-    @classmethod
-    def _validate_skill_spec(cls, text: str, skill_id: str) -> Optional[tuple]:
-        """
-        使用 SkillManager 中该 Skill 的 OutputSpec 验收，
-        返回 (action, text, reason) 或 None（表示通过）
-        """
-        try:
-            from app.core.skills.skill_manager import SkillManager
-
-            passed, reason = SkillManager.validate_output(skill_id, text)
-            if passed:
-                return None
-
-            # 验收失败：尝试本地自动格式化
-            skill_def = SkillManager.get_definition(skill_id)
-            if skill_def:
-                fmt = skill_def.output_spec.format
-                fmt_str = fmt.value if hasattr(fmt, "value") else fmt
-
-                if fmt_str == "table" and "|" not in text:
-                    reformatted = _Formatter.to_markdown_table(text)
-                    return ("REFORMAT", reformatted, f"自动修复格式 ({reason})")
-
-                if fmt_str == "markdown" and not text.strip().startswith("#"):
-                    # 尝试添加 markdown 列表格式
-                    reformatted = _Formatter.to_markdown_list(text)
-                    return ("REFORMAT", reformatted, f"自动修复格式 ({reason})")
-
-            # 无法自动修复，要求重试
-            return ("RETRY", text, reason)
-
-        except Exception as e:
-            logger.warning(f"[OutputValidator] Skill 验收异常: {e}")
-            return None

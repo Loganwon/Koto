@@ -1391,11 +1391,11 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     continue
                 # Stacked placeholders often overlap by a thin strip while spanning
                 # most of the line width. That is not a side obstruction and should
-                # not force a huge left/right inset on the lower text box.
-                if (
-                    _overlap_w >= _a["width"] * _MAX_EXCL_OVERLAP_RATIO
-                    or _overlap_w >= _b["width"] * _MAX_EXCL_OVERLAP_RATIO
-                    or (_bl < _acx < _br)
+                # not force a huge left/right inset on the lower text box. A small
+                # upper shape can be fully contained by the overlap and still be a
+                # valid side obstruction, so only compare against the lower shape.
+                if _overlap_w >= _a["width"] * _MAX_EXCL_OVERLAP_RATIO or (
+                    _bl < _acx < _br
                 ):
                     continue
                 # Expand inset on the side where _b sits relative to _a's centre

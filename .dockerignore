@@ -1,0 +1,93 @@
+# Docker uses the build-context root. A nested .dockerignore was never applied.
+# Keep developer environments, repository history and local diagnostics out.
+.git/
+.agents/
+.codex/
+build/
+dist/
+node_modules/
+**/node_modules/
+.venv*/
+.pytest*/
+.hypothesis/
+*.log
+*.zip
+*.exe
+*.bak
+**/__pycache__/
+**/*.pyc
+**/*.db
+**/*.sqlite*
+**/*.env
+**/*.key
+.env
+
+# Config (secrets); *.env.example files remain available for explicit COPY.
+config/deepseek_config.env
+config/gemini_config.env
+config/.builtin_key
+config/jwt_secret.txt
+config/email_accounts.json
+config/context/
+config/memory_summaries.json
+config/file_task_plans.json
+config/file_task_followups.json
+config/users.json
+config/user_settings.json
+config/user_profile.json
+config/memory.json
+app/core/config/user_settings.json
+app/core/config/token_usage.json
+web/config/jwt_secret.txt
+
+# Workspace user data
+workspace/
+chats/
+logs/
+data/
+app/core/chats/
+app/core/workspace/images/
+app/core/workspace/uploads/
+app/core/workspace/clipboard/history.json
+app/core/workspace/calendar/events.json
+app/core/workspace/reminders/reminders.json
+app/core/workspace/tasks/scheduled_tasks.json
+web/uploads/
+web/workspace/_index/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Desktop-only files
+koto_app.py
+*.bat
+*.vbs
+assets/
+
+# Archive & docs
+archive/
+_archive/
+docs/
+images/
+models/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+*.ico*
+*.png.old
+*.png.backup
+Thumbs.db
+.DS_Store
+
+# Tests & scripts
+tests/
+scripts/
+test_*.py
+verify_*.py

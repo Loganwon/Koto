@@ -125,6 +125,9 @@ export interface ReviewLayoutDeps {
   _isReviewEditorFocused: () => boolean;
   _getSelectionViewportBounds: () => any;
   _previewReviewText: (text: string, maxLength: number) => string;
+  captureReviewSelection: (event?: Event) => any;
+  createReviewComment: () => void;
+  createReviewRevision: () => void;
 }
 
 export interface ReviewSvgApi {
@@ -142,7 +145,6 @@ export interface ReviewSvgApi {
 
 export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi {
   const {
-    state,
     $,
     _findReviewEntry,
     _findDocxReviewAnchorElement,
@@ -328,14 +330,21 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
       .replace(/^comment:/, '')
       .trim();
     if (reviewKey) {
-      const exact = layoutCache && layoutCache.markerIndex instanceof Map
-        ? ((layoutCache.markerIndex.get(reviewKey) || [])[0] || null)
-        : (Array.from(root.querySelectorAll('[data-koto-review-id]')).find((element) => {
+      const exactMarkers = layoutCache && layoutCache.markerIndex instanceof Map
+        ? (layoutCache.markerIndex.get(reviewKey) || [])
+        : Array.from(root.querySelectorAll<HTMLElement>('[data-koto-review-id]')).filter((element) => {
             return String(element.getAttribute('data-koto-review-id') || '').trim() === reviewKey;
-          }) || null);
-      if (exact && exact.ownerDocument && exact.ownerDocument.createRange) {
-        const range = exact.ownerDocument.createRange();
-        range.selectNodeContents(exact);
+          });
+      const firstMarker = exactMarkers[0] || null;
+      const lastMarker = exactMarkers[exactMarkers.length - 1] || null;
+      if (firstMarker && lastMarker && firstMarker.ownerDocument && firstMarker.ownerDocument.createRange) {
+        const range = firstMarker.ownerDocument.createRange();
+        if (firstMarker === lastMarker) {
+          range.selectNodeContents(firstMarker);
+        } else {
+          range.setStartBefore(firstMarker);
+          range.setEndAfter(lastMarker);
+        }
         return range;
       }
     }

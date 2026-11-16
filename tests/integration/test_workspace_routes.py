@@ -48,16 +48,40 @@ class TestListWorkspace:
         assert "files" in data
         assert isinstance(data["files"], list)
 
+    def test_quick_access_uses_live_workspace_path(self, monkeypatch, tmp_path):
+        """The Koto workspace shortcut must follow a workspace switch immediately."""
+        from app.core.config.workspace_runtime import (
+            get_workspace_root,
+            set_workspace_root,
+        )
+        from web.blueprints.workspace import _quick_access_locations
 
-# ── GET /workspace-assistant ────────────────────────────────────────────────
+        previous_root = get_workspace_root()
+        live_workspace = tmp_path / "live_workspace"
+        live_workspace.mkdir()
+        try:
+            set_workspace_root(live_workspace)
+            workspace_entry = next(
+                item
+                for item in _quick_access_locations()
+                if item["name"] == "Koto 工作区"
+            )
+            assert workspace_entry["path"] == str(live_workspace.resolve())
+        finally:
+            set_workspace_root(previous_root)
+
+
+# ── Removed legacy workspace page aliases ──────────────────────────────────
 
 
 @pytest.mark.integration
 class TestUnifiedWorkspaceEntry:
-    def test_legacy_workspace_assistant_route_redirects_to_unified_app(self, client):
+    def test_legacy_workspace_assistant_route_is_gone(self, client):
         resp = client.get("/workspace-assistant?_codex_probe=1", follow_redirects=False)
-        assert resp.status_code == 302
-        assert resp.headers["Location"].endswith("/?_codex_probe=1")
+        assert resp.status_code == 404
+
+    def test_legacy_workspace_route_is_gone(self, client):
+        assert client.get("/workspace", follow_redirects=False).status_code == 404
 
 
 # ── GET /api/workspace/<path:filepath> ───────────────────────────────────────
@@ -81,12 +105,13 @@ class TestWorkspaceFile:
 
     def test_serve_existing_file(self, client):
         """Create a file in workspace and verify it can be served."""
-        from web.blueprints.workspace import WORKSPACE_DIR
+        from app.core.config.workspace_runtime import get_workspace_root
 
+        workspace_dir = get_workspace_root()
         test_filename = "_test_integration_workspace.txt"
-        test_path = os.path.join(WORKSPACE_DIR, test_filename)
+        test_path = os.path.join(workspace_dir, test_filename)
         try:
-            os.makedirs(WORKSPACE_DIR, exist_ok=True)
+            os.makedirs(workspace_dir, exist_ok=True)
             with open(test_path, "w", encoding="utf-8") as f:
                 f.write("workspace file content")
             resp = client.get(f"/api/workspace/{test_filename}")

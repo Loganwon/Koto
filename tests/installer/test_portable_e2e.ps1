@@ -5,21 +5,24 @@
     Steps:
       1. Extract ZIP to temp dir
       2. Verify critical files + file size + Python DLL
-      3. Seed config (bypass first-run wizard) + launch
-      4. Poll /api/health + /api/ping
+      3. Seed config (bypass first-run wizard) + launch the real desktop path
+      4. Poll /api/health + verify that the WebView window was shown
       5. Stop process
       6. Remove temp dir
 
     Exit 0 on success, 1 on any failure.
 
 .PARAMETER ZipFile
-    Path to Koto_v*_Windows.zip. Defaults to searching dist\.
+    Path to Koto_v*_Windows.zip. Defaults to the exact VERSION artifact in dist\.
 
 .PARAMETER Port
     Port for the test server. Default 5098.
 
 .PARAMETER HealthTimeoutSec
     Seconds to wait for /api/health. Default 45.
+
+.PARAMETER StartupEvidenceDir
+    Optional directory for the frozen interactive startup JSONL artifact.
 
 .EXAMPLE
     .\test_portable_e2e.ps1 -ZipFile "C:\downloads\Koto_v1.0.3_Windows.zip"
@@ -28,19 +31,26 @@ param(
     [string]$ZipFile          = "",
     [int]$Port                = 5098,
     [int]$HealthTimeoutSec    = 45,
-    [bool]$RequireHealth      = $true   # set to $false in headless/CI
+    [bool]$RequireHealth      = $true,
+    [bool]$RequireDesktopWindow = $true,
+    [string]$StartupEvidenceDir = "",
+    [switch]$ServerOnly,
+    [string[]]$MatrixScenarios = @(),
+    [switch]$RequireAuthenticodeSignatures,
+    [string]$ExpectedSignerThumbprint = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Resolve-Path (Join-Path $ScriptDir "..\..")
+. (Join-Path $ScriptDir "release_e2e_helpers.ps1")
 $ExtractDir = Join-Path $env:TEMP "KotoPortableE2E"
 
 # ── Locate ZIP ───────────────────────────────────────────────────────────
 if (-not $ZipFile) {
-    $found = Get-Item (Join-Path $RepoRoot "dist\Koto_v*_Windows.zip") -ErrorAction SilentlyContinue |
-             Select-Object -First 1
-    if ($found) { $ZipFile = $found.FullName }
+    $releaseVersion = (Get-Content (Join-Path $RepoRoot "VERSION") -Raw).Trim()
+    $candidate = Join-Path $RepoRoot "dist\Koto_v${releaseVersion}_Windows.zip"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $ZipFile = $candidate }
 }
 if (-not $ZipFile -or -not (Test-Path $ZipFile)) {
     Write-Error "ERROR: ZIP not found. Pass -ZipFile <path>."
@@ -62,7 +72,7 @@ function Show-KotoStartupDiagnostics([string]$InstallDir, [int]$HealthPort) {
     } catch {
         Write-Host "No listener found on port $HealthPort"
     }
-    foreach ($logName in @("startup.log", "runtime.log")) {
+    foreach ($logName in @("startup.log", "startup_prerequisites.log", "runtime.log")) {
         $logPath = Join-Path $InstallDir "logs\$logName"
         if (Test-Path $logPath) {
             Write-Host "--- $logPath (last 200 lines) ---"
@@ -119,12 +129,7 @@ $requiredPaths = @(
     (Join-Path $internalDir "web"),
     (Join-Path $configRoot ".builtin_key"),
     (Join-Path $configRoot "deepseek_config.env.example"),
-    (Join-Path $configRoot "macro_suggestions.json"),
     (Join-Path $configRoot "personality_matrix.json"),
-    (Join-Path $configRoot "skill_affinity.json"),
-    (Join-Path $configRoot "skill_bindings.json"),
-    (Join-Path $configRoot "skill_ratings.json"),
-    (Join-Path $configRoot "triggers.json"),
     (Join-Path $configRoot "context"),
     (Join-Path $configRoot "divination_data"),
     (Join-Path $configRoot "skills"),
@@ -135,11 +140,35 @@ $requiredPaths = @(
     (Join-Path $staticRoot "jszip.min.js"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.js"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.css"),
-    (Join-Path $ExtractDir "Start_Koto.bat")
+    (Join-Path $ExtractDir "Start_Koto.bat"),
+    (Join-Path $ExtractDir "Install_WebView2_Runtime.bat"),
+    (Join-Path $ExtractDir "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"),
+    (Join-Path $ExtractDir "LocalModelInstaller.exe"),
+    (Join-Path $internalDir "python311.dll"),
+    (Join-Path $internalDir "VCRUNTIME140.dll"),
+    (Join-Path $internalDir "webview\lib\runtimes\win-x64\native\WebView2Loader.dll")
 )
 foreach ($path in $requiredPaths) {
     if (Test-Path $path) { Pass "Exists: $(Split-Path -Leaf $path)" }
     else                 { Fail "Missing: $path" }
+}
+
+
+if ($RequireAuthenticodeSignatures) {
+    foreach ($path in @(
+        $exePath,
+        (Join-Path $ExtractDir "LocalModelInstaller.exe")
+    )) {
+        try {
+            Assert-KotoAuthenticodeSignature `
+                -FilePath $path `
+                -ExpectedThumbprint $ExpectedSignerThumbprint
+            Pass "Valid Authenticode signature: $(Split-Path -Leaf $path)"
+        }
+        catch {
+            Fail $_.Exception.Message
+        }
+    }
 }
 
 $unexpectedRuntimePaths = @(
@@ -170,14 +199,24 @@ else                      { Fail "python311.dll missing from _internal" }
 # STEP 3 — Seed config + launch
 # ══════════════════════════════════════════════════════════════════════════
 Write-Host "`n[Step 3] Seeding config and launching..."
-& (Join-Path $ScriptDir "seed_config.ps1") -InstallDir $ExtractDir
+& (Join-Path $ScriptDir "seed_config.ps1") `
+    -InstallDir $ExtractDir -Scenario "cloud_invalid"
+$startupEventLog = Join-Path $ExtractDir "logs\startup_events.jsonl"
+Remove-Item -LiteralPath $startupEventLog -Force -ErrorAction SilentlyContinue
 
 $env:KOTO_PORT = $Port
-$env:KOTO_SERVER_ONLY = "1"
-Write-Host "  KOTO_SERVER_ONLY=1 (server-only mode)"
-$kotoProc = Start-Process -FilePath $exePath `
-    -WorkingDirectory $ExtractDir `
-    -PassThru
+if ($ServerOnly) {
+    $env:KOTO_SERVER_ONLY = "1"
+    $RequireDesktopWindow = $false
+    Write-Host "  Server-only diagnostic mode (desktop callback intentionally skipped)"
+} else {
+    Remove-Item Env:KOTO_SERVER_ONLY -ErrorAction SilentlyContinue
+    Write-Host "  Desktop mode (WebView2 path enabled)"
+}
+$kotoProc = Start-KotoWithoutDeveloperEnvironment `
+    -ExePath $exePath `
+    -WorkingDirectory $ExtractDir
+Write-Host "  Developer runtimes removed from child PATH/environment"
 
 Write-Host "  Koto.exe PID: $($kotoProc.Id)"
 
@@ -196,15 +235,8 @@ while ((Get-Date) -lt $deadline) {
     }
     try {
         $resp = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 3 -ErrorAction Stop
-        if ($resp.success -eq $true -or $resp.status -eq "ok" -or $resp.status -eq "healthy") {
+        if (Test-KotoHealthResponse -Response $resp) {
             $healthy = $true; Pass "/api/health returned success"; break
-        }
-    } catch {}
-    # Fallback: accept any 200
-    try {
-        $raw = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
-        if ($raw.StatusCode -eq 200) {
-            $healthy = $true; Pass "/api/health HTTP 200"; break
         }
     } catch {}
     Start-Sleep -Milliseconds 1000
@@ -215,6 +247,43 @@ if (-not $healthy) {
         Fail "Health endpoint did not respond within ${HealthTimeoutSec}s"
     } else {
         Write-Host "::warning::Health endpoint did not respond within ${HealthTimeoutSec}s (best-effort in CI — pywebview may not init headless)"
+    }
+}
+
+$desktopReady = $false
+if (-not $ServerOnly) {
+    $desktopDeadline = (Get-Date).AddSeconds($HealthTimeoutSec)
+    $startupLog = Join-Path $ExtractDir "logs\startup.log"
+    while ((Get-Date) -lt $desktopDeadline -and -not $kotoProc.HasExited) {
+        if (Test-Path $startupLog) {
+            $startupText = Get-Content -LiteralPath $startupLog -Raw -ErrorAction SilentlyContinue
+            if ($startupText -match "窗口已显示，应用正常运行中") {
+                $desktopReady = $true
+                Pass "WebView2 desktop window reached the shown callback"
+                break
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+}
+if ($ServerOnly) {
+    Pass "Desktop callback skipped only for the explicit server-only diagnostic"
+} elseif (-not $desktopReady) {
+    Show-KotoStartupDiagnostics -InstallDir $ExtractDir -HealthPort $Port
+    if ($RequireDesktopWindow) { Fail "Desktop window was not shown within ${HealthTimeoutSec}s" }
+    else { Write-Host "::warning::Desktop window callback was not observed" }
+}
+else {
+    try {
+        Export-KotoDesktopStartupEvidence `
+            -InstallDir $ExtractDir `
+            -OutputDirectory $StartupEvidenceDir `
+            -Scenario "portable" | Out-Null
+        if (-not [string]::IsNullOrWhiteSpace($StartupEvidenceDir)) {
+            Pass "Portable desktop startup evidence frozen before server-only matrix"
+        }
+    } catch {
+        Fail "Could not freeze portable desktop startup evidence: $($_.Exception.Message)"
     }
 }
 
@@ -237,6 +306,7 @@ if ($healthy) {
     } catch {
         Write-Host "  WARN: /api/ping did not respond"
     }
+
 }
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -247,6 +317,27 @@ if (-not $kotoProc.HasExited) {
     Stop-Process -Id $kotoProc.Id -Force -ErrorAction SilentlyContinue
     $kotoProc.WaitForExit(5000) | Out-Null
     Pass "Process stopped"
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# STEP 5b — Provider-independent startup matrix
+# ══════════════════════════════════════════════════════════════════════════
+Write-Host "`n[Step 5b] Running eight provider/startup scenarios..."
+try {
+    Invoke-KotoStartupMatrix `
+        -ExePath $exePath `
+        -InstallDir $ExtractDir `
+        -ScriptDir $ScriptDir `
+        -BasePort ($Port + 20) `
+        -TimeoutSec $HealthTimeoutSec `
+        -ScenarioNames $MatrixScenarios | Out-Null
+    if ($MatrixScenarios.Count -gt 0) {
+        Pass "Selected portable-app startup scenarios passed: $($MatrixScenarios -join ', ')"
+    } else {
+        Pass "All eight portable-app startup scenarios passed"
+    }
+} catch {
+    Fail $_.Exception.Message
 }
 
 # ══════════════════════════════════════════════════════════════════════════

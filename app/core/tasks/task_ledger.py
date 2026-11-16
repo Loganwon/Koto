@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 import threading
 import time
@@ -33,17 +32,29 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.core.config.runtime_storage import (
+    legacy_config_path,
+    prepare_runtime_database,
+    runtime_database_path,
+)
+from app.core.tasks.task_journal import JOURNAL_DDL, TaskJournalMixin
+
 logger = logging.getLogger(__name__)
 
 # ── 默认路径（与 CheckpointManager 同库文件）────────────────────────────────
-_DEFAULT_DB_PATH = str(
-    Path(
-        os.environ.get(
-            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+_DEFAULT_DB_PATH = str(runtime_database_path("koto_checkpoints.sqlite"))
+
+
+def _resolve_db_path(db_path: Optional[str] = None) -> str:
+    if db_path:
+        return db_path
+    return str(
+        prepare_runtime_database(
+            _DEFAULT_DB_PATH,
+            legacy_paths=(legacy_config_path("koto_checkpoints.sqlite"),),
         )
     )
-    / "koto_checkpoints.sqlite"
-)
+
 
 # ── 单例 ─────────────────────────────────────────────────────────────────────
 _ledger_instance: Optional["TaskLedger"] = None
@@ -85,7 +96,6 @@ class TaskRecord:
 
     # 分类/来源
     task_type: Optional[str] = None  # "agent"/"ppt"/"code"/"scheduler"…
-    skill_id: Optional[str] = None
     source: str = "agent"  # 发起来源
 
     # 时间戳
@@ -166,7 +176,7 @@ def _now_iso() -> str:
 # ============================================================================
 
 
-class TaskLedger:
+class TaskLedger(TaskJournalMixin):
     """
     持久化任务台账。
 
@@ -205,7 +215,6 @@ class TaskLedger:
         user_input        TEXT NOT NULL,
         status            TEXT NOT NULL DEFAULT 'pending',
         task_type         TEXT,
-        skill_id          TEXT,
         source            TEXT NOT NULL DEFAULT 'agent',
         created_at        TEXT NOT NULL,
         started_at        TEXT,
@@ -236,10 +245,27 @@ class TaskLedger:
         created_at  TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_koto_steps_task  ON koto_task_steps(task_id);
+
+    CREATE TABLE IF NOT EXISTS koto_task_controls (
+        control_id        TEXT PRIMARY KEY,
+        cancel_requested  INTEGER NOT NULL DEFAULT 0,
+        terminal_status   TEXT,
+        updated_at        TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS koto_task_plans (
+        run_id       TEXT PRIMARY KEY,
+        payload      TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'in_progress',
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_koto_task_plans_status
+      ON koto_task_plans(status);
     """
 
     def __init__(self, db_path: Optional[str] = None):
-        self._db_path = db_path or _DEFAULT_DB_PATH
+        self._db_path = _resolve_db_path(db_path)
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()  # serialise concurrent SQLite access
         self._conn = self._open_conn()
@@ -258,10 +284,13 @@ class TaskLedger:
 
     def _init_schema(self):
         self._conn.executescript(self._DDL)
+        self._conn.executescript(JOURNAL_DDL)
         # 迁移旧表：追加可能不存在的列和索引
         _migrations = [
             "ALTER TABLE koto_tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 1",
             "CREATE INDEX IF NOT EXISTS idx_koto_tasks_priority ON koto_tasks(priority)",
+            "ALTER TABLE koto_kernel_checkpoints ADD COLUMN owner_pid INTEGER",
+            "ALTER TABLE koto_kernel_checkpoints ADD COLUMN owner_started REAL",
         ]
         for sql in _migrations:
             try:
@@ -277,7 +306,6 @@ class TaskLedger:
         session_id: str,
         user_input: str,
         task_type: Optional[str] = None,
-        skill_id: Optional[str] = None,
         source: str = "agent",
         metadata: Optional[Dict[str, Any]] = None,
         priority: int = TaskPriority.NORMAL,
@@ -294,7 +322,6 @@ class TaskLedger:
             session_id=session_id,
             user_input=user_input[:1000],  # 限制长度
             task_type=task_type,
-            skill_id=skill_id,
             source=source,
             priority=int(priority),
             metadata=json.dumps(metadata or {}, ensure_ascii=False),
@@ -305,7 +332,6 @@ class TaskLedger:
             "user_input": task.user_input,
             "status": task.status.value,
             "task_type": task.task_type,
-            "skill_id": task.skill_id,
             "source": task.source,
             "created_at": task.created_at,
             "priority": task.priority,
@@ -317,11 +343,11 @@ class TaskLedger:
                     self._conn.execute(
                         """
                         INSERT INTO koto_tasks
-                          (task_id, session_id, user_input, status, task_type, skill_id,
+                          (task_id, session_id, user_input, status, task_type,
                            source, created_at, step_count, tool_calls, retry_count,
                            interrupt_requested, cancel_requested, priority, metadata)
                         VALUES
-                          (:task_id, :session_id, :user_input, :status, :task_type, :skill_id,
+                          (:task_id, :session_id, :user_input, :status, :task_type,
                            :source, :created_at, 0, 0, 0, 0, 0, :priority, :metadata)
                         """,
                         payload,
@@ -445,60 +471,124 @@ class TaskLedger:
             self._conn.execute(f"UPDATE koto_tasks SET {sets} WHERE task_id = ?", vals)
             self._conn.commit()
 
+    def _update_nonterminal_fields(self, task_id: str, **kwargs: Any) -> bool:
+        if not kwargs:
+            return False
+        with self._lock:
+            sets = ", ".join(f"{key} = ?" for key in kwargs)
+            values = list(kwargs.values()) + [task_id]
+            cursor = self._conn.execute(
+                f"""UPDATE koto_tasks SET {sets}
+                    WHERE task_id = ?
+                      AND status NOT IN ('completed', 'failed', 'cancelled')""",
+                values,
+            )
+            self._conn.commit()
+        return bool(cursor.rowcount)
+
     def mark_running(self, task_id: str):
-        self._update_fields(
-            task_id, status=TaskStatus.RUNNING.value, started_at=_now_iso()
+        changed = self._update_nonterminal_fields(
+            task_id,
+            status=TaskStatus.RUNNING.value,
+            started_at=_now_iso(),
         )
-        self._notify_status_change(task_id, TaskStatus.RUNNING)
+        if changed:
+            self._notify_status_change(task_id, TaskStatus.RUNNING)
+        return changed
+
+    def _transition_terminal(self, task_id: str, **fields: Any) -> bool:
+        """Apply the first terminal transition and reject later rewrites."""
+        with self._lock:
+            sets = ", ".join(f"{key} = ?" for key in fields)
+            values = list(fields.values()) + [task_id]
+            cursor = self._conn.execute(
+                f"""UPDATE koto_tasks SET {sets}
+                    WHERE task_id = ?
+                      AND status NOT IN ('completed', 'failed', 'cancelled')""",
+                values,
+            )
+            self._conn.commit()
+        return bool(cursor.rowcount)
 
     def mark_completed(self, task_id: str, result_summary: Optional[str] = None):
-        self._update_fields(
-            task_id,
+        changed = self._transition_terminal(
+            task_id=task_id,
             status=TaskStatus.COMPLETED.value,
             completed_at=_now_iso(),
             result_summary=(result_summary or "")[:500],
         )
-        self._notify_status_change(task_id, TaskStatus.COMPLETED)
+        if changed:
+            self.mark_control_terminal(task_id, TaskStatus.COMPLETED.value)
+            self._notify_status_change(task_id, TaskStatus.COMPLETED)
+        return changed
 
     def mark_failed(self, task_id: str, error: str):
-        self._update_fields(
-            task_id,
+        changed = self._transition_terminal(
+            task_id=task_id,
             status=TaskStatus.FAILED.value,
             completed_at=_now_iso(),
             error=str(error)[:1000],
         )
-        self._notify_status_change(task_id, TaskStatus.FAILED)
+        if changed:
+            self.mark_control_terminal(task_id, TaskStatus.FAILED.value)
+            self._notify_status_change(task_id, TaskStatus.FAILED)
+        return changed
 
     def mark_cancelled(self, task_id: str):
-        self._update_fields(
-            task_id,
+        changed = self._transition_terminal(
+            task_id=task_id,
             status=TaskStatus.CANCELLED.value,
             completed_at=_now_iso(),
         )
-        self._notify_status_change(task_id, TaskStatus.CANCELLED)
+        if changed:
+            self.mark_control_terminal(task_id, TaskStatus.CANCELLED.value)
+            self._notify_status_change(task_id, TaskStatus.CANCELLED)
+        return changed
 
     def mark_waiting(self, task_id: str, reason: str = "human_in_loop"):
         """标记为等待人工确认。"""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT metadata FROM koto_tasks WHERE task_id = ?", (task_id,)
-            ).fetchone()
-            meta = json.loads(row["metadata"]) if row else {}
-        meta["waiting_reason"] = reason
-        self._update_fields(
-            task_id,
-            status=TaskStatus.WAITING.value,
-            metadata=json.dumps(meta, ensure_ascii=False),
-        )
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT metadata, status FROM koto_tasks WHERE task_id = ?",
+                    (task_id,),
+                ).fetchone()
+                if not row or row["status"] in {
+                    TaskStatus.COMPLETED.value,
+                    TaskStatus.FAILED.value,
+                    TaskStatus.CANCELLED.value,
+                }:
+                    self._conn.rollback()
+                    return False
+                meta = json.loads(row["metadata"]) if row["metadata"] else {}
+                meta["waiting_reason"] = reason
+                self._conn.execute(
+                    "UPDATE koto_tasks SET status = ?, metadata = ? WHERE task_id = ?",
+                    (
+                        TaskStatus.WAITING.value,
+                        json.dumps(meta, ensure_ascii=False),
+                        task_id,
+                    ),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
         self._notify_status_change(task_id, TaskStatus.WAITING)
+        return True
 
     def increment_retries(self, task_id: str):
         with self._lock:
-            self._conn.execute(
-                "UPDATE koto_tasks SET retry_count = retry_count + 1, status = ? WHERE task_id = ?",
+            cursor = self._conn.execute(
+                """UPDATE koto_tasks
+                   SET retry_count = retry_count + 1, status = ?
+                   WHERE task_id = ?
+                     AND status NOT IN ('completed', 'failed', 'cancelled')""",
                 (TaskStatus.RETRYING.value, task_id),
             )
             self._conn.commit()
+        return bool(cursor.rowcount)
 
     def set_priority(self, task_id: str, priority: int):
         """更新任务优先级（0=低/1=正常/2=高/3=紧急）。"""
@@ -508,16 +598,21 @@ class TaskLedger:
     def update_metadata(self, task_id: str, metadata: Dict[str, Any]):
         """Merge metadata keys into an existing task record."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT metadata FROM koto_tasks WHERE task_id = ?", (task_id,)
-            ).fetchone()
-            current = json.loads(row["metadata"]) if row and row["metadata"] else {}
-            current.update(metadata or {})
-            self._conn.execute(
-                "UPDATE koto_tasks SET metadata = ? WHERE task_id = ?",
-                (json.dumps(current, ensure_ascii=False), task_id),
-            )
-            self._conn.commit()
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT metadata FROM koto_tasks WHERE task_id = ?", (task_id,)
+                ).fetchone()
+                current = json.loads(row["metadata"]) if row and row["metadata"] else {}
+                current.update(metadata or {})
+                self._conn.execute(
+                    "UPDATE koto_tasks SET metadata = ? WHERE task_id = ?",
+                    (json.dumps(current, ensure_ascii=False), task_id),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
 
     # ── 中断 / 取消控制 ───────────────────────────────────────────────────────
 
@@ -528,25 +623,194 @@ class TaskLedger:
 
     def resume_task(self, task_id: str):
         """恢复被 interrupt 的任务。"""
-        self._update_fields(
+        changed = self._update_nonterminal_fields(
             task_id,
             interrupt_requested=0,
             status=TaskStatus.RUNNING.value,
         )
-        logger.info(f"[TaskLedger] ▶ 恢复任务 → task {task_id[:8]}")
+        if changed:
+            logger.info(f"[TaskLedger] ▶ 恢复任务 → task {task_id[:8]}")
+        return changed
 
-    def cancel_task(self, task_id: str):
-        """请求取消任务（执行线程应在下次检查时停止）。"""
-        self._update_fields(task_id, cancel_requested=1)
-        logger.info(f"[TaskLedger] ✖ 取消请求 → task {task_id[:8]}")
+    def cancel_task(self, task_id: str) -> bool:
+        """Persist a cancellation request, even before a task row exists.
+
+        File-task ``run_id`` values and Kernel ``task_id`` values share this
+        control table.  The upsert makes cancellation visible across workers
+        and preserves a request that arrives just before task registration.
+        Returns ``True`` only for the first request.
+        """
+        control_id = str(task_id or "").strip()
+        if not control_id:
+            return False
+        now = _now_iso()
+        with self._lock:
+            previous = self._conn.execute(
+                "SELECT cancel_requested FROM koto_task_controls WHERE control_id = ?",
+                (control_id,),
+            ).fetchone()
+            self._conn.execute(
+                """
+                INSERT INTO koto_task_controls
+                  (control_id, cancel_requested, terminal_status, updated_at)
+                VALUES (?, 1, NULL, ?)
+                ON CONFLICT(control_id) DO UPDATE SET
+                  cancel_requested = 1,
+                  updated_at = excluded.updated_at
+                """,
+                (control_id, now),
+            )
+            self._conn.execute(
+                "UPDATE koto_tasks SET cancel_requested = 1 WHERE task_id = ?",
+                (control_id,),
+            )
+            self._conn.commit()
+        logger.info(f"[TaskLedger] ✖ 取消请求 → task {control_id[:8]}")
+        return not bool(previous and previous["cancel_requested"])
 
     def is_cancel_requested(self, task_id: str) -> bool:
         """供执行线程轮询检查。"""
+        control_id = str(task_id or "").strip()
+        if not control_id:
+            return False
         with self._lock:
             row = self._conn.execute(
                 "SELECT cancel_requested FROM koto_tasks WHERE task_id = ?", (task_id,)
             ).fetchone()
-        return bool(row["cancel_requested"]) if row else False
+            control = self._conn.execute(
+                "SELECT cancel_requested FROM koto_task_controls WHERE control_id = ?",
+                (control_id,),
+            ).fetchone()
+        return bool(
+            (row and row["cancel_requested"])
+            or (control and control["cancel_requested"])
+        )
+
+    def mark_control_terminal(self, control_id: str, status: str) -> None:
+        """Record one durable terminal state for a run/task control key."""
+        clean = str(control_id or "").strip()
+        if not clean:
+            return
+        normalized = str(status or "").strip().lower()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO koto_task_controls
+                  (control_id, cancel_requested, terminal_status, updated_at)
+                VALUES (?, 0, ?, ?)
+                ON CONFLICT(control_id) DO UPDATE SET
+                  terminal_status = COALESCE(koto_task_controls.terminal_status,
+                                             excluded.terminal_status),
+                  updated_at = excluded.updated_at
+                """,
+                (clean, normalized, _now_iso()),
+            )
+            self._conn.commit()
+
+    # ── Durable file-task plans ──────────────────────────────────────────
+
+    def upsert_task_plan(
+        self,
+        run_id: str,
+        patch: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Transactionally merge a task-plan patch without losing fields."""
+        clean = str(run_id or "").strip()
+        if not clean:
+            return {}
+        now = _now_iso()
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT payload, created_at FROM koto_task_plans WHERE run_id = ?",
+                    (clean,),
+                ).fetchone()
+                current: Dict[str, Any] = {}
+                if row and row["payload"]:
+                    try:
+                        decoded = json.loads(row["payload"])
+                    except (TypeError, ValueError) as exc:
+                        raise RuntimeError(
+                            f"corrupt task plan for run_id={clean}"
+                        ) from exc
+                    if not isinstance(decoded, dict):
+                        raise RuntimeError(f"invalid task plan for run_id={clean}")
+                    current = decoded
+                created_at = str(row["created_at"] if row else now)
+                current.update(dict(patch or {}))
+                current.update(
+                    {
+                        "run_id": clean,
+                        "created_at": current.get("created_at") or created_at,
+                        "updated_at": now,
+                    }
+                )
+                status = str(current.get("status") or "in_progress")[:32]
+                current["status"] = status
+                encoded = json.dumps(current, ensure_ascii=False)
+                self._conn.execute(
+                    """
+                    INSERT INTO koto_task_plans
+                      (run_id, payload, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(run_id) DO UPDATE SET
+                      payload = excluded.payload,
+                      status = excluded.status,
+                      updated_at = excluded.updated_at
+                    """,
+                    (clean, encoded, status, created_at, now),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return dict(current)
+
+    def get_task_plan(self, run_id: str) -> Optional[Dict[str, Any]]:
+        clean = str(run_id or "").strip()
+        if not clean:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payload FROM koto_task_plans WHERE run_id = ?", (clean,)
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"corrupt task plan for run_id={clean}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"invalid task plan for run_id={clean}")
+        return payload
+
+    def list_task_plans(
+        self, *, status: Optional[str] = None, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        safe_limit = max(1, min(int(limit or 10), 500))
+        with self._lock:
+            if status:
+                rows = self._conn.execute(
+                    """SELECT payload FROM koto_task_plans
+                       WHERE status = ? ORDER BY updated_at DESC LIMIT ?""",
+                    (str(status), safe_limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """SELECT payload FROM koto_task_plans
+                       ORDER BY updated_at DESC LIMIT ?""",
+                    (safe_limit,),
+                ).fetchall()
+        plans: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("corrupt task-plan ledger row") from exc
+            if isinstance(payload, dict):
+                plans.append(payload)
+        return plans
 
     def is_interrupt_requested(self, task_id: str) -> bool:
         with self._lock:

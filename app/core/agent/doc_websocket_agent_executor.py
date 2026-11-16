@@ -9,7 +9,7 @@ from typing import Any, Optional
 from app.core.agent import llm_provider_helpers
 from app.core.agent.editor_code_action_executor import EditorCodeActionExecutor
 from app.core.agent.hooks import HookContext, HookPoint, HookRegistry
-from app.core.agent.lifecycle import (
+from app.core.agent.kernel import (
     AgentEvent,
     AgentRequest,
     RunMetadata,
@@ -131,7 +131,6 @@ class DocWebSocketAgentExecutor:
             "system_instruction", system_instruction
         )
         prompt = hook_ctx.metadata.get("prompt", prompt)
-        pipeline_skill_ids = hook_ctx.metadata.get("skill_ids", [])
         pipeline_mask_result = hook_ctx.metadata.get("mask_result")
         pipeline_force_local = hook_ctx.metadata.get("force_local", False)
         full_prompt = RequestValidator.assemble_prompt(request, prompt)
@@ -164,7 +163,6 @@ class DocWebSocketAgentExecutor:
             request=request,
             metadata={
                 "mask_result": pipeline_mask_result,
-                "skill_ids": pipeline_skill_ids,
                 "raw_prompt": request.prompt,
                 "file_type": request.file_type,
             },
@@ -386,7 +384,7 @@ class DocWebSocketAgentExecutor:
         if force_local:
             return True
         try:
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             return bool(SettingsManager().get("ai", "use_local_only"))
         except Exception:

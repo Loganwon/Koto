@@ -22,12 +22,11 @@ Koto ShadowWatcher — 影子追踪 · 长期用户观察引擎
 
 存储
 ----
-config/shadow_observations.json  （人类可读，便于调试）
+data/shadow_observations.json  （人类可读，便于调试）
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import threading
@@ -36,11 +35,31 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.core.config.atomic_json_store import load_json_document, save_json_document
+from app.core.config.runtime_storage import (
+    legacy_config_path,
+    migrate_legacy_file,
+    runtime_data_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── 路径 ────────────────────────────────────────────────────────────────────
-_BASE = Path(__file__).parent.parent.parent.parent / "config"
-_OBS_FILE = _BASE / "shadow_observations.json"
+_DEFAULT_OBS_FILE = runtime_data_path(
+    "shadow_observations.json", env_var="KOTO_SHADOW_OBSERVATIONS_PATH"
+)
+_OBS_FILE = _DEFAULT_OBS_FILE
+
+
+def _observation_path() -> Path:
+    target = Path(_OBS_FILE)
+    if target == _DEFAULT_OBS_FILE:
+        return migrate_legacy_file(
+            target,
+            legacy_paths=(legacy_config_path("shadow_observations.json"),),
+        )
+    return target
+
 
 # ── 话题关键词（扩展时只需在此添加） ──────────────────────────────────────────
 _TOPIC_KEYWORDS: Dict[str, List[str]] = {
@@ -251,7 +270,7 @@ _USER_CORRECTION_PATTERNS = [
     r"(no[,，]|nope|wrong|not right|that'?s not|you misunderstood|not what i|actually[,，])",
 ]
 
-# ── 高频请求短语（用于 insight 触发创建 Skill）───────────────────────────────────
+# ── 高频请求短语（用于 insight 触发快捷工作流建议）──────────────────────────────
 _RECURRING_PHRASE_PATTERNS = [
     r"(帮我写|帮我分析|帮我总结|帮我翻译|帮我优化|帮我生成|帮我检查|帮我解释|帮我整理)",
     r"(总结一下|分析一下|解释一下|翻译一下|优化一下|写一个|生成一个|整理一下)",
@@ -313,7 +332,7 @@ def _default_obs() -> Dict[str, Any]:
             "avg_session_length": 0,
             "sessions_last_30d": 0,
         },
-        "recurring_phrases": {},  # {phrase: count}  — 高频请求动作短语，触发 Skill 建议
+        "recurring_phrases": {},  # {phrase: count} — 高频请求动作短语
         "hourly_task_type": {},  # {"9": {"代码": 3, "分析": 1}} — 时段×任务交叉
         "corrections": 0,  # 用户修正 AI 次数（质量信号）
         "recent_snippets": [],  # 最近 20 条对话摘要 [{user, ai, ts}]（截断至 120 字，供影子消息引用）
@@ -553,7 +572,7 @@ class ShadowWatcher:
                 )
                 _should_trigger = _new_failed or _new_open
 
-                # 高频请求短语（用于 insight → 创建 Skill 建议）
+                # 高频请求短语（用于 insight → 创建快捷工作流建议）
                 self._extract_recurring_phrases(user_msg)
 
                 # 用户修正信号
@@ -720,7 +739,7 @@ class ShadowWatcher:
     def _analyze_task_style(self, user_msg: str):
         """
         识别用户请求的任务类型和期望的输出格式，累积分布统计。
-        数据供 ProactiveAgent 推荐技能、SkillAutoBuilder 生成画像使用。
+        数据供 ProactiveAgent 生成任务模式洞察使用。
         """
         ts = self._obs.setdefault(
             "task_style", {"task_types": {}, "output_format": {}, "samples": 0}
@@ -820,7 +839,7 @@ class ShadowWatcher:
         return any(p.lower() in lower for p in _AI_FAILURE_PATTERNS)
 
     def _extract_recurring_phrases(self, text: str):
-        """统计高频请求动作短语，用于后续 Skill 创建建议。"""
+        """统计高频请求动作短语，用于后续快捷工作流建议。"""
         phrases: Dict[str, int] = self._obs.setdefault("recurring_phrases", {})
         lower = text.lower()
         for pattern in _RECURRING_PHRASE_PATTERNS:
@@ -919,9 +938,10 @@ class ShadowWatcher:
     # ── 持久化 ────────────────────────────────────────────────────────────────
 
     def _load(self):
-        if _OBS_FILE.exists():
+        path = _observation_path()
+        if path.exists():
             try:
-                data = json.loads(_OBS_FILE.read_text(encoding="utf-8"))
+                data = load_json_document(path, default={})
                 self._obs.update(data)
             except Exception as exc:
                 logger.warning("[ShadowWatcher] 加载失败: %s", exc)
@@ -936,7 +956,6 @@ class ShadowWatcher:
 
     def _save(self):
         try:
-            _BASE.mkdir(parents=True, exist_ok=True)
             with self._obs_lock:
                 # 裁剪已完成的 open_tasks（保留全部未完成 + 最近 20 条已完成）
                 open_tasks = self._obs.get("open_tasks", [])
@@ -948,8 +967,8 @@ class ShadowWatcher:
                 unresolved = [f for f in failed_tasks if not f.get("resolved")]
                 resolved = [f for f in failed_tasks if f.get("resolved")]
                 self._obs["failed_tasks"] = unresolved + resolved[-10:]
-                payload = json.dumps(self._obs, ensure_ascii=False, indent=2)
-            _OBS_FILE.write_text(payload, encoding="utf-8")
+                payload = dict(self._obs)
+            save_json_document(_observation_path(), payload)
         except Exception as exc:
             logger.warning("[ShadowWatcher] 保存失败: %s", exc)
 

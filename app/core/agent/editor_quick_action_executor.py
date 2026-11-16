@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import Optional
 
 from app.core.agent import llm_provider_helpers
-from app.core.agent.lifecycle import (
+from app.core.agent.kernel import (
     AgentEvent,
     AgentRequest,
     RunMetadata,
@@ -204,7 +204,7 @@ class EditorQuickActionExecutor:
 
     def _resolve_phases(self, request: AgentRequest) -> list[dict[str, str]]:
         try:
-            from app.core.editor_skills import get_phases
+            from app.core.editor_actions import get_phases
 
             action_hint = request.action_type or ""
             return get_phases(action_hint) if action_hint else get_phases("")
@@ -243,7 +243,7 @@ class EditorQuickActionExecutor:
         if normalized_mode == "cloud":
             return False
         try:
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             return bool(SettingsManager().get("ai", "use_local_only"))
         except Exception:
@@ -285,5 +285,5 @@ class EditorQuickActionExecutor:
             )
         return (
             "在线 AI 不可用，本地 Ollama 也未运行。\n"
-            "请执行: ollama serve，或在 config/gemini_config.env 配置 API 密钥。"
+            "请执行: ollama serve，或在 config/deepseek_config.env 配置 API 密钥。"
         )

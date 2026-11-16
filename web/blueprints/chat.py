@@ -18,20 +18,8 @@ import logging
 
 from flask import Blueprint, Response, jsonify, request
 
-from web.chat_runtime_services import (
-    get_brain,
-    get_chat_stream_handler,
-    get_default_chat_system_instruction,
-    get_interrupt_flags,
-    get_interrupt_manager,
-    get_local_executor,
-    get_model_map,
-    get_session_manager,
-    get_smart_dispatcher,
-    get_utils,
-    get_web_searcher,
-    resolve_requested_model_id,
-)
+from app.core.llm.model_selection import resolve_requested_model_id
+from web.runtime_context import service_registry
 
 _logger = logging.getLogger("koto.routes.chat")
 
@@ -62,7 +50,7 @@ def chat() -> Response:
             _size_mb = _chat_os.path.getsize(_resolved) / (1024 * 1024)
             if _size_mb > 10:
                 return jsonify({"error": f"File too large ({_size_mb:.1f}MB). Max 10MB for direct reads."}), 413
-            from web.file_processor import FileProcessor as _FP
+            from web.files.file_processor import FileProcessor as _FP
             _raw = _FP.process_file(_resolved)
             _formatted, _fd = _FP.format_result_for_chat(_raw, user_input or "")
             user_input = _formatted
@@ -105,9 +93,9 @@ def chat() -> Response:
     except ImportError:
         _logger.debug("[chat] provider_factory not importable, skipping pre-check")
 
-    utils = get_utils()
-    session_manager = get_session_manager()
-    model_map = get_model_map()
+    utils = service_registry.utils
+    session_manager = service_registry.session_manager
+    model_map = service_registry.model_map
     user_input = utils.sanitize_string(user_input)
     full_history = session_manager.load_full(f"{session_name}.json")
     if hasattr(session_manager, "_trim_history"):
@@ -133,7 +121,7 @@ def chat() -> Response:
     except Exception as exc:
         _logger.debug("[chat] configured local model lookup skipped: %s", exc)
 
-    result = get_brain().chat(
+    result = service_registry.brain.chat(
         history,
         user_input,
         file_data=_file_data_for_brain,
@@ -167,7 +155,7 @@ def chat() -> Response:
 @chat_bp.route("/api/chat/stream", methods=["POST"])
 def chat_stream() -> Response:
     """Stream chat response via the configured SSE handler."""
-    return get_chat_stream_handler()()
+    return service_registry.chat_stream_handler()
 
 
 @chat_bp.route("/api/chat/file", methods=["POST"])
@@ -218,22 +206,49 @@ def interrupt_chat() -> Response:
     payload = request.json or {}
     session_name: str | None = payload.get("session")
     task_id: str | None = payload.get("task_id")
+    run_id = str(payload.get("run_id") or "").strip()
     if not session_name:
         return jsonify({"error": "Missing session"}), 400
 
-    get_interrupt_manager().set_interrupt(session_name)
-    get_interrupt_flags()[session_name] = True
+    # KernelAgent observes durable cancellation, whereas explicit legacy task
+    # contracts still observe the session interrupt flag below. Keep both
+    # transports connected to their existing owners during compatibility.
+    from app.core.tasks.task_ledger import TaskStatus, get_ledger
+
+    ledger = get_ledger()
+    if task_id and run_id:
+        try:
+            ledger.bind_run_identity(task_id, run_id, session_id=session_name)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 409
+    pending_cancel = False
+    if task_id:
+        task = ledger.get(task_id)
+        if task is None and run_id:
+            pending_cancel = True
+        elif task is None or task.session_id != session_name:
+            return jsonify({"error": "Task not found in this session"}), 404
+    else:
+        running = ledger.list_tasks(
+            session_id=session_name, status=TaskStatus.RUNNING,
+            source="kernel_agent", limit=1,
+        )
+        task_id = running[0].task_id if running else None
+    if task_id:
+        ledger.cancel_task(task_id)
+        if run_id:
+            ledger.cancel_task(run_id)
+
+    service_registry.interrupt_manager.set_interrupt(session_name)
+    service_registry.interrupt_flags[session_name] = True
 
     if task_id:
-        try:
-            from web.task_scheduler import get_task_scheduler
+        _logger.debug("[INTERRUPT] Task stream interruption requested: %s", task_id)
 
-            get_task_scheduler().cancel_task(task_id)
-            _logger.debug("[INTERRUPT] Cancel task_id=%s", task_id)
-        except Exception as e:
-            _logger.debug("[INTERRUPT] cancel task failed: %s", e)
-
-    return jsonify({"success": True, "message": "Chat interrupted"})
+    response = {"success": True, "message": "Chat interrupted", "task_id": task_id}
+    if pending_cancel:
+        response.update(run_id=run_id, cancel_requested=True, status="pending")
+    return jsonify(response), 202 if pending_cancel else 200
 
 
 @chat_bp.route("/api/chat/reset-interrupt", methods=["POST"])
@@ -241,8 +256,8 @@ def reset_interrupt() -> Response:
     """重置中断标志"""
     session_name: str | None = (request.json or {}).get("session")
     if session_name:
-        get_interrupt_manager().reset(session_name)
-        flags = get_interrupt_flags()
+        service_registry.interrupt_manager.reset(session_name)
+        flags = service_registry.interrupt_flags
         if session_name in flags:
             del flags[session_name]
     return jsonify({"success": True})
@@ -250,132 +265,51 @@ def reset_interrupt() -> Response:
 
 @chat_bp.route("/api/mini/chat", methods=["POST"])
 def mini_chat() -> Response:
-    """迷你模式专用聊天 API — 使用与完整版相同的任务分配和执行逻辑"""
+    """Mini-mode text chat with a stable, non-agent transport contract."""
     data = request.json or {}
     user_input: str = data.get("message", "").strip()
     if not user_input:
         return jsonify({"error": "消息不能为空"}), 400
 
-    utils = get_utils()
-    session_manager = get_session_manager()
-    brain = get_brain()
-    model_map = get_model_map()
-    from app.core.llm.provider_factory import get_llm_provider
-
-    provider = get_llm_provider(provider="deepseek", allow_local_fallback=False)
-
-    def _provider_text(response):
-        if isinstance(response, dict):
-            return str(response.get("content") or response.get("text") or "")
-        return str(getattr(response, "text", response) or "")
+    utils = service_registry.utils
+    session_manager = service_registry.session_manager
+    brain = service_registry.brain
+    model_map = service_registry.model_map
 
     user_input = utils.sanitize_string(user_input)
     session_name = "MiniKoto_Quick"
     history = session_manager.load(f"{session_name}.json")
 
-    task_type, route_method, context_info = get_smart_dispatcher().analyze(
-        user_input, history
-    )
-    _logger.debug(
-        "[MINI_CHAT] SmartDispatcher: task_type='%s', method='%s'",
-        task_type,
-        route_method,
-    )
+    task_type = "CHAT"
+    route_method = "Stable mini chat boundary"
 
     response_text: str = ""
     is_error = False
     used_model = "unknown"
 
     try:
-        if task_type == "WEB_SEARCH":
-            _mini_skill_prompt = (context_info or {}).get("skill_prompt")
-            search_result = get_web_searcher().search_with_grounding(
-                user_input, skill_prompt=_mini_skill_prompt
-            )
-            response_text = search_result.get("response", "")
-            used_model = "DeepSeek Chat (Web Search)"
-            if (
-                not search_result.get("success")
-                or utils.is_failure_output(response_text)
-                or "搜索失败" in response_text
-            ):
-                fix_query_prompt = (
-                    "请把用户需求改写成更适合搜索的简短关键词或查询语句，只输出查询语句。\n"
-                    f"用户需求: {user_input}"
-                )
-                try:
-                    fix_resp = provider.generate_content(
-                        prompt=fix_query_prompt,
-                        model="deepseek-chat",
-                        temperature=0.2,
-                        max_tokens=64,
-                    )
-                    fixed_query = (_provider_text(fix_resp) or user_input).strip()
-                    search_result = get_web_searcher().search_with_grounding(fixed_query)
-                    response_text = search_result.get("response", "")
-                except Exception as e:
-                    _logger.debug("[MINI_CHAT] 修正查询失败: %s", e)
-            if not response_text or utils.is_failure_output(response_text):
-                is_error = True
-                response_text = f"搜索失败：无法获取 '{user_input}' 的实时信息"
-
-        elif task_type == "SYSTEM":
-            try:
-                exec_result = get_local_executor().execute(user_input)
-                response_text = exec_result.get("message", "命令执行失败")
-                if exec_result.get("details"):
-                    response_text += f"\n\n{exec_result['details']}"
-                used_model = "LocalExecutor"
-                is_error = not exec_result.get("success", False)
-                if is_error or utils.is_failure_output(response_text):
-                    fix_prompt = utils.build_fix_prompt(
-                        "SYSTEM", user_input, response_text
-                    )
-                    try:
-                        fix_resp = provider.generate_content(
-                            prompt=fix_prompt,
-                            model="deepseek-chat",
-                            system_instruction=get_default_chat_system_instruction(),
-                            temperature=0.4,
-                            max_tokens=1000,
-                        )
-                        response_text = _provider_text(fix_resp) or response_text
-                        used_model = "deepseek-chat (fallback)"
-                        is_error = False
-                    except Exception as e:
-                        _logger.debug("[MINI_CHAT] AI 修正失败: %s", e)
-            except Exception as e:
-                _logger.error("[MINI_CHAT] ❌ 系统命令执行出错: %s", e)
-                response_text = f"系统命令执行出错：{str(e)}"
-                used_model = "LocalExecutor"
-                is_error = True
-
-        else:
-            model = model_map.get(task_type, model_map["CHAT"])
+        model = model_map.get("CHAT", "deepseek-chat")
+        result = brain.chat(
+            history, user_input, model=model, auto_model=False, task_type="CHAT"
+        )
+        response_text = result.get("response", "")
+        used_model = result.get("model", model)
+        is_error = response_text.startswith("Error:") or response_text.startswith("❌")
+        if is_error and any(
+            code in response_text for code in ("404", "503", "UNAVAILABLE", "INVALID")
+        ):
             result = brain.chat(
-                history, user_input, model=model, auto_model=False, task_type=task_type
+                history,
+                user_input,
+                model="deepseek-chat",
+                auto_model=False,
+                task_type="CHAT",
             )
-            response_text = result.get("response", "")
-            used_model = result.get("model", model)
-            is_error = response_text.startswith("Error:") or response_text.startswith("❌")
-            # Fallback on HTTP errors (404 model unavailable, 503 overloaded, etc.)
-            _needs_fallback = is_error and any(
-                code in response_text for code in ("404", "503", "UNAVAILABLE", "INVALID")
-            )
-            if _needs_fallback:
-                for fallback_model in ["deepseek-chat"]:
-                    try:
-                        result = brain.chat(
-                            history, user_input, model=fallback_model, auto_model=False
-                        )
-                        _fb_resp = result.get("response", "")
-                        if _fb_resp and not _fb_resp.startswith("Error:") and not _fb_resp.startswith("❌"):
-                            response_text = _fb_resp
-                            used_model = fallback_model
-                            is_error = False
-                            break
-                    except Exception:
-                        continue
+            fallback_text = result.get("response", "")
+            if fallback_text and not fallback_text.startswith(("Error:", "❌")):
+                response_text = fallback_text
+                used_model = "deepseek-chat"
+                is_error = False
 
     except Exception as e:
         _logger.error("[MINI_CHAT] ❌ 执行出错: %s", e)

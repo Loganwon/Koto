@@ -10,12 +10,24 @@ TEST_MCP_API_KEY = "test-mcp-key"
 
 
 @pytest.fixture(autouse=True)
-def _mcp_test_api_key(monkeypatch):
+def _mcp_test_api_key(monkeypatch, tmp_path):
+    from app.core.agent import frontend_observability
     from app.core.agent.mcp_manager import reset_mcp_runtime_for_tests
+    from app.core.tasks.task_ledger import TaskLedger
 
+    ledger = TaskLedger(str(tmp_path / "frontend-actions.sqlite"))
+    monkeypatch.setattr(frontend_observability, "get_ledger", lambda: ledger)
+    monkeypatch.setattr(
+        frontend_observability,
+        "_event_log_path",
+        lambda: tmp_path / "frontend-events.jsonl",
+    )
+    frontend_observability.clear_frontend_events()
     reset_mcp_runtime_for_tests()
     monkeypatch.setenv("KOTO_MCP_API_KEY", TEST_MCP_API_KEY)
     yield
+    frontend_observability.clear_frontend_events()
+    ledger._conn.close()
     reset_mcp_runtime_for_tests()
 
 
@@ -24,6 +36,20 @@ def _mcp_rpc(client, payload: dict, headers: dict | None = None):
     if headers:
         request_headers.update(headers)
     return client.post("/api/mcp", json=payload, headers=request_headers)
+
+
+def _ack_browser_action(client, action, result):
+    response = client.post(
+        "/api/mcp/frontend-action-result",
+        json={
+            "id": action["id"],
+            "browser_id": action["browser_id"],
+            "delivery_token": action["delivery_token"],
+            "ok": True,
+            "result": result,
+        },
+    )
+    assert response.status_code == 200
 
 
 def test_mcp_registry_accepts_claude_style_stdio_config():
@@ -49,7 +75,7 @@ def test_mcp_registry_accepts_claude_style_stdio_config():
     assert entry.client.timeout == 7
 
 
-def test_factory_injects_configured_mcp_tools(monkeypatch):
+def test_factory_does_not_inject_configured_mcp_tools(monkeypatch):
     from app.core.agent import factory
 
     called = {"count": 0}
@@ -69,10 +95,10 @@ def test_factory_injects_configured_mcp_tools(monkeypatch):
         fake_inject,
     )
 
-    registry = factory._build_registry(api_key=None, full=False)
+    registry = factory._build_registry(api_key=None, profile="core")
     names = [tool["name"] for tool in registry.get_definitions()]
-    assert called["count"] == 1
-    assert "mcp__fake__ping" in names
+    assert called["count"] == 0
+    assert "mcp__fake__ping" not in names
 
 
 def test_mcp_routes_list_and_call_status_tool(monkeypatch):
@@ -319,6 +345,12 @@ def test_mcp_routes_expose_supervision_tools(monkeypatch):
     assert "koto_recent_file_changes" in tool_names
     assert "koto_search_code" in tool_names
     assert "koto_run_tests" in tool_names
+    inventory = next(
+        tool
+        for tool in listed.get_json()["tools"]
+        if tool["name"] == "koto_agent_tool_inventory"
+    )
+    assert "full" not in inventory["inputSchema"]["properties"]
 
     called = _mcp_rpc(
         client,
@@ -537,6 +569,8 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
         "/api/mcp/frontend-action-result",
         json={
             "id": action["id"],
+            "browser_id": action["browser_id"],
+            "delivery_token": action["delivery_token"],
             "ok": True,
             "result": {"clicked": True, "target": {"id": "navSettingsBtn"}},
         },
@@ -583,6 +617,19 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     panel_payload = panel_action.get_json()["action"]
     assert panel_payload["action"] == "open_panel"
     assert panel_payload["panel"] == "settings"
+    assert (
+        client.post(
+            "/api/mcp/frontend-action-result",
+            json={
+                "id": panel_payload["id"],
+                "browser_id": panel_payload["browser_id"],
+                "delivery_token": panel_payload["delivery_token"],
+                "ok": True,
+                "result": {"panel": "settings", "clicked": True},
+            },
+        ).status_code
+        == 200
+    )
 
     file_queued = _mcp_rpc(
         client,
@@ -606,6 +653,7 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     file_payload = file_action.get_json()["action"]
     assert file_payload["action"] == "open_workspace_file"
     assert file_payload["path"] == "demo/notes.txt"
+    _ack_browser_action(client, file_payload, {"opened": True})
 
     read_queued = _mcp_rpc(
         client,
@@ -673,6 +721,7 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     range_payload = range_action.get_json()["action"]
     assert range_payload["action"] == "select_text_range"
     assert range_payload["options"]["end"] == 10
+    _ack_browser_action(client, range_payload, {"selected": True})
 
     replace_queued = _mcp_rpc(
         client,
@@ -696,6 +745,7 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     replace_payload = replace_action.get_json()["action"]
     assert replace_payload["action"] == "replace_text_selection"
     assert replace_payload["value"] == "patched"
+    _ack_browser_action(client, replace_payload, {"applied": True})
 
     set_queued = _mcp_rpc(
         client,
@@ -719,6 +769,7 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     set_payload = set_action.get_json()["action"]
     assert set_payload["action"] == "set_editor_content"
     assert set_payload["value"] == "full content"
+    _ack_browser_action(client, set_payload, {"applied": True})
 
     save_queued = _mcp_rpc(
         client,
@@ -740,6 +791,7 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert save_action.status_code == 200
     save_payload = save_action.get_json()["action"]
     assert save_payload["action"] == "save_current_file"
+    _ack_browser_action(client, save_payload, {"saved": True})
 
     context_queued = _mcp_rpc(
         client,
@@ -788,6 +840,7 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert pptx_payload["action"] == "set_pptx_shape_text"
     assert pptx_payload["value"] == "Updated title"
     assert pptx_payload["options"]["shapeId"] == 2
+    _ack_browser_action(client, pptx_payload, {"applied": True})
 
     docx_queued = _mcp_rpc(
         client,
@@ -927,15 +980,22 @@ def test_deferred_blueprint_registration_exempts_mcp_api_from_csrf():
     source = (Path(__file__).resolve().parents[2] / "web/app_blueprints.py").read_text(
         encoding="utf-8"
     )
-    mcp_registration = source[
-        source.index("from app.api.mcp_routes import mcp_bp as _mcp_bp") :
+    mcp_spec = source[
+        source.index('"app.api.mcp_routes"') : source.index(
+            'BlueprintSpec("app.api.ops_routes"'
+        )
+    ]
+    registration = source[
+        source.index("def _register_spec(") : source.index(
+            "def _register_health_and_http(", source.index("def _register_spec(")
+        )
     ]
 
-    assert "app.register_blueprint(_mcp_bp)" in mcp_registration
-    assert "_exempt_csrf_blueprint(app, _mcp_bp)" in mcp_registration
-    assert mcp_registration.index(
-        "app.register_blueprint(_mcp_bp)"
-    ) < mcp_registration.index("_exempt_csrf_blueprint(app, _mcp_bp)")
+    assert '"mcp_bp"' in mcp_spec
+    assert "csrf_blueprint=True" in mcp_spec
+    assert registration.index("app.register_blueprint(blueprint") < registration.index(
+        "_exempt_csrf_blueprint(app, blueprint)"
+    )
 
 
 def test_mcp_frontend_action_sticks_to_recent_action_session(tmp_path, monkeypatch):
@@ -955,8 +1015,12 @@ def test_mcp_frontend_action_sticks_to_recent_action_session(tmp_path, monkeypat
         }
     )
     first = frontend_observability.enqueue_frontend_action(action="open_workspace_file")
-    frontend_observability.next_frontend_action(session_id="first-visible")
+    delivery = frontend_observability.next_frontend_action(session_id="first-visible")[
+        "action"
+    ]
     frontend_observability.complete_frontend_action(
+        browser_id=delivery["browser_id"],
+        delivery_token=delivery["delivery_token"],
         action_id=first["action"]["id"],
         ok=True,
         result={"opened": True},
@@ -1035,6 +1099,8 @@ def test_mcp_frontend_action_wait_ms_returns_completed_action(tmp_path, monkeypa
         if action.get("id"):
             frontend_observability.complete_frontend_action(
                 action_id=action["id"],
+                browser_id=action["browser_id"],
+                delivery_token=action["delivery_token"],
                 ok=True,
                 result={"title": "Koto", "readyState": "complete"},
             )

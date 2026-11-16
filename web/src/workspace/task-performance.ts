@@ -1,34 +1,11 @@
-export interface ModelSummaryState {
-  rounds: Set<number>;
-  startedRounds: Set<number>;
-  toolCalls: number;
-  contentChars: number;
-  latestRound: number;
-  mode: string;
-  failed: boolean;
-}
-
 export interface TaskPerformanceUpdate {
   performance: Record<string, any>;
   encoded: string;
   summary: string;
 }
 
-export interface ModelSummaryUpdate {
-  chip: string;
-  summary: string;
-}
-
-export function createModelSummaryState(): ModelSummaryState {
-  return {
-    rounds: new Set(),
-    startedRounds: new Set(),
-    toolCalls: 0,
-    contentChars: 0,
-    latestRound: 0,
-    mode: '',
-    failed: false,
-  };
+export interface TaskPerformanceCard {
+  dataset: DOMStringMap;
 }
 
 export function taskPerformanceSource(data: Record<string, any>): Record<string, any> {
@@ -99,18 +76,13 @@ export function updateTaskPerformanceDataset(currentEncoded: string, data: Recor
   };
 }
 
-export function updateModelSummaryState(state: ModelSummaryState, data: Record<string, any>): ModelSummaryUpdate {
-  state.latestRound = Number(data.round || state.latestRound || 0);
-  state.toolCalls = Number(data.tool_calls || state.toolCalls || 0);
-  state.contentChars = Number(data.content_chars || state.contentChars || 0);
-  state.mode = String(data.mode || state.mode || '').trim();
-  if (data.failed) state.failed = true;
-  if (data.round !== undefined && !state.startedRounds.has(state.latestRound)) state.startedRounds.add(state.latestRound);
-  if (data.round_finished !== undefined && state.latestRound) state.rounds.add(state.latestRound);
-  const roundLabel = state.latestRound ? '第' + state.latestRound + '轮' : '';
-  const callsLabel = state.toolCalls ? state.toolCalls + '次工具调用' : '';
-  return {
-    chip: state.mode || '思考',
-    summary: [roundLabel, callsLabel].filter(Boolean).join('，') || '思考中',
-  };
+export function updateTaskPerformanceRow(
+  card: TaskPerformanceCard,
+  data: Record<string, any>,
+): void {
+  if (!card || !card.dataset) return;
+  const current = String(card.dataset.taskPerformance || '').trim();
+  const next = updateTaskPerformanceDataset(current, data);
+  try { card.dataset.taskPerformance = next.encoded; }
+  catch { delete card.dataset.taskPerformance; }
 }

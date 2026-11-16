@@ -19,6 +19,8 @@ def test_release_manifest_records_each_artifact_and_sha256(tmp_path: Path):
             "scripts/write_release_manifest.py",
             "--version",
             "1.2.3",
+            "--source-version",
+            "1.2.3",
             "--output",
             str(manifest),
             "--hash-output",
@@ -34,7 +36,13 @@ def test_release_manifest_records_each_artifact_and_sha256(tmp_path: Path):
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     assert "Wrote release manifest" in result.stdout
     assert payload["schema_version"] == 1
+    assert isinstance(payload["git_dirty"], bool)
+    assert payload["worktree_changed_during_build"] is None
+    assert payload["release_eligible"] is False
+    assert payload["build_mode"] == "diagnostic"
+    assert "worktree_change_unknown" in payload["diagnostic_reasons"]
     assert payload["version"] == "1.2.3"
+    assert payload["source_version"] == "1.2.3"
     assert payload["artifacts"] == [
         {
             "name": artifact.name,
@@ -45,6 +53,120 @@ def test_release_manifest_records_each_artifact_and_sha256(tmp_path: Path):
     assert (
         checksums.read_text(encoding="utf-8") == f"{expected_hash} *{artifact.name}\n"
     )
+
+
+def test_release_manifest_accepts_build_start_provenance(tmp_path: Path):
+    artifact = tmp_path / "Koto.zip"
+    artifact.write_bytes(b"artifact")
+    manifest = tmp_path / "manifest.json"
+    checksums = tmp_path / "checksums.txt"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/write_release_manifest.py",
+            "--version",
+            "1.2.3",
+            "--source-version",
+            "1.2.3",
+            "--output",
+            str(manifest),
+            "--hash-output",
+            str(checksums),
+            "--git-revision",
+            "build-start-revision",
+            "--git-dirty",
+            "true",
+            "--worktree-changed-during-build",
+            "true",
+            str(artifact),
+        ],
+        check=True,
+    )
+
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["git_revision"] == "build-start-revision"
+    assert payload["git_dirty"] is True
+    assert payload["worktree_changed_during_build"] is True
+    assert payload["release_eligible"] is False
+    assert payload["build_mode"] == "diagnostic"
+    assert payload["diagnostic_reasons"] == [
+        "git_dirty",
+        "worktree_changed_during_build",
+    ]
+
+
+def test_release_manifest_marks_only_a_frozen_clean_build_as_eligible(tmp_path: Path):
+    artifact = tmp_path / "Koto.zip"
+    artifact.write_bytes(b"artifact")
+    manifest = tmp_path / "manifest.json"
+    checksums = tmp_path / "checksums.txt"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/write_release_manifest.py",
+            "--version",
+            "1.2.3",
+            "--source-version",
+            "1.2.3",
+            "--output",
+            str(manifest),
+            "--hash-output",
+            str(checksums),
+            "--git-dirty",
+            "false",
+            "--worktree-changed-during-build",
+            "false",
+            str(artifact),
+        ],
+        check=True,
+    )
+
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["release_eligible"] is True
+    assert payload["build_mode"] == "formal"
+    assert payload["diagnostic_reasons"] == []
+
+
+def test_release_manifest_records_explicit_diagnostic_build_modes(tmp_path: Path):
+    artifact = tmp_path / "Koto.zip"
+    artifact.write_bytes(b"artifact")
+    manifest = tmp_path / "manifest.json"
+    checksums = tmp_path / "checksums.txt"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/write_release_manifest.py",
+            "--version",
+            "1.2.3",
+            "--source-version",
+            "1.2.3",
+            "--output",
+            str(manifest),
+            "--hash-output",
+            str(checksums),
+            "--git-dirty",
+            "false",
+            "--worktree-changed-during-build",
+            "false",
+            "--diagnostic-reason",
+            "skip_cython",
+            "--diagnostic-reason",
+            "incremental_pyinstaller",
+            str(artifact),
+        ],
+        check=True,
+    )
+
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["release_eligible"] is False
+    assert payload["build_mode"] == "diagnostic"
+    assert payload["diagnostic_reasons"] == [
+        "skip_cython",
+        "incremental_pyinstaller",
+    ]
 
 
 def test_release_manifest_rejects_unsafe_version_and_duplicate_artifact_names(
@@ -65,6 +187,8 @@ def test_release_manifest_rejects_unsafe_version_and_duplicate_artifact_names(
             "scripts/write_release_manifest.py",
             "--version",
             "1/unsafe",
+            "--source-version",
+            "1/unsafe",
             "--output",
             str(manifest),
             "--hash-output",
@@ -80,6 +204,8 @@ def test_release_manifest_rejects_unsafe_version_and_duplicate_artifact_names(
             "scripts/write_release_manifest.py",
             "--version",
             "1.2.3",
+            "--source-version",
+            "1.2.3",
             "--output",
             str(manifest),
             "--hash-output",
@@ -92,6 +218,34 @@ def test_release_manifest_rejects_unsafe_version_and_duplicate_artifact_names(
     )
 
     assert unsafe_version.returncode != 0
-    assert "unsafe for release filenames" in unsafe_version.stderr
+    assert "stable semantic version format" in unsafe_version.stderr
     assert duplicate_names.returncode != 0
     assert "artifact names must be unique" in duplicate_names.stderr
+
+
+def test_release_manifest_rejects_source_version_mismatch(tmp_path: Path):
+    artifact = tmp_path / "Koto_v1.2.3_Windows.zip"
+    artifact.write_bytes(b"artifact")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/write_release_manifest.py",
+            "--version",
+            "1.2.3",
+            "--source-version",
+            "1.2.2",
+            "--output",
+            str(tmp_path / "manifest.json"),
+            "--hash-output",
+            str(tmp_path / "checksums.txt"),
+            str(artifact),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Release manifest generation failed:" in result.stderr
+    assert "source version mismatch" in result.stderr
+    assert "Traceback" not in result.stderr

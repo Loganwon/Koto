@@ -77,112 +77,87 @@
 哪个文件里写了数据库连接配置
 ```
 
-## 📡 API 调用
+## 📡 当前 API
 
-### 文件编辑 API
+旧的 `/api/file-editor/*` 与 `/api/file-search/*` 路由已经退役。不要重新接入这些入口；
+工作区文件读写、Agent 文件任务和知识库检索分别使用下面的唯一生产入口。
 
-#### 读取文件
+### 打开工作区文件
+
 ```bash
-POST /api/file-editor/read
+POST /api/v1/workspace/open_file_by_path
 {
-  "file_path": "workspace/test.txt"
+  "path": "test.txt"
 }
 ```
 
-#### 替换文本
+### 执行文件 Agent 任务
+
 ```bash
-POST /api/file-editor/replace
+POST /api/editor/ai/task-stream
 {
-  "file_path": "workspace/test.txt",
-  "old_text": "旧文本",
-  "new_text": "新文本",
-  "use_regex": false
+  "task": "把 test.txt 中的 TODO 改成 DONE",
+  "file_path": "test.txt"
 }
 ```
 
-#### 智能编辑
+该接口返回 SSE 任务事件，并通过统一的 `FileTaskRuntime`、任务账本和文件工具完成修改与验证。
+
+### 导出文本修补结果
+
 ```bash
-POST /api/file-editor/smart-edit
+POST /api/v1/workspace/patch_file
 {
-  "file_path": "workspace/test.txt",
-  "instruction": "把所有的 TODO 改成 DONE"
+  "path": "test.txt",
+  "proposals": [
+    {"original_text": "TODO", "proposed_text": "DONE"}
+  ]
 }
 ```
 
-### 文件搜索 API
+该接口支持 `.docx`、`.txt`、`.md`，返回修改后的下载文件，不直接覆盖磁盘原件。
 
-#### 搜索文件
+### 知识库搜索
+
 ```bash
-POST /api/file-search/search
+POST /api/rag/search
 {
   "query": "python",
-  "limit": 20,
-  "file_types": [".py", ".txt"]
+  "k": 20,
+  "score_threshold": 0.3
 }
 ```
 
-#### 内容查找
-```bash
-POST /api/file-search/find-by-content
-{
-  "content": "import flask\nfrom flask import Flask",
-  "min_similarity": 0.3
-}
-```
+### 手动索引目录
 
-#### 手动索引
 ```bash
-POST /api/file-search/index
+POST /api/rag/index-directory
 {
-  "path": "workspace/documents",
-  "is_directory": true
+  "dir_path": "workspace/documents",
+  "extensions": [".pdf", ".docx", ".txt"]
 }
 ```
 
 ## 🔧 技术细节
 
-### FileEditor 类
-- **位置**: `web/file_editor.py`
-- **核心方法**:
-  - `read_file()` - 读取文件
-  - `write_file()` - 写入文件
-  - `replace_text()` - 替换文本
-  - `insert_line()` - 插入行
-  - `delete_lines()` - 删除行
-  - `smart_edit()` - 智能编辑
+### 生产所有者
 
-### FileIndexer 类
-- **位置**: `web/file_indexer.py`
-- **核心方法**:
-  - `index_file()` - 索引单个文件
-  - `index_directory()` - 批量索引
-  - `search()` - 全文搜索
-  - `find_by_content()` - 相似度搜索
-  - `list_indexed_files()` - 列出所有文件
+- 文件打开/保存：`web/blueprints/workspace_assistant.py`
+- Agent 文件任务：`app/core/agent/file_task_runtime.py`
+- Agent 文件工具：`app/core/agent/task_tools.py`
+- 知识库检索：`web/blueprints/rag_api.py`
 
-### SmartDispatcher 路由
-自动识别用户意图：
-- **FILE_EDIT**: 修改、编辑、替换、删除行、插入
-- **FILE_SEARCH**: 找文件、搜索、包含、哪个文件
+### Agent 任务入口
 
-## 📊 测试结果
+工作区只对明确的文件上下文和白名单系统动作做确定性快路径。其他文件请求统一进入
+`FileTaskRuntime`，由模型根据当前文件、目标与可用工具决定读取、检索或修改步骤，不再由
+关键词分类器预判 `FILE_EDIT` / `FILE_SEARCH`。
 
-运行 `python test_file_features.py`:
+## 📊 验证入口
 
-```
-✅ 文件编辑测试
-   - 创建文件: 成功
-   - 文本替换: 1 处替换
-   - 插入行: 成功
-   - 智能编辑: 成功
-   - 自动备份: 1 个备份文件
-
-✅ 文件搜索测试
-   - 索引文件: 99 个文件，39 个已索引
-   - 搜索测试: 成功
-   - 相似度查找: 100% 匹配
-   - 统计信息: 3 种文件类型
-```
+使用 `tests/integration/test_e2e_user_scenarios.py` 验证文件创建、打开、保存和重开，
+使用 `tests/unit/test_file_task_runtime.py` 验证 Agent 文件任务主链。不要在文档中记录会随
+本地数据变化的固定文件数量或成功率。
 
 ## 🚀 示例场景
 

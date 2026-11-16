@@ -53,35 +53,37 @@ $WEB_APP     = Join-Path $KOTO_ROOT "web\app.py"
 
 $KOTO_PORT   = [int]($env:KOTO_PORT -replace '\s','')
 if ($KOTO_PORT -le 0) { $KOTO_PORT = 5000 }
+$STARTUP_HEALTH_TIMEOUT_SEC = 120
+if ($env:KOTO_STARTUP_TIMEOUT_SEC -match '^\d+$') {
+    $STARTUP_HEALTH_TIMEOUT_SEC = [Math]::Max(15, [int]$env:KOTO_STARTUP_TIMEOUT_SEC)
+}
 
 function Resolve-EntryScript {
     param([string]$RunMode)
-
-    $candidates = switch ($RunMode) {
-        "server" {
-            @(
-                (Join-Path $KOTO_ROOT "web\app.py")
-                (Join-Path $KOTO_ROOT "server.py")
-                (Join-Path $KOTO_ROOT "src\server.py")
-            )
-        }
-        default {
-            @(
-                (Join-Path $KOTO_ROOT "src\koto_app.py")   # pywebview 独立窗口（优先）
-                (Join-Path $KOTO_ROOT "koto_app.py")
-                (Join-Path $KOTO_ROOT "src\koto_setup.py")
-                (Join-Path $KOTO_ROOT "koto_setup.py")
-                (Join-Path $KOTO_ROOT "web\app.py")        # 纯 Flask 兜底
-            )
-        }
+    $manifestPath = Join-Path $KOTO_ROOT "config\runtime_entrypoints.json"
+    if (-not (Test-Path $manifestPath)) {
+        Write-Log "ERROR" "缺少统一启动入口清单: $manifestPath"
+        return $null
     }
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) {
-            return $candidate
-        }
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Write-Log "ERROR" "启动入口清单无法解析: $($_.Exception.Message)"
+        return $null
     }
-
+    $relativePath = if ($RunMode -eq "server") { $manifest.server } else { $manifest.desktop }
+    if ([string]::IsNullOrWhiteSpace($relativePath)) {
+        Write-Log "ERROR" "启动入口清单没有声明模式: $RunMode"
+        return $null
+    }
+    $entry = [System.IO.Path]::GetFullPath((Join-Path $KOTO_ROOT $relativePath))
+    $rootPrefix = [System.IO.Path]::GetFullPath($KOTO_ROOT).TrimEnd('\') + '\'
+    if (-not $entry.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Log "ERROR" "启动入口越出程序目录: $relativePath"
+        return $null
+    }
+    if (Test-Path -LiteralPath $entry -PathType Leaf) { return $entry }
+    Write-Log "ERROR" "统一启动入口不存在，拒绝降级到其他运行链: $entry"
     return $null
 }
 
@@ -136,20 +138,37 @@ function Test-PortFree {
 }
 
 function Test-KotoHealth {
-    param([int]$Port)
+    param(
+        [int]$Port,
+        [string]$LaunchToken = ""
+    )
 
     try {
-        $response = Invoke-RestMethod `
-            -Uri "http://127.0.0.1:$Port/api/health" `
-            -TimeoutSec 2 `
-            -ErrorAction Stop
+        $request = @{
+            Uri = "http://127.0.0.1:$Port/api/startup-health"
+            TimeoutSec = 2
+            ErrorAction = "Stop"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($LaunchToken)) {
+            $request.Headers = @{ "X-Koto-Launch-Token" = $LaunchToken }
+        }
+        $response = Invoke-RestMethod @request
         # A recovery page can also return HTTP 200.  Treat startup as healthy
         # only when the endpoint responds with Koto's expected JSON contract.
         if ($response -is [string] -or $null -eq $response) {
             return $false
         }
         $status = [string]$response.status
-        return $status -in @("healthy", "degraded")
+        if ($status -notin @("healthy", "degraded")) {
+            return $false
+        }
+        if (-not [string]::IsNullOrWhiteSpace($LaunchToken)) {
+            if ($response.PSObject.Properties.Name -notcontains "launch_token") {
+                return $false
+            }
+            return [string]$response.launch_token -eq $LaunchToken
+        }
+        return $true
     } catch {
         return $false
     }
@@ -188,8 +207,14 @@ function Stop-KotoProcessTree {
 }
 
 function Get-KotoProcesses {
-    return Get-Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and ($_.CommandLine -match "koto_app\.py" -or $_.CommandLine -match "web[/\\\\]app\.py") }
+    return Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.CommandLine -and (
+                $_.CommandLine -match "koto_(app|setup)\.py" -or
+                $_.CommandLine -match "web[/\\\\]app\.py" -or
+                $_.CommandLine -match "-m\s+web\.app"
+            )
+        }
 }
 
 # ─────────────────────────────────────────────
@@ -202,11 +227,16 @@ function Invoke-LockCheck {
         $lockedPid = (Get-Content $LOCK_FILE -ErrorAction SilentlyContinue).Trim()
         if ($lockedPid -match '^\d+$') {
             $proc = Get-Process -Id ([int]$lockedPid) -ErrorAction SilentlyContinue
-            if ($null -ne $proc -and $proc.Name -match "python") {
+            if ($null -ne $proc -and $proc.Name -match "python|koto") {
                 Write-Log "WARN" "已检测到运行中的 Koto 实例 (PID $lockedPid)。"
                 # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
                 $runningCmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$lockedPid" -ErrorAction SilentlyContinue).CommandLine
-                if ($runningCmd -match "web[/\\\\]app\.py" -or $runningCmd -notmatch "koto_app\.py") {
+                $isDesktopProcess = $runningCmd -match "koto_(app|setup)\.py"
+                $isServerProcess = (
+                    $runningCmd -match "web[/\\\\]app\.py" -or
+                    $runningCmd -match "-m\s+web\.app"
+                )
+                if ($isServerProcess -or -not $isDesktopProcess) {
                     if ($RunMode -eq "desktop") {
                         Write-Log "WARN" "检测到正在运行的 Flask 调试模式；desktop 启动将先停止它，再打开桌面窗口。"
                         Stop-Process -Id ([int]$lockedPid) -Force -ErrorAction SilentlyContinue
@@ -238,7 +268,7 @@ function Clear-OrphanProcesses {
         $cimProcs = Get-CimInstance Win32_Process `
             -Filter "Name='python.exe' OR Name='pythonw.exe'" `
             -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -and $_.CommandLine -match "koto_app\.py" }
+            Where-Object { $_.CommandLine -and $_.CommandLine -match "koto_(app|setup)\.py" }
         if ($cimProcs) {
             $pids = @($cimProcs | ForEach-Object { $_.ProcessId })
             Write-Log "WARN" "清理孤立 Koto 进程: $($pids -join ', ')..."
@@ -376,7 +406,8 @@ function Resolve-PortConflict {
                 $remotePid = $cols[-1]
                 if ($remotePid -match '^\d+$') {
                     $proc = Get-Process -Id ([int]$remotePid) -ErrorAction SilentlyContinue
-                    if ($proc -and $proc.CommandLine -match "koto") {
+                    $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$remotePid" -ErrorAction SilentlyContinue
+                    if ($procInfo -and $procInfo.CommandLine -match "koto_(app|setup)\.py|web[/\\\\]app\.py|-m\s+web\.app") {
                         Write-Log "WARN" "杀死旧 Koto 进程 PID=$remotePid..."
                         Stop-Process -Id ([int]$remotePid) -Force -ErrorAction SilentlyContinue
                         Start-Sleep -Seconds 1
@@ -443,6 +474,10 @@ function Start-KotoApp {
     $backoffSec  = 3
 
     while ($true) {
+        $launchToken = [Guid]::NewGuid().ToString("N")
+        $startupPortFile = Join-Path $LOG_DIR "startup-port-$launchToken.txt"
+        Remove-Item $startupPortFile -Force -ErrorAction SilentlyContinue
+
         Write-Log "INFO" "============================================"
         $entryKind = if ($Mode -eq "server") { "开发调试服务器" } else { "统一桌面入口" }
         Write-Log "INFO" "启动 Koto  入口=$entryKind  模式=$Mode  端口=$Port  重试=$retryCount"
@@ -462,6 +497,8 @@ function Start-KotoApp {
 
         # 环境变量透传
         $env:KOTO_PORT = "$Port"
+        $env:KOTO_LAUNCH_TOKEN = $launchToken
+        $env:KOTO_STARTUP_PORT_FILE = $startupPortFile
         $env:KOTO_DISABLE_LEGACY_VOICE = "1"
         $env:KOTO_DISABLE_BROWSER_AUTOMATION = "1"
         if ($Mode -eq "server") { $env:KOTO_DEPLOY_MODE = "local" }
@@ -516,23 +553,53 @@ function Start-KotoApp {
                     # Do not report success just because the pythonw launcher
                     # survived.  A desktop window without a healthy backend is
                     # unusable and used to be reported as a successful startup.
-                    $healthDeadline = (Get-Date).AddSeconds(15)
+                    # Keep this aligned with the desktop startup page.  The
+                    # previous 15-second deadline killed a healthy-but-still-
+                    # importing process and restarted it forever.
+                    $healthDeadline = (Get-Date).AddSeconds($STARTUP_HEALTH_TIMEOUT_SEC)
                     $backendHealthy = $false
+                    $probePort = $Port
                     while ((Get-Date) -lt $healthDeadline -and -not $proc.HasExited) {
-                        if (Test-KotoHealth -Port $Port) {
+                        if ($Mode -eq "desktop" -and (Test-Path $startupPortFile)) {
+                            try {
+                                $reportedText = (Get-Content -Path $startupPortFile -Raw -ErrorAction Stop).Trim()
+                                $reportedPort = 0
+                                if (
+                                    [int]::TryParse($reportedText, [ref]$reportedPort) -and
+                                    $reportedPort -ge 1 -and
+                                    $reportedPort -le 65535
+                                ) {
+                                    if ($probePort -ne $reportedPort) {
+                                        Write-Log "INFO" "桌面进程将实际后端端口调整为 $reportedPort；启动器同步探测目标。"
+                                    }
+                                    $probePort = $reportedPort
+                                    $Port = $reportedPort
+                                }
+                            } catch { }
+                        }
+                        if (Test-KotoHealth -Port $probePort -LaunchToken $launchToken) {
                             $backendHealthy = $true
                             break
                         }
                         Start-Sleep -Milliseconds 500
                     }
 
-                    if (-not $backendHealthy) {
-                        Write-Log "WARN" "桌面进程仍在运行，但 /api/health 在 15 秒内未就绪；按启动失败处理。"
-                        Stop-KotoProcessTree -ProcessId $proc.Id
-                        $proc.WaitForExit(2000) | Out-Null
+                    if (-not $backendHealthy -and -not $proc.HasExited) {
+                        # The desktop process owns a startup-status window with
+                        # diagnostics and recovery.  A slow import is not proof
+                        # of a crash, so the outer launcher must never kill and
+                        # restart a still-live process merely because a probe
+                        # deadline elapsed.  That previously created restart
+                        # loops on slower machines and when optional providers
+                        # (notably Ollama) were unavailable.
+                        Remove-Item $startupPortFile -Force -ErrorAction SilentlyContinue
+                        Write-Log "WARN" "Koto 进程仍在运行，但 /api/startup-health 在 $STARTUP_HEALTH_TIMEOUT_SEC 秒内未确认；保留桌面进程，由内置启动状态页继续诊断，不自动误杀或重启。"
+                        Write-Log "INFO" "如后端最终失败，请查看窗口中的诊断信息或日志: $runtimeLog  $errLog"
+                        exit 0
                     }
 
                     if ($backendHealthy) {
+                        Remove-Item $startupPortFile -Force -ErrorAction SilentlyContinue
                         # 桌面模式：窗口进程与后端健康，启动器立即退出（Koto 继续运行）
                         Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
                         Set-Content -Path $LOCK_FILE -Value "$($proc.Id)" -Encoding ASCII
@@ -558,6 +625,7 @@ function Start-KotoApp {
 
         # 清理锁文件
         Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
+        Remove-Item $startupPortFile -Force -ErrorAction SilentlyContinue
 
         # 重试判断
         if ($NoAutoRestart) {
@@ -645,7 +713,13 @@ if (-not (Assert-PythonVersion -PythonExe $pyConsole)) {
 }
 
 # Step 6: 端口检查
-$resolvedPort = Resolve-PortConflict -Port $KOTO_PORT
+# 桌面进程自身是桌面端口的唯一裁决者，并通过 startup-port 文件把实际
+# 端口回报给本启动器。server 模式没有这层协调，仍在这里预先解析冲突。
+$resolvedPort = if ($Mode -eq "desktop") {
+    $KOTO_PORT
+} else {
+    Resolve-PortConflict -Port $KOTO_PORT
+}
 
 # Step 7: 启动（含重试）
 Start-KotoApp -PythonInfo $pyInfo -Port $resolvedPort -Mode $Mode

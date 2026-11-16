@@ -43,9 +43,8 @@ BENIGN_ERROR_PATTERNS: list[re.Pattern[str]] = [
 # Pages to sweep — path and human-readable label
 SWEEP_PAGES: list[tuple[str, str]] = [
     ("/", "main_page"),
-    ("/skill-marketplace", "skill_marketplace"),
-    ("/landing", "landing_page"),
-    ("/mobile", "mobile_page"),
+    ("/addons", "addon_center"),
+    ("/mini", "mini_page"),
 ]
 
 
@@ -295,51 +294,25 @@ class TestButtonSweepMainPage:
 
 
 @pytest.mark.e2e
-class TestButtonSweepSkillMarketplace:
-    """Sweep all interactive elements on /skill-marketplace."""
+class TestButtonSweepAddonCenter:
+    """Sweep all interactive elements on /addons."""
 
-    def test_sweep_skill_marketplace(
+    def test_sweep_addon_center(
         self,
         e2e_page_with_network,
         e2e_base_url,
         console_errors,
         failed_requests,
     ):
-        url = f"{e2e_base_url}/skill-marketplace"
+        url = f"{e2e_base_url}/addons"
         result = sweep_page_buttons(
             e2e_page_with_network, url, console_errors, failed_requests
         )
 
-        _print_sweep_report("Skill Marketplace (/skill-marketplace)", result)
+        _print_sweep_report("Addon Center (/addons)", result)
 
-        assert (
-            result["total"] > 0
-        ), "No interactive elements found on /skill-marketplace"
+        assert result["total"] > 0, "No interactive elements found on /addons"
         _assert_no_uncaught_exceptions(result, console_errors)
-
-
-@pytest.mark.e2e
-class TestButtonSweepLandingPage:
-    """Sweep all interactive elements on /landing."""
-
-    def test_sweep_landing_page(
-        self,
-        e2e_page_with_network,
-        e2e_base_url,
-        console_errors,
-        failed_requests,
-    ):
-        url = f"{e2e_base_url}/landing"
-        result = sweep_page_buttons(
-            e2e_page_with_network, url, console_errors, failed_requests
-        )
-
-        _print_sweep_report("Landing Page (/landing)", result)
-
-        # /landing may not exist as a standalone route in local mode — if so,
-        # the page-load failure is already captured in result["errors"].
-        if result["total"] > 0:
-            _assert_no_uncaught_exceptions(result, console_errors)
 
 
 # ===================================================================

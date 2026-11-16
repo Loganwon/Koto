@@ -2,28 +2,48 @@
  * DOCX/PPTX toolbar bridges - hoverbar formatting, slide operations, shape operations.
  */
 
-import { _getDocxSelectionPayload, _showTableTooltipNear } from './selection-toolbar';
-import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import {
+  _evtEl,
+  _getDocxSelectionPayload,
+  _showTableTooltipNear,
+  _updateContextBar,
+} from './selection-toolbar';
+import { $, _csrfFetch, _escHtml } from '../workspace/infrastructure';
+import { state as workspaceState } from '../workspace/state';
+import { _updateDocxZoomUI } from '../editors/cdn-loaders';
+import { getFeatureRegistry, registerFeatures } from '../shared/feature-registry';
+import {
+  getDocxHoverForceHiddenText,
+  getDocxMouseUpY,
+  getDocxNativeSelectionBottom,
+  getLastSelectionText,
+  isDocxMouseDown,
+  setDocxHoverForceHiddenText,
+  setDocxNativeSelectionBottom,
+  setLastSelectionText,
+} from '../shared/selection-runtime';
+import { isReviewCommentModeEnabled } from '../workspace/docx-review-runtime';
+import {
+  appendToUiPortal,
+  ensureUiPortalRoot,
+  getVisualViewportBounds,
+  placeFixedInViewport,
+  setFixedVisualPosition,
+} from '../shared/ui-scale';
 
-const workspaceApi = getWorkspaceApi();
+// The concrete editor implementations are loaded lazily and expose different
+// runtime protocols. Keep that dynamic boundary explicit here while importing
+// the shared state from its real module.
+export const state: any = workspaceState;
+export const workspaceApi: any = getFeatureRegistry();
 // Existing toolbar helpers retain this short local name, but it is now the
 // canonical workspace API object rather than an ambient browser global.
-const WA = workspaceApi;
+export const WA = workspaceApi;
 
-declare function $(id: string): HTMLElement | null;
-declare let state: any;
-declare let lastSelectionText: string;
 let _docxCpEl: HTMLElement | null = null;
 let _docxHbEl: HTMLElement | null = null;
 
-declare function _escHtml(s: any): string;
-declare function showToast(message: string, kind?: string, duration?: number): void;
-declare function _evtEl(target: EventTarget | null): Element | null;
-declare function _updateContextBar(opts?: any): void;
-declare function _updateDocxZoomUI(zoom: number): void;
-declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
-
-const _CP_COLORS = [
+export const _CP_COLORS = [
   '#000000','#1f1f1f','#595959','#808080','#a6a6a6','#d9d9d9','#f2f2f2','#ffffff',
   '#c00000','#ff0000','#ff4b4b','#ff6d00','#ff9900','#ffc000','#ffff00','#fff2cc',
   '#375623','#548235','#70ad47','#92d050','#00b050','#008080','#0070c0','#bdd7ee',
@@ -43,8 +63,8 @@ function _ensureDocxHoverBar(): HTMLElement | null {
   if (!_docxCpEl || !_docxCpEl.isConnected) {
     _docxCpEl = document.getElementById('wa-docx-cp');
   }
-  (window as any)._docxHbEl = _docxHbEl;
-  (window as any)._docxCpEl = _docxCpEl;
+  getFeatureRegistry()._docxHbEl = _docxHbEl;
+  getFeatureRegistry()._docxCpEl = _docxCpEl;
   return _docxHbEl;
 }
 
@@ -59,26 +79,13 @@ function _syncDocxHoverBar(): void {
 }
 
 function _resetDocxSelection(): void {
-  const reset = (window as any)._resetDocxSelection;
+  const reset = getFeatureRegistry()._resetDocxSelection;
   if (typeof reset === 'function') reset();
-}
-
-function _isReviewCommentModeEnabled(): boolean {
-  const check = (window as any)._isReviewCommentModeEnabled;
-  if (typeof check === 'function') return !!check();
-  return state?.fileType === 'docx'
-    && state?._reviewCenterOpen !== false
-    && state?._reviewMode === 'comments';
-}
-
-function _hideReviewSelectionLauncher(): void {
-  const hide = (window as any)._hideReviewSelectionLauncher;
-  if (typeof hide === 'function') hide();
 }
 
 function _updateSubjectBar(fileName: string, fileType: string): void {
   const update = workspaceApi._updateSubjectBar
-    || (window as any)._updateSubjectBar;
+    || getFeatureRegistry()._updateSubjectBar;
   if (typeof update === 'function') update(fileName, fileType);
 }
 
@@ -99,7 +106,7 @@ function _getDocxFontDisplayName(fontName: string): string {
 }
 
 function _safeGetDocxHdrFtrSelectionInfo(): any {
-  const getter = (window as any)._getDocxHdrFtrSelectionInfo;
+  const getter = getFeatureRegistry()._getDocxHdrFtrSelectionInfo;
   return typeof getter === 'function' ? getter() : null;
 }
 
@@ -164,7 +171,7 @@ export function _getDocxNativeSelectionBounds(pm?: HTMLElement | null, editorLef
   const rects: DOMRectList | DOMRect[] = range.getClientRects ? range.getClientRects() : [];
   const bounds = _boundsFromRects(rects, editorLeft);
   if (bounds) {
-    (window as any)._docxNativeSelBottom = bounds.bottom;
+    setDocxNativeSelectionBottom(bounds.bottom);
   }
   return bounds;
 }
@@ -283,9 +290,9 @@ export function _showDocxHoverBar(): void {
   // Review mode owns the native selection and uses it to position the comment
   // launcher. Exit before the formatting path attempts to normalize or clear
   // a selection that ProseMirror has not mirrored yet.
-  if (_isReviewCommentModeEnabled()) {
+  if (isReviewCommentModeEnabled()) {
     _hideDocxHoverBar();
-    const tt = $('wa-pdf-tooltip');
+    const tt = $('wa-selection-toolbar');
     if (tt) tt.style.display = 'none';
     return;
   }
@@ -301,7 +308,7 @@ export function _showDocxHoverBar(): void {
     if (docxSelection && docxSelection.kind === 'table' && docxSelection.tableElement) {
       _hideDocxHoverBar();
       _showTableTooltipNear(docxSelection.tableElement);
-      lastSelectionText = docxSelection.rawText;
+      setLastSelectionText(docxSelection.rawText);
       const countEl = $('wa-tooltip-count');
       if (countEl) countEl.textContent = docxSelection.countLabel || docxSelection.previewText;
       _updateContextBar({ table: docxSelection.previewText });
@@ -320,15 +327,16 @@ export function _showDocxHoverBar(): void {
   }
   if (!selText) { _resetDocxSelection(); return; }
 
-  if ((window as any)._docxHoverForceHiddenText === selText) {
+  if (getDocxHoverForceHiddenText() === selText) {
     _hideDocxHoverBar();
     return;
   }
 
   hb.style.visibility = 'hidden';
   hb.style.display = 'flex';
-  const hbW = hb.offsetWidth || 420;
-  const hbH = hb.offsetHeight || 34;
+  const hbRect = hb.getBoundingClientRect();
+  const hbW = hbRect.width || 420;
+  const hbH = hbRect.height || 34;
   hb.style.visibility = '';
 
   const ribbonEl = document.getElementById('koto-tt-toolbar')
@@ -339,11 +347,10 @@ export function _showDocxHoverBar(): void {
     if (rr.height > 0) ribbonBottom = rr.bottom;
   }
 
-  const vh = window.innerHeight;
-  const vw = window.innerWidth;
+  const viewport = getVisualViewportBounds();
 
-  const nativeSelectionBottom = Number((window as any)._docxNativeSelBottom) || 0;
-  const mouseUpY = Number((window as any)._docxMouseUpY) || 0;
+  const nativeSelectionBottom = getDocxNativeSelectionBottom();
+  const mouseUpY = getDocxMouseUpY();
   const anchorY = bounds.bottom > 0
     ? bounds.bottom
     : (nativeSelectionBottom > 0 ? nativeSelectionBottom : mouseUpY);
@@ -354,45 +361,44 @@ export function _showDocxHoverBar(): void {
   const EDGE_GAP = 6;
   const minTop = Math.max(EDGE_GAP, ribbonBottom + EDGE_GAP);
 
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   let ttH = 0;
   let ttW = 0;
   if (tt) {
-    if (tt.parentElement !== document.body) document.body.appendChild(tt);
+    if (tt.parentElement !== ensureUiPortalRoot()) appendToUiPortal(tt);
     tt.style.visibility = 'hidden';
     tt.style.display = 'flex';
-    ttW = tt.offsetWidth || 220;
-    ttH = tt.offsetHeight || 36;
+    const ttRect = tt.getBoundingClientRect();
+    ttW = ttRect.width || 220;
+    ttH = ttRect.height || 36;
     tt.style.visibility = '';
   }
 
   const stackHeight = hbH + (tt ? ttH + STACK_GAP : 0);
-  const maxStackTop = Math.max(minTop, vh - stackHeight - EDGE_GAP);
+  const maxStackTop = Math.max(minTop, viewport.bottom - stackHeight - EDGE_GAP);
   let stackTop = anchorY + SELECTION_GAP - STACK_RAISE;
-  if (stackTop + stackHeight > vh - EDGE_GAP) {
+  if (stackTop + stackHeight > viewport.bottom - EDGE_GAP) {
     stackTop = bounds.top - stackHeight - SELECTION_GAP;
   }
   stackTop = Math.max(minTop, Math.min(stackTop, maxStackTop));
 
   if (tt) {
     const aiTop = stackTop;
-    const aiLeft = Math.max(8, Math.min(bounds.left, vw - ttW - 8));
-    tt.style.left = aiLeft + 'px';
-    tt.style.top = aiTop + 'px';
+    const aiLeft = Math.max(viewport.left + 8, Math.min(bounds.left, viewport.right - ttW - 8));
+    setFixedVisualPosition(tt, aiLeft, aiTop);
   }
 
   let fmtTop = stackTop + (tt ? ttH + STACK_GAP : 0);
   let fmtLeft = bounds.left;
-  fmtTop = Math.max(minTop, Math.min(fmtTop, vh - hbH - EDGE_GAP));
-  fmtLeft = Math.max(4, Math.min(fmtLeft, vw - hbW - 4));
+  fmtTop = Math.max(minTop, Math.min(fmtTop, viewport.bottom - hbH - EDGE_GAP));
+  fmtLeft = Math.max(viewport.left + 4, Math.min(fmtLeft, viewport.right - hbW - 4));
 
-  hb.style.left = fmtLeft + 'px';
-  hb.style.top = fmtTop + 'px';
+  setFixedVisualPosition(hb, fmtLeft, fmtTop);
 
   _syncDocxHoverBar();
 
   if (selText) {
-    lastSelectionText = selText;
+    setLastSelectionText(selText);
     const countEl = $('wa-tooltip-count');
     if (countEl) {
       countEl.textContent = docxSelection && docxSelection.countLabel
@@ -423,7 +429,7 @@ export function _kotoDocxSelectionChanged(): void {
         state.activeEditor._toolbarSelection = null;
       }
       _resetDocxSelection();
-    } else if (!(state as any)._docxMouseIsDown) {
+    } else if (!isDocxMouseDown(state)) {
       // _showDocxHoverBar handles both the formatting hoverbar and the
       // quick-assistant selection toolbar (快捷助手) as a stacked layout.
       _showDocxHoverBar();
@@ -534,10 +540,11 @@ export function docxColorPicker(type: string, triggerEl?: HTMLElement): void {
   ).join('');
   if (triggerEl) {
     const r = triggerEl.getBoundingClientRect();
-    const pw = 8 * 18 + 7 * 3 + 16;
-    const left = Math.min(r.left, window.innerWidth - pw - 8);
-    palette.style.left = Math.max(4, left) + 'px';
-    palette.style.top = (r.bottom + 4) + 'px';
+    palette.style.visibility = 'hidden';
+    palette.style.display = 'block';
+    placeFixedInViewport(palette, r.left, r.bottom + 4, 4);
+    palette.style.visibility = '';
+    return;
   }
   palette.style.display = 'block';
 }
@@ -545,8 +552,8 @@ export function docxColorPicker(type: string, triggerEl?: HTMLElement): void {
 export function _docxPickColor(color: string, keepOpen?: boolean): void {
   const palette = _docxCpEl;
   const type = palette ? palette.dataset.cpType : '';
-  if (typeof (window as any)._ttPickColor === 'function') {
-    (window as any)._ttPickColor(color, keepOpen);
+  if (typeof getFeatureRegistry()._ttPickColor === 'function') {
+    getFeatureRegistry()._ttPickColor(color, keepOpen);
     _syncDocxHoverBar();
     const hexEl = $('wa-docx-cp-hex');
     if (hexEl) hexEl.textContent = color;
@@ -575,16 +582,8 @@ export function _docxPickColor(color: string, keepOpen?: boolean): void {
   if (!keepOpen && palette) palette.style.display = 'none';
 }
 
-export function docxHoverAI(action: string): void {
-  _hideDocxHoverBar();
-  const selText = workspaceApi._getDocxSelectionTextForAI ? workspaceApi._getDocxSelectionTextForAI() : (window.getSelection()?.toString().trim() || '');
-  if (selText) lastSelectionText = selText;
-  if (!lastSelectionText) { showToast('\u8bf7\u5148\u9009\u4e2d\u6587\u5b57', 'info'); return; }
-  WA.sendQuickAction(action);
-}
-
 export function closeDocxHoverBar(): void {
-  (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection()?.toString().trim() || '');
+  setDocxHoverForceHiddenText(getLastSelectionText() || (window.getSelection()?.toString().trim() || ''));
   _resetDocxSelection();
 }
 
@@ -618,574 +617,9 @@ function _buildHdrFtrSelectionInfo(): { text: string; bounds: any } | null {
     return { text, bounds: { top: br.top, bottom: br.bottom, left: br.left, right: br.right, centerX: br.left + br.width / 2 } };
   }
   return { text, bounds: { top, bottom, left, right, centerX: (left + right) / 2 } };
-}
+}import { _pptxPickColor, _sendImageToAI, docxZoom, pptxAddSlide, pptxAlign, pptxApplyQuickLayout, pptxBgColor, pptxBorderWidth, pptxChangeBgImage, pptxClearFormat, pptxColorPicker, pptxDelShape, pptxDelSlide, pptxDownload, pptxDupSlide, pptxFmt, pptxFontColor, pptxFontName, pptxFontSize, pptxHighlightColor, pptxIndent, pptxInsertImageClick, pptxInsertImageFile, pptxInsertMode, pptxInsertShape, pptxLineSpacing, pptxNav, pptxOpacity, pptxRedo, pptxRemoveBg, pptxSave, pptxSetBgImage, pptxSetShapePos, pptxSetShapeRot, pptxSetShapeSize, pptxShapeBorder, pptxShapeFill, pptxStepFont, pptxSwitchTab, pptxToggleBullet, pptxToggleNumbered, pptxUndo, pptxVertAlign, pptxZOrder, pptxZoom } from './pptx-toolbar-actions';
+export * from './pptx-toolbar-actions';
 
-// ── PPTX shape/slide operations ───────────────────────────────────
-
-export function pptxShapeFill(val: string): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed._selShape) { showToast('\u8bf7\u5148\u9009\u4e2d\u4e00\u4e2a\u5f62\u72b6', 'info'); return; }
-  const swatch = $('wa-pptx-shapefill-swatch');
-  if (swatch) swatch.style.background = val;
-  ed._pushUndo();
-  const shapeId = parseInt(ed._selShape.dataset.shapeId);
-  const slide = ed.data.slides[ed._curIdx];
-  const shape = (slide.shapes || []).find((s: any) => s.id === shapeId);
-  if (shape) {
-    shape.fill = val;
-    ed._selShape.style.backgroundColor = val;
-    WA.scheduleAutoSave();
-  }
-}
-
-export function pptxShapeBorder(val: string): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed._selShape) { showToast('\u8bf7\u5148\u9009\u4e2d\u4e00\u4e2a\u5f62\u72b6', 'info'); return; }
-  const swatch = $('wa-pptx-shapeborder-swatch');
-  if (swatch) swatch.style.background = val;
-  ed._pushUndo();
-  const shapeId = parseInt(ed._selShape.dataset.shapeId);
-  const slide = ed.data.slides[ed._curIdx];
-  const shape = (slide.shapes || []).find((s: any) => s.id === shapeId);
-  if (shape) {
-    if (!shape.border) shape.border = {};
-    shape.border.color = val;
-    const w = shape.border.width || 1;
-    ed._selShape.style.border = w + 'pt solid ' + val;
-    WA.scheduleAutoSave();
-  }
-}
-
-export function pptxBorderWidth(val: string): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed._selShape) return;
-  ed._pushUndo();
-  const shapeId = parseInt(ed._selShape.dataset.shapeId);
-  const slide = ed.data.slides[ed._curIdx];
-  const shape = (slide.shapes || []).find((s: any) => s.id === shapeId);
-  if (shape) {
-    if (!shape.border) shape.border = {};
-    shape.border.width = parseFloat(val);
-    if (parseFloat(val) === 0) {
-      ed._selShape.style.border = 'none';
-    } else {
-      const c = shape.border.color || '#000000';
-      ed._selShape.style.border = val + 'pt solid ' + c;
-    }
-    WA.scheduleAutoSave();
-  }
-}
-
-export function pptxDupSlide(): void {
-  const ed = state.activeEditor;
-  if (ed && ed._duplicateSlide) ed._duplicateSlide();
-}
-
-export function pptxStepFont(dir: number): void {
-  const ed = state.activeEditor;
-  if (ed && ed._stepFontSize) ed._stepFontSize(dir);
-}
-
-export function pptxClearFormat(): void {
-  const ed = state.activeEditor;
-  if (!ed) return;
-  const slide = ed.data.slides[ed._curIdx];
-  const getSpans = (): HTMLElement[] => {
-    const sel = window.getSelection && window.getSelection();
-    const actRange = (ed._savedRange && !ed._savedRange.collapsed)
-      ? ed._savedRange
-      : (sel && sel.rangeCount > 0 && !sel.isCollapsed ? sel.getRangeAt(0) : null);
-    if (actRange) {
-      const arr: HTMLElement[] = [];
-      ed._selShape && ed._selShape.querySelectorAll('.wa-pptx-run').forEach((s: HTMLElement) => {
-        if (sel ? sel.containsNode(s, true) : actRange.intersectsNode(s)) arr.push(s);
-      });
-      if (arr.length) return arr;
-    }
-    return ed._activeSpan ? [ed._activeSpan]
-      : (ed._selShape ? Array.from(ed._selShape.querySelectorAll('.wa-pptx-run')) : []);
-  };
-  const spans = getSpans();
-  if (!spans.length) return;
-  ed._pushUndo();
-  spans.forEach((sp: HTMLElement) => {
-    const shape = (slide.shapes || []).find((s: any) => s.id === parseInt(sp.dataset.shapeId || '0'));
-    const run = shape && shape.paragraphs[parseInt(sp.dataset.pi || '0')] && shape.paragraphs[parseInt(sp.dataset.pi || '0')].runs[parseInt(sp.dataset.ri || '0')];
-    if (!run) return;
-    ['bold','italic','underline','strikethrough','superscript','subscript','highlight','color'].forEach(p => { delete run[p]; });
-    sp.style.fontWeight = '';
-    sp.style.fontStyle = '';
-    sp.style.textDecoration = '';
-    sp.style.verticalAlign = '';
-    sp.style.backgroundColor = '';
-    sp.style.color = '';
-    const canvasEl = $('wa-pptx-slide-canvas');
-    if (canvasEl) {
-      const scaleW = parseFloat(canvasEl.style.width) / ed.data.slideWidthEmu;
-      sp.style.fontSize = Math.max(Math.round((run.size || 18) * scaleW * 12700), 6) + 'px';
-    }
-  });
-  WA.scheduleAutoSave();
-}
-
-export function pptxAddSlide(): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed.data) return;
-  ed._pushUndo();
-  const newIdx = ed.data.slides.length;
-  const sW = ed.data.slideWidthEmu || 9144000;
-  const sH = ed.data.slideHeightEmu || 6858000;
-  ed.data.slides.push({
-    index: newIdx, background: '#ffffff',
-    shapes: [
-      {
-        id: -(Date.now() % 100000000),
-        name: 'Title', type: 'TEXT_BOX',
-        left: Math.round(sW * 0.05), top: Math.round(sH * 0.06),
-        width: Math.round(sW * 0.9), height: Math.round(sH * 0.18),
-        z_order: 1, has_text: true, fill: null,
-        paragraphs: [{ align: 'CENTER', runs: [{ text: '\u70b9\u51fb\u8f93\u5165\u6807\u9898', size: 36, bold: true }] }],
-      },
-      {
-        id: -(Date.now() % 100000000) - 1,
-        name: 'Content', type: 'TEXT_BOX',
-        left: Math.round(sW * 0.05), top: Math.round(sH * 0.30),
-        width: Math.round(sW * 0.9), height: Math.round(sH * 0.60),
-        z_order: 2, has_text: true, fill: null,
-        paragraphs: [{ align: 'LEFT', runs: [{ text: '\u70b9\u51fb\u8f93\u5165\u5185\u5bb9', size: 24 }] }],
-      },
-    ],
-  });
-  ed._buildThumbs();
-  ed._renderSlide(newIdx);
-  WA.scheduleAutoSave();
-}
-
-export function pptxDelSlide(): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed.data || ed.data.slides.length <= 1) { showToast('\u81f3\u5c11\u4fdd\u7559\u4e00\u5f20\u5e7b\u706f\u7247', 'error'); return; }
-  ed._pushUndo();
-  const deletedIdx = ed._curIdx;
-  ed.data.slides.splice(deletedIdx, 1);
-  ed.data.slides.forEach((s: any, i: number) => { s.index = i; });
-  const newIdx = Math.min(deletedIdx, ed.data.slides.length - 1);
-  ed._buildThumbs();
-  ed._renderSlide(newIdx);
-  WA.scheduleAutoSave();
-  showToast(`\u5df2\u5220\u9664\u7b2c ${deletedIdx + 1} \u5f20\u5e7b\u706f\u7247`, 'info');
-}
-
-export function pptxInsertShape(type: string): void {
-  const ed = state.activeEditor;
-  if (!ed) return;
-  const slide = ed.data.slides[ed._curIdx];
-  if (!slide) return;
-  ed._pushUndo();
-  const newId = Math.max(0, ...(slide.shapes || []).map((s: any) => s.id || 0)) + 1;
-  const W = ed.data.slideWidthEmu, H = ed.data.slideHeightEmu;
-  const shape: any = {
-    id: newId, type: 'shape', shapeType: type,
-    left: W * 0.3, top: H * 0.3,
-    width: W * 0.2, height: H * 0.15,
-    fill: '#4472C4',
-    border: { color: '#2F4E8A', width: 1 },
-    paragraphs: [{ runs: [], align: 'CENTER' }]
-  };
-  if (type === 'line') {
-    shape.height = 0;
-    shape.top = H * 0.5;
-    shape.fill = 'none';
-    shape.border = { color: '#4472C4', width: 2 };
-  }
-  slide.shapes.push(shape);
-  ed._renderSlide(ed._curIdx);
-  WA.scheduleAutoSave();
-}
-
-export function pptxSetShapeSize(dim: string, val: string): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed._selShape) return;
-  const px = parseFloat(val);
-  if (isNaN(px) || px <= 0) return;
-  const shapeId = parseInt(ed._selShape.dataset.shapeId);
-  const slide = ed.data.slides[ed._curIdx];
-  const shape = (slide.shapes || []).find((s: any) => s.id === shapeId);
-  if (!shape) return;
-  ed._pushUndo();
-  const canvasEl = $('wa-pptx-slide-canvas');
-  const scaleW = parseFloat(canvasEl!.style.width) / ed.data.slideWidthEmu;
-  const scaleH = parseFloat(canvasEl!.style.height) / ed.data.slideHeightEmu;
-  if (dim === 'w') { shape.width = px / scaleW; ed._selShape.style.width = px + 'px'; }
-  else             { shape.height = px / scaleH; ed._selShape.style.height = px + 'px'; }
-  WA.scheduleAutoSave();
-}
-
-export function pptxSetShapePos(dim: string, val: string): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed._selShape) return;
-  const px = parseFloat(val);
-  if (isNaN(px)) return;
-  const shapeId = parseInt(ed._selShape.dataset.shapeId);
-  const slide = ed.data.slides[ed._curIdx];
-  const shape = (slide.shapes || []).find((s: any) => s.id === shapeId);
-  if (!shape) return;
-  ed._pushUndo();
-  const canvasEl = $('wa-pptx-slide-canvas');
-  const scaleW = parseFloat(canvasEl!.style.width) / ed.data.slideWidthEmu;
-  const scaleH = parseFloat(canvasEl!.style.height) / ed.data.slideHeightEmu;
-  if (dim === 'x') { shape.left = px / scaleW;  ed._selShape.style.left = px + 'px'; }
-  else             { shape.top  = px / scaleH;  ed._selShape.style.top  = px + 'px'; }
-  WA.scheduleAutoSave();
-}
-
-export function pptxSetShapeRot(deg: string): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed._selShape) return;
-  const d = parseFloat(deg);
-  if (isNaN(d)) return;
-  const shapeId = parseInt(ed._selShape.dataset.shapeId);
-  const slide = ed.data.slides[ed._curIdx];
-  const shape = (slide.shapes || []).find((s: any) => s.id === shapeId);
-  if (!shape) return;
-  ed._pushUndo();
-  shape.rotation = d;
-  ed._selShape.style.transform = 'rotate(' + d + 'deg)';
-  WA.scheduleAutoSave();
-}
-
-export function pptxHighlightColor(val: string): void {
-  const swatch = $('wa-pptx-highlight-swatch');
-  if (swatch) swatch.style.background = val;
-  const ed = state.activeEditor;
-  if (ed && ed.applyFormat) ed.applyFormat('highlight', val);
-}
-
-// ── PPTX slide background operations ──────────────────────────────
-
-export function pptxBgColor(color: string): void {
-  const ed = state.activeEditor;
-  if (!ed) return;
-  ed._pushUndo();
-  const slide = ed.data.slides[ed._curIdx];
-  slide.background = color;
-  slide.backgroundGradient = null;
-  slide.backgroundImage = null;
-  const canvas = $('wa-pptx-slide-canvas');
-  if (canvas) canvas.style.background = color;
-  const swatch = $('wa-pptx-bg-swatch');
-  if (swatch) swatch.style.background = color;
-  ed._redrawThumb(ed._curIdx);
-  WA.scheduleAutoSave();
-}
-
-export function pptxSetBgImage(fileInput: HTMLInputElement): void {
-  const ed = state.activeEditor;
-  if (!ed || !fileInput.files || !fileInput.files[0]) return;
-  const file = fileInput.files[0];
-  fileInput.value = '';
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    const raw = ev.target!.result as string;
-    const img = new Image();
-    img.onload = () => {
-      const MAX = 1920;
-      let w = img.naturalWidth, h = img.naturalHeight;
-      if (w > MAX || h > MAX) {
-        const ratio = Math.min(MAX / w, MAX / h);
-        w = Math.round(w * ratio);
-        h = Math.round(h * ratio);
-      }
-      const _cv = document.createElement('canvas');
-      _cv.width = w; _cv.height = h;
-      const _ctx = _cv.getContext('2d')!;
-      _ctx.drawImage(img, 0, 0, w, h);
-      const dataUri = _cv.toDataURL('image/jpeg', 0.82);
-      ed._pushUndo();
-      const slide = ed.data.slides[ed._curIdx];
-      slide.backgroundImage = dataUri;
-      slide.backgroundGradient = null;
-      const canvas = $('wa-pptx-slide-canvas');
-      if (canvas) canvas.style.background = `url('${dataUri}') center/cover no-repeat`;
-      const swatch = $('wa-pptx-bg-swatch');
-      if (swatch) { swatch.style.background = `url('${dataUri}') center/cover`; swatch.style.backgroundSize = 'cover'; }
-      ed._redrawThumb(ed._curIdx);
-      WA.scheduleAutoSave();
-    };
-    img.src = raw;
-  };
-  reader.readAsDataURL(file);
-}
-
-export function pptxRemoveBg(): void {
-  const ed = state.activeEditor;
-  if (!ed) return;
-  ed._pushUndo();
-  const slide = ed.data.slides[ed._curIdx];
-  slide.background = '#ffffff';
-  slide.backgroundGradient = null;
-  slide.backgroundImage = null;
-  const canvas = $('wa-pptx-slide-canvas');
-  if (canvas) canvas.style.background = '#ffffff';
-  const swatch = $('wa-pptx-bg-swatch');
-  if (swatch) { swatch.style.background = '#ffffff'; swatch.style.backgroundImage = ''; }
-  ed._redrawThumb(ed._curIdx);
-  WA.scheduleAutoSave();
-}
-
-export function pptxApplyQuickLayout(layout: string): void {
-  const ed = state.activeEditor;
-  if (ed && ed._applyQuickLayout) ed._applyQuickLayout(layout);
-}
-
-export function pptxChangeBgImage(fileInput: HTMLInputElement): void {
-  pptxSetBgImage(fileInput);
-}
-
-export function pptxFmt(cmd: string): void {
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat(cmd);
-}
-
-export function pptxAlign(align: string): void {
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('align', align);
-}
-
-export function pptxFontSize(size: string): void {
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('size', size);
-}
-
-export function pptxFontName(value: string): void {
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('fontName', value);
-}
-
-export function pptxFontColor(value: string): void {
-  const swatch = $('wa-pptx-fontcolor-swatch');
-  if (swatch) swatch.style.background = value;
-  const hoverSwatch = $('wa-hb-color-swatch');
-  if (hoverSwatch) hoverSwatch.style.background = value;
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('color', value);
-}
-
-export function pptxColorPicker(type: string, triggerEl?: HTMLElement): void {
-  const palette = $('wa-pptx-cp');
-  const grid = $('wa-pptx-cp-grid');
-  if (!palette || !grid) return;
-  if (palette.style.display !== 'none' && palette.dataset.cpType === type) {
-    palette.style.display = 'none';
-    return;
-  }
-  palette.dataset.cpType = type;
-  grid.innerHTML = _CP_COLORS.map((c: string) =>
-    `<div title="${c}" style="width:18px;height:18px;border-radius:3px;background:${c};cursor:pointer;border:1px solid rgba(255,255,255,.12);box-sizing:border-box"` +
-    ` data-wa-toolbar-color="pptx" data-color="${c}"></div>`
-  ).join('');
-  if (triggerEl) {
-    const r = triggerEl.getBoundingClientRect();
-    const pw = 8 * 18 + 7 * 3 + 16;
-    const left = Math.min(r.left, window.innerWidth - pw - 8);
-    palette.style.left = Math.max(4, left) + 'px';
-    palette.style.top = (r.bottom + 4) + 'px';
-  }
-  palette.style.display = 'block';
-}
-
-export function _pptxPickColor(color: string, keepOpen?: boolean): void {
-  const palette = $('wa-pptx-cp');
-  const type = palette ? palette.dataset.cpType : '';
-  if (type === 'font') pptxFontColor(color);
-  else if (type === 'fill') pptxShapeFill(color);
-  else if (type === 'border') pptxShapeBorder(color);
-  else if (type === 'highlight') pptxHighlightColor(color);
-  else if (type === 'bg') pptxBgColor(color);
-  const hexEl = $('wa-pptx-cp-hex');
-  if (hexEl) hexEl.textContent = color;
-  const customInput = $('wa-pptx-cp-custom') as HTMLInputElement;
-  if (customInput && /^#[0-9a-f]{6}$/i.test(color)) customInput.value = color;
-  if (!keepOpen && palette) palette.style.display = 'none';
-}
-
-export function pptxHoverAI(action: string): void {
-  const hoverBar = $('wa-pptx-hoverbar');
-  if (hoverBar) hoverBar.style.display = 'none';
-  const selText = window.getSelection()?.toString().trim() || '';
-  if (selText) lastSelectionText = selText;
-  if (!lastSelectionText) {
-    showToast('\u8bf7\u5148\u9009\u4e2d\u6587\u5b57', 'info');
-    return;
-  }
-  WA.sendQuickAction(action);
-}
-
-export function pptxIndent(delta: number): void {
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('indent', Number(delta) || 0);
-}
-
-export function pptxLineSpacing(value: string): void {
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('lineSpacing', value);
-}
-
-export function pptxToggleBullet(): void {
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('bullet', true);
-}
-
-export function pptxToggleNumbered(): void {
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('numbered', true);
-}
-
-export function pptxVertAlign(value: string): void {
-  const ed = state.activeEditor;
-  if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('verticalAlign', value);
-}
-
-export function pptxOpacity(value: string): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed._selShape) return;
-  const pct = Math.max(0, Math.min(100, parseFloat(value)));
-  if (!Number.isFinite(pct)) return;
-  const shapeId = parseInt(ed._selShape.dataset.shapeId || '0');
-  const slide = ed.data && ed.data.slides && ed.data.slides[ed._curIdx];
-  const shape = slide && (slide.shapes || []).find((s: any) => s.id === shapeId);
-  if (!shape) return;
-  if (typeof ed._pushUndo === 'function') ed._pushUndo();
-  shape.opacity = pct / 100;
-  ed._selShape.style.opacity = String(shape.opacity);
-  WA.scheduleAutoSave();
-}
-
-export function pptxZOrder(action: string): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed._selShape) return;
-  const shapeId = parseInt(ed._selShape.dataset.shapeId || '0');
-  if (action === 'front' && typeof ed._bringToFront === 'function') ed._bringToFront(shapeId);
-  else if (action === 'back' && typeof ed._sendToBack === 'function') ed._sendToBack(shapeId);
-  else if ((action === 'up' || action === 'forward') && typeof ed._reorder === 'function') ed._reorder(shapeId, 1);
-  else if ((action === 'down' || action === 'backward') && typeof ed._reorder === 'function') ed._reorder(shapeId, -1);
-}
-
-export function pptxZoom(value: string | number): void {
-  const pct = parseInt(String(value), 10);
-  const label = $('wa-pptx-zoom-label');
-  if (label && Number.isFinite(pct)) label.textContent = pct + '%';
-  const ed = state.activeEditor;
-  if (ed && typeof ed.setZoom === 'function' && Number.isFinite(pct)) ed.setZoom(pct);
-}
-
-export function pptxNav(delta: number): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed.data || !Array.isArray(ed.data.slides) || typeof ed._renderSlide !== 'function') return;
-  const next = (ed._curIdx || 0) + Number(delta || 0);
-  if (next >= 0 && next < ed.data.slides.length) ed._renderSlide(next);
-}
-
-export function docxZoom(value: string | number): void {
-  const pct = parseInt(String(value), 10);
-  const ed = state.activeEditor;
-  if (ed && typeof ed.setZoom === 'function' && Number.isFinite(pct)) ed.setZoom(pct);
-  if (Number.isFinite(pct)) _updateDocxZoomUI(pct);
-}
-
-export function pptxInsertImageClick(): void {
-  const input = document.getElementById('wa-pptx-img-input') as HTMLInputElement | null
-    || document.getElementById('wa-pptx-insert-image-file') as HTMLInputElement | null
-    || document.getElementById('wa-pptx-image-input') as HTMLInputElement | null;
-  if (input) {
-    input.click();
-    return;
-  }
-  showToast('未找到 PPT 图片文件选择器，请刷新后重试', 'warning');
-}
-
-export function pptxInsertImageFile(input: HTMLInputElement): void {
-  const ed = state.activeEditor;
-  const file = input && input.files && input.files[0];
-  if (!file) return;
-  input.value = '';
-  if (!ed) {
-    showToast('请先打开一个 PPT 文件', 'warning');
-    return;
-  }
-  if (typeof ed.insertImageFile === 'function') {
-    ed.insertImageFile(file);
-    return;
-  }
-  if (typeof ed._insertImageFile === 'function') {
-    ed._insertImageFile(file);
-    return;
-  }
-  showToast('当前 PPT 编辑器不支持插入图片，请刷新后重试', 'error');
-}
-
-// ── Image send-to-AI ───────────────────────────────────────────────
-export function _sendImageToAI(action: string, imgSrc: string): void {
-  const aiInput = document.getElementById('wa-user-input') as HTMLTextAreaElement;
-  if (!aiInput) return;
-  const label = action === 'describe' ? '\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u7684\u5185\u5bb9' : '\u8bf7\u4e3a\u8fd9\u5f20\u56fe\u7247\u751f\u6210\u66ff\u6362\u65b9\u6848';
-  aiInput.value = label;
-  aiInput.focus();
-  workspaceApi._pendingImageSrc = imgSrc;
-  WA.sendMessage();
-}
-
-export function pptxDelShape(): void {
-  const ed = state.activeEditor;
-  if (ed && ed.deleteSelected) ed.deleteSelected();
-}
-
-export function pptxSwitchTab(btn: HTMLElement, tabName: string): void {
-  document.querySelectorAll('.wa-pptx-rtab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  const toolbar = document.getElementById('wa-pptx-toolbar');
-  if (!toolbar) return;
-  toolbar.querySelectorAll('[data-tab]').forEach(el => {
-    (el as HTMLElement).style.display = ((el as HTMLElement).dataset.tab === tabName) ? '' : 'none';
-  });
-}
-
-export function pptxInsertMode(): void {
-  const ed = state.activeEditor;
-  if (!ed || !ed.data) return;
-  ed._insertMode = !ed._insertMode;
-  const btn = $('wa-pptx-insert-tb');
-  if (btn) btn.classList.toggle('active', ed._insertMode);
-  const canvas = $('wa-pptx-slide-canvas');
-  if (canvas) canvas.style.cursor = ed._insertMode ? 'crosshair' : '';
-  const mainEl = $('wa-pptx-main');
-  if (mainEl) { mainEl.scrollLeft = 0; mainEl.scrollTop = 0; }
-  if (ed._insertMode) showToast('\u5728\u5e7b\u706f\u7247\u4e0a\u62d6\u62fd\u7ed8\u5236\u6587\u672c\u6846', 'info');
-}
-
-export function pptxSave(): void {
-  if (state.activeEditor && state.activeEditor.serialize) {
-    WA.saveFile();
-  }
-}
-
-export function pptxUndo(): void {
-  if (state.activeEditor && state.activeEditor._undo) state.activeEditor._undo();
-}
-
-export function pptxRedo(): void {
-  if (state.activeEditor && state.activeEditor._redo) state.activeEditor._redo();
-}
-
-export function pptxDownload(): void {
-  if (state.fileId) {
-    WA.saveFile().then(() => {
-      const a = document.createElement('a');
-      a.href = `/api/v1/workspace/raw/${state.fileId}`;
-      a.download = state.fileName || 'presentation.pptx';
-      a.click();
-    }).catch(() => {});
-  }
-}
 
 let toolbarColorDelegationInstalled = false;
 
@@ -1211,15 +645,15 @@ function _installToolbarColorDelegation(): void {
 
 _installToolbarColorDelegation();
 
-publishWorkspaceApi({
+registerFeatures({
   docxHoverFmt, docxInsertLink, docxHoverFontFamily, docxHoverFontSize,
-  docxHoverAI, docxColorPicker, _docxPickColor, closeDocxHoverBar,
+  docxColorPicker, _docxPickColor, closeDocxHoverBar,
   pptxShapeFill, pptxShapeBorder, pptxBorderWidth, pptxDupSlide, pptxStepFont,
   pptxClearFormat, pptxAddSlide, pptxDelSlide, pptxInsertShape, pptxSetShapeSize,
   pptxSetShapePos, pptxSetShapeRot, pptxHighlightColor, pptxApplyQuickLayout,
   pptxChangeBgImage, pptxBgColor, pptxSetBgImage, pptxRemoveBg, pptxFmt,
   pptxAlign, pptxFontSize, pptxFontName, pptxFontColor, pptxColorPicker,
-  _pptxPickColor, pptxHoverAI, pptxIndent, pptxLineSpacing, pptxToggleBullet,
+  _pptxPickColor, pptxIndent, pptxLineSpacing, pptxToggleBullet,
   pptxToggleNumbered, pptxVertAlign, pptxOpacity, pptxZOrder, pptxZoom, pptxNav,
   docxZoom, pptxInsertImageClick, pptxInsertImageFile, pptxDelShape, pptxSwitchTab,
   pptxInsertMode, pptxSave, pptxUndo, pptxRedo, pptxDownload, _sendImageToAI,
@@ -1227,8 +661,8 @@ publishWorkspaceApi({
 });
 
 if (typeof window !== 'undefined') {
-  (window as any)._getDocxSelBounds = _getDocxSelBounds;
-  (window as any)._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
-(window as any)._getDocxHdrFtrSelectionInfo = _buildHdrFtrSelectionInfo;
-  (window as any)._kotoDocxSelectionChanged = _kotoDocxSelectionChanged;
+  getFeatureRegistry()._getDocxSelBounds = _getDocxSelBounds;
+  getFeatureRegistry()._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
+getFeatureRegistry()._getDocxHdrFtrSelectionInfo = _buildHdrFtrSelectionInfo;
+  getFeatureRegistry()._kotoDocxSelectionChanged = _kotoDocxSelectionChanged;
 }

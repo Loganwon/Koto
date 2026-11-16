@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.core.agent.file_task_contract import (
     FileTaskClassification,
-    FileTaskExecutionBrief,
     FileTaskIntentPlan,
     FileTaskRequest,
 )
-from app.core.agent.file_task_whitebox import WhiteboxExecutionPlan
 
 
 def output_mode_label(output_mode: str) -> str:
@@ -40,8 +36,8 @@ def output_mode_guidance(classification: FileTaskClassification) -> str:
         return (
             f"当前任务反馈模式：{label}。\n"
             "本轮先基于显式上下文给出分析、问题清单、修改方向或可应用方案。\n"
-            "除非用户这轮已经明确要求直接应用到文件，否则不要直接调用写入工具，也不要声称文件已经更新。\n"
-            "如果需要后续落盘，应先把建议说清楚，再等待用户继续要求应用。\n"
+            "目标和依据明确、写入有助于完成用户目标时，可以按需调用写入工具；也可以只返回分析。\n"
+            "文件变更不是本模式的完成条件；如果选择写入，必须以真实 file.changed 为依据，不能声称未发生的更新。\n"
         )
     return (
         f"当前任务反馈模式：{label}。\n"
@@ -73,77 +69,12 @@ def intent_plan_guidance(intent_plan: FileTaskIntentPlan) -> str:
             lines.append(
                 f"  {index}. {title}" + (f"：{description}" if description else "")
             )
-    if intent_plan.write_intent:
+    if intent_plan.write_required:
         lines.append(
             "- 监管约束：写入型任务必须产生真实 file.changed；分步确认任务必须先完成本步骤写入，再进入等待用户继续。"
         )
+    elif intent_plan.write_authorized:
+        lines.append(
+            "- 写入权限：模型可以按用户本轮明确要求调用写工具，但文件变更不是预设完成条件。"
+        )
     return "\n".join(lines) + "\n"
-
-
-def execution_brief_continue_message(
-    request: FileTaskRequest,
-    brief: FileTaskExecutionBrief,
-) -> str:
-    summary = brief.summary or brief.objective or "已完成任务分析。"
-    lines = [
-        f"已收到 execution_brief：{summary}",
-        "下一轮请在白盒任务骨架内直接调用需要的 Koto 工具继续执行，不要重复输出同一份 brief。",
-    ]
-    if request.target_path:
-        lines.append(f"当前目标文件是：{request.target_path}。")
-    return " ".join(lines)
-
-
-def execution_plan_continue_message(
-    request: FileTaskRequest,
-    execution_plan: WhiteboxExecutionPlan,
-    recipe_skeleton: dict[str, Any],
-) -> str:
-    summary = (
-        execution_plan.plan_summary or execution_plan.goal or "已完成白盒执行计划。"
-    )
-    lines = [
-        f"已收到 execution_plan：{summary}",
-        "现在请按该计划继续调用 Koto allowlist 工具执行；不要重复输出计划，也不要跳过必需写入/核验步骤。",
-    ]
-    completion_check = recipe_skeleton.get("completion_check")
-    required_operations = (
-        completion_check.get("required_operations")
-        if isinstance(completion_check, dict)
-        else []
-    )
-    if required_operations:
-        lines.append(
-            "完成检查要求包含："
-            + "、".join(
-                str(item) for item in required_operations if str(item or "").strip()
-            )
-        )
-    if request.target_path:
-        lines.append(f"目标文件：{request.target_path}。")
-    return " ".join(lines)
-
-
-def whitebox_plan_repair_message(
-    gate_payload: dict[str, Any],
-    recipe_skeleton: dict[str, Any],
-) -> str:
-    lines = [
-        "白盒计划审查未通过或不完整，请修复计划后继续执行。",
-        "必须遵守 recipe_skeleton 的 required_steps、allowed_tools、success_criteria 和 completion_check。",
-    ]
-    violations = gate_payload.get("violations")
-    warnings = gate_payload.get("warnings")
-    if isinstance(violations, list) and violations:
-        lines.append("阻断问题：" + "；".join(str(item) for item in violations[:6]))
-    if isinstance(warnings, list) and warnings:
-        lines.append("需要补强：" + "；".join(str(item) for item in warnings[:6]))
-    allowed_tools = recipe_skeleton.get("allowed_tools")
-    if isinstance(allowed_tools, list) and allowed_tools:
-        lines.append(
-            "只能调用这些工具："
-            + "、".join(
-                str(item) for item in allowed_tools[:30] if str(item or "").strip()
-            )
-        )
-    return "\n".join(lines)

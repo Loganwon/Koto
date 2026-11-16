@@ -5,15 +5,18 @@ import json
 import time
 import os
 import re
+import threading
 
 from app.core.llm.chat_generation_policy import (
     first_token_timeout_seconds,
     select_regular_model,
-    should_try_local_chat_fast_path,
 )
 from web.sse.sanitizer import safe_sse as _safe_sse
 from ..error_messages import format_chat_error
 from ._provider_helpers import _convert_history_to_messages, _stream_from_provider
+
+
+_READONLY_TIMEOUT_CAPACITY = threading.BoundedSemaphore(4)
 
 
 def handle_regular(
@@ -32,32 +35,20 @@ def handle_regular(
     locked_model,
     use_instruction,
     history,
-    context_info,
     _interrupt_manager,
     _rag_context_block,
-    SmartDispatcher,
-    _LMRv2,
 ):
     from app.core.llm.provider_compat import types
-    from web.chat_runtime_services import get_utils
     from web.memory_runtime import _start_memory_extraction, get_memory_manager
+    from web.runtime_context import service_registry
     from web.utils.threading_utils import stream_with_keepalive
 
-    Utils = get_utils()
-    try:
-        from web.context_analyzer import ContextAnalyzer
-    except Exception:
-        class ContextAnalyzer:
-            @staticmethod
-            def filter_history(_query, history):
-                return history
-
+    Utils = service_registry.utils
     def interrupted():
         return _interrupt_manager.is_interrupted(session_name)
 
     model_id = select_regular_model(task_type, MODEL_MAP)
     full_history = history
-    _local_chat_override = (context_info or {}).get("local_chat_override", False)
     _memory_manager = get_memory_manager()
 
     try:
@@ -117,113 +108,20 @@ def handle_regular(
                 yield t
             yield _safe_sse({'type': 'progress', 'message': '💬 Koto 正在思考...', 'detail': '请稍候'})
 
-            from app.core.routing import LocalModelRouter
-
-            _simple_local_query = False
-            if locked_model != "local" and not _local_chat_override:
-                _simple_local_query = LocalModelRouter.is_simple_query(
-                    user_input, task_type, history
-                )
-            if should_try_local_chat_fast_path(
-                task_type=task_type,
-                locked_model=locked_model,
-                local_chat_override=_local_chat_override,
-                simple_query=_simple_local_query,
-            ):
-                local_stream = LocalModelRouter.generate_stream(
-                    user_input,
-                    history=history,
-                    system_instruction=use_instruction,
-                )
-                if local_stream is not None:
-                    _app_logger.debug(
-                        f"[CHAT] ⚡ 使用本地模型快速响应: {LocalModelRouter._response_model}"
-                    )
-                    t = yield_thinking(
-                        f"检测到简单查询, 切换到本地模型 {LocalModelRouter._response_model} 快速响应",
-                        "model",
-                        "local",
-                    )
-                    if t:
-                        yield t
-                    yield _safe_sse({'type': 'classification', 'task_type': task_type, 'task_display': '💬 对话', 'model': f'🏠 {LocalModelRouter._response_model} (本地)', 'message': f'🎯 任务分类: 💬 对话 (方法: 🏠 {LocalModelRouter._response_model} 本地快速通道)'})
-                    local_full_text = ""
-                    local_ok = False
-                    try:
-                        for chunk in local_stream:
-                            local_full_text += chunk
-                            yield _safe_sse({'type': 'token', 'content': chunk})
-                        local_ok = bool(local_full_text.strip())
-                    except Exception as local_err:
-                        _app_logger.debug(f"[CHAT] 本地模型生成失败: {local_err}")
-
-                    if local_ok:
-                        session_manager.append_and_save(
-                            f"{session_name}.json",
-                            user_input,
-                            local_full_text,
-                            task=task_type,
-                            model_name=f"ollama/{LocalModelRouter._response_model}",
-                        )
-                        _reflect_types_local = {
-                            "CHAT",
-                            "RESEARCH",
-                            "CODER",
-                            "FILE_GEN",
-                            "AGENT",
-                        }
-                        if task_type in _reflect_types_local:
-                            _start_memory_extraction(
-                                user_input,
-                                local_full_text,
-                                history,
-                                task_type=task_type,
-                                session_name=session_name,
-                            )
-                        total_time = time.time() - start_time
-                        _app_logger.debug(
-                            f"[CHAT] ⚡ 本地模型响应完成 ({total_time:.2f}s)"
-                        )
-                        yield _safe_sse({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})
-                        return
-                    else:
-                        _app_logger.debug(f"[CHAT] 本地模型输出为空, 降级到云模型")
-                        t = yield_thinking(
-                            f"本地模型输出为空, 降级到云端模型 {model_id}",
-                            "model",
-                            "hybrid",
-                        )
-                        if t:
-                            yield t
-                        yield _safe_sse({'type': 'progress', 'message': '☁️ 切换到云端模型...', 'detail': model_id})
         elif task_type == "RESEARCH":
             yield _safe_sse({'type': 'progress', 'message': '🔬 正在进行深度分析...', 'detail': f'使用 {model_id}'})
         else:
             yield _safe_sse({'type': 'progress', 'message': '💭 Koto 正在思考...', 'detail': '请稍候'})
 
-        _task_skill = (context_info or {}).get("skill_prompt")
-        if _task_skill:
-            use_instruction += f"\n\n[响应要求] {_task_skill}"
-
-        if context_info and context_info.get("is_continuation"):
-            history_for_model = history
+        history_for_model = list(history or [])[-20:]
+        if len(history_for_model) != len(history):
             t = yield_thinking(
-                f"检测到上下文延续, 保留全部 {len(history)} 轮对话历史",
+                f"裁剪对话历史: {len(history)} 轮 → {len(history_for_model)} 轮",
                 "context",
                 "hybrid",
             )
             if t:
                 yield t
-        else:
-            history_for_model = ContextAnalyzer.filter_history(user_input, history)
-            if len(history_for_model) != len(history):
-                t = yield_thinking(
-                    f"过滤对话历史: {len(history)} 轮 → {len(history_for_model)} 轮相关记录",
-                    "context",
-                    "hybrid",
-                )
-                if t:
-                    yield t
 
         formatted_history = []
         for turn in history_for_model:
@@ -241,23 +139,6 @@ def handle_regular(
         if t:
             yield t
 
-        import concurrent.futures as _cf
-
-        _plan_future = None
-        try:
-            from app.core.routing import LocalModelRouter as _LMR_plan
-
-            if _LMR_plan.is_ollama_available() and _LMR_plan._initialized:
-                _plan_exec = _cf.ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="koto_plan"
-                )
-                _plan_future = _plan_exec.submit(
-                    _LMR_plan.generate_plan, user_input, task_type
-                )
-                _plan_exec.shutdown(wait=False)
-        except Exception:
-            _plan_future = None
-
         effective_input = user_input
         if _rag_context_block:
             _rag_augmented_input = (
@@ -270,10 +151,10 @@ def handle_regular(
             _rag_augmented_input = effective_input
 
         if locked_model == "local":
-            from app.core.routing import LocalModelRouter as _LMR_all
-            _lmr_name = _LMR_all._response_model or "本地模型"
+            from app.core.llm.local_model_runtime import OllamaRuntime
+            _lmr_name = OllamaRuntime._response_model or "本地模型"
             yield _safe_sse({'type': 'classification', 'task_type': task_type, 'task_display': task_type, 'model': f'🏠 {_lmr_name} (本地)', 'message': f'🏠 本地模型处理 {task_type} 任务'})
-            _local_all_stream = _LMR_all.generate_stream(
+            _local_all_stream = OllamaRuntime.generate_stream(
                 _rag_augmented_input,
                 history=history,
                 system_instruction=use_instruction,
@@ -299,7 +180,7 @@ def handle_regular(
                     user_input,
                     _local_all_text,
                     task=task_type,
-                    model_name=f"ollama/{_LMR_all._response_model}",
+                    model_name=f"ollama/{OllamaRuntime._response_model}",
                 )
                 _start_memory_extraction(
                     user_input,
@@ -364,7 +245,6 @@ def handle_regular(
         chunk_count = 0
         heartbeat_interval = 5
         first_chunk_received = False
-        _plan_flushed = False
 
         try:
             max_wait = first_token_timeout_seconds(task_type)
@@ -381,24 +261,6 @@ def handle_regular(
                     interrupt_msg = "\n\n⏸️ 用户已中断"
                     yield _safe_sse({'type': 'token', 'content': interrupt_msg})
                     break
-
-                if not _plan_flushed and _plan_future is not None:
-                    try:
-                        _steps = _plan_future.result(timeout=0.05)
-                        if _steps:
-                            for _s in _steps:
-                                _pt = yield_thinking(
-                                    f"📋 {_s}", "planning", "local"
-                                )
-                                if _pt:
-                                    yield _pt
-                        _plan_flushed = True
-                        _plan_future = None
-                    except _cf.TimeoutError:
-                        pass
-                    except Exception:
-                        _plan_flushed = True
-                        _plan_future = None
 
                 if item_type == "heartbeat":
                     elapsed = item_data
@@ -424,7 +286,7 @@ def handle_regular(
                     if task_type == "CODER" and not full_text:
                         yield _safe_sse({'type': 'progress', 'message': '⚠️ 首包超时, 切换到快速模型...', 'detail': ''})
                         try:
-                            fallback_resp = client.models.generate_content(
+                            fallback_resp = client.generate_content(
                                 model="deepseek-chat",
                                 contents=formatted_history
                                 + [
@@ -461,21 +323,6 @@ def handle_regular(
                             _app_logger.debug(
                                 f"[CHAT] 收到第一个响应, 耗时 {time.time() - start_time:.1f}s"
                             )
-                            if not _plan_flushed and _plan_future is not None:
-                                try:
-                                    _steps = _plan_future.result(timeout=0.5)
-                                    if _steps:
-                                        for _s in _steps:
-                                            _pt = yield_thinking(
-                                                f"📋 {_s}", "planning", "local"
-                                            )
-                                            if _pt:
-                                                yield _pt
-                                except Exception:
-                                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-                                _plan_flushed = True
-                                _plan_future = None
-
                         full_text += chunk.text
                         chunk_count += 1
                         yield _safe_sse({'type': 'token', 'content': chunk.text})
@@ -485,14 +332,14 @@ def handle_regular(
             _app_logger.debug(f"[CHAT] Stream error: {error_str}")
 
             from app.core.shared.llm_helpers import is_online_failure as _iof, is_ollama_alive as _ioav
-            from app.core.routing import LocalModelRouter as _LMR_fb
+            from app.core.llm.local_model_runtime import OllamaRuntime
             _OLLAMA_TEXT_TASKS = {"CHAT", "CODER", "RESEARCH", "FILE_GEN", "MULTI_STEP", "AGENT"}
 
             if _iof(stream_error) and not full_text and task_type in _OLLAMA_TEXT_TASKS and _ioav():
                 _app_logger.warning(f"[CHAT] cloud unavailable ({error_str[:60]}), falling back to Ollama")
                 yield _safe_sse({'type': 'progress', 'message': '⚠️ 云端 AI 不可用, 已切换到本地模型 (Ollama)...', 'detail': ''})
                 try:
-                    _fb_stream = _LMR_fb.generate_stream(
+                    _fb_stream = OllamaRuntime.generate_stream(
                         user_input, history=history,
                         system_instruction=use_instruction,
                     )
@@ -516,7 +363,7 @@ def handle_regular(
         if Utils.is_failure_output(full_text):
             yield _safe_sse({'type': 'progress', 'message': '⚠️ 初次生成失败, 正在修正...', 'detail': ''})
             fix_prompt = Utils.build_fix_prompt(task_type, user_input, full_text)
-            fix_resp = client.models.generate_content(
+            fix_resp = client.generate_content(
                 model=model_id,
                 contents=fix_prompt,
                 config=types.GenerateContentConfig(
@@ -533,7 +380,6 @@ def handle_regular(
         else:
             is_complex_task = (
                 task_type in ["RESEARCH", "FILE_GEN", "CODER"]
-                or (context_info and context_info.get("complexity") == "complex")
                 or len(user_input) > 200
             )
             if is_complex_task:
@@ -541,7 +387,7 @@ def handle_regular(
                 if not check.get("pass") and check.get("fix_prompt"):
                     status_msg = "🩺 自检未通过, 正在修正..."
                     yield _safe_sse({'type': 'progress', 'message': status_msg, 'detail': '快速模型自检'})
-                    fix_resp = client.models.generate_content(
+                    fix_resp = client.generate_content(
                         model=model_id,
                         contents=check["fix_prompt"],
                         config=types.GenerateContentConfig(
@@ -620,7 +466,7 @@ def handle_regular(
         _app_logger.debug(f"[CHAT] Exception: {error_str}")
 
         from app.core.shared.llm_helpers import is_online_failure as _iof2, is_ollama_alive as _ioav2
-        from app.core.routing import LocalModelRouter as _LMR_fb2
+        from app.core.llm.local_model_runtime import OllamaRuntime
         _OLLAMA_TEXT_TASKS2 = {"CHAT", "CODER", "RESEARCH", "FILE_GEN", "MULTI_STEP", "AGENT"}
 
         if _iof2(e) and task_type in _OLLAMA_TEXT_TASKS2 and _ioav2():
@@ -628,7 +474,7 @@ def handle_regular(
             yield _safe_sse({'type': 'progress', 'message': '⚠️ 云端 AI 不可用, 已切换到本地模型 (Ollama)...', 'detail': ''})
             _ollama_ok = False
             try:
-                _fb2_stream = _LMR_fb2.generate_stream(
+                _fb2_stream = OllamaRuntime.generate_stream(
                     user_input, history=history,
                     system_instruction=use_instruction,
                 )
@@ -678,12 +524,40 @@ def handle_regular(
 
 def run_with_timeout(func, timeout):
     import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(func)
+
+    # A ThreadPoolExecutor context manager calls shutdown(wait=True).  That
+    # made the old timeout branch wait for the late result before returning.
+    # This helper is used for read-only context generation, so a late result
+    # can be abandoned safely while the request observes its real deadline.
+    if not _READONLY_TIMEOUT_CAPACITY.acquire(timeout=max(0.001, float(timeout))):
+        return None, None, True
+
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="koto-chat-readonly",
+    )
+    def _bounded_call():
         try:
-            result = future.result(timeout=timeout)
-            return result, None, False
-        except concurrent.futures.TimeoutError:
-            return None, None, True
-        except Exception as e:
-            return None, str(e), False
+            return func()
+        finally:
+            _READONLY_TIMEOUT_CAPACITY.release()
+
+    try:
+        future = executor.submit(_bounded_call)
+    except BaseException:
+        _READONLY_TIMEOUT_CAPACITY.release()
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    timed_out = False
+    try:
+        result = future.result(timeout=timeout)
+        return result, None, False
+    except concurrent.futures.TimeoutError:
+        timed_out = True
+        if future.cancel():
+            _READONLY_TIMEOUT_CAPACITY.release()
+        return None, None, True
+    except Exception as e:
+        return None, str(e), False
+    finally:
+        executor.shutdown(wait=not timed_out, cancel_futures=timed_out)

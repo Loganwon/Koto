@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
@@ -191,25 +191,13 @@ def _koto_mcp_status(**_: Any) -> Dict[str, Any]:
     return data
 
 
-def _koto_skill_inventory(limit: int = 50, **_: Any) -> Dict[str, Any]:
-    from app.core.skills.skill_manager import SkillManager
+def _koto_addon_inventory(limit: int = 50, **_: Any) -> Dict[str, Any]:
+    from app.core.agent.addons import addon_system_snapshot
 
-    skills = SkillManager.list_skills()
-    visible = skills[: max(1, min(int(limit or 50), 200))]
-    return {
-        "count": len(skills),
-        "returned": len(visible),
-        "skills": [
-            {
-                "id": item.get("id"),
-                "name": item.get("name"),
-                "category": item.get("category"),
-                "enabled": item.get("enabled"),
-                "description": item.get("description", ""),
-            }
-            for item in visible
-        ],
-    }
+    snapshot = addon_system_snapshot()
+    addons = snapshot["addons"]
+    visible = addons[: max(1, min(int(limit or 50), 200))]
+    return {"count": len(addons), "returned": len(visible), "addons": visible}
 
 
 def _koto_project_overview(**_: Any) -> Dict[str, Any]:
@@ -483,6 +471,19 @@ def _koto_task_logs(tail: int = 20, **_: Any) -> Dict[str, Any]:
     return {"success": True, "log_dir": str(log_dir), "entries": entries}
 
 
+def _queue_supervision_frontend_action(**arguments):
+    if "trusted_scope" in arguments or str(arguments.get("action") or "").lower() in {
+        "ui_read_context",
+        "ui_apply_edit",
+        "ui_save",
+    }:
+        return {
+            "success": False,
+            "error": "Semantic document actions require the host-bound DocumentUI tool context; model arguments cannot grant a document scope",
+        }
+    return enqueue_frontend_action(**arguments)
+
+
 _MCP_TOOLS: Dict[str, tuple[Dict[str, Any], Callable[..., Any]]] = {
     "koto_health": (
         _tool_schema("koto_health", "Return Koto version, workspace, and MCP health."),
@@ -492,20 +493,20 @@ _MCP_TOOLS: Dict[str, tuple[Dict[str, Any], Callable[..., Any]]] = {
         _tool_schema("koto_mcp_status", "Return configured MCP server status."),
         _koto_mcp_status,
     ),
-    "koto_skill_inventory": (
+    "koto_addon_inventory": (
         _tool_schema(
-            "koto_skill_inventory",
-            "List Koto skills for supervision and routing diagnostics.",
+            "koto_addon_inventory",
+            "List admitted Koto Addons for supervision and routing diagnostics.",
             {
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 200,
-                    "description": "Maximum number of skills to return.",
+                    "description": "Maximum number of Addons to return.",
                 }
             },
         ),
-        _koto_skill_inventory,
+        _koto_addon_inventory,
     ),
     "koto_project_overview": (
         _tool_schema(
@@ -611,12 +612,8 @@ _MCP_TOOLS: Dict[str, tuple[Dict[str, Any], Callable[..., Any]]] = {
     "koto_agent_tool_inventory": (
         _tool_schema(
             "koto_agent_tool_inventory",
-            "Build a Koto agent tool registry and return available tools.",
+            "Return the fixed production Koto agent tool inventory.",
             {
-                "full": {
-                    "type": "boolean",
-                    "description": "Whether to include the full UnifiedAgent tool set.",
-                },
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
@@ -740,7 +737,7 @@ _MCP_TOOLS: Dict[str, tuple[Dict[str, Any], Callable[..., Any]]] = {
             required=["action"],
             read_only=False,
         ),
-        enqueue_frontend_action,
+        _queue_supervision_frontend_action,
     ),
     "koto_frontend_action_status": (
         _tool_schema(
@@ -760,8 +757,12 @@ _MCP_TOOLS: Dict[str, tuple[Dict[str, Any], Callable[..., Any]]] = {
                 "ok": {"type": "boolean"},
                 "result": {"type": "object"},
                 "error": {"type": "string"},
+                "browser_id": {"type": "string"},
+                "delivery_token": {"type": "string"},
+                "request_id": {"type": "string"},
+                "session_id": {"type": "string"},
             },
-            required=["action_id"],
+            required=["action_id", "browser_id", "delivery_token"],
             read_only=False,
         ),
         complete_frontend_action,
@@ -981,14 +982,21 @@ def mcp_frontend_action_next():
         session_id=request.args.get("session_id", ""),
         timeout_ms=request.args.get("timeout_ms", 0),
     )
-    return jsonify(data)
+    response = jsonify(data)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @mcp_bp.route("/frontend-action-result", methods=["POST"])
 def mcp_frontend_action_result():
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return (
+            jsonify({"success": False, "error": "A browser receipt must be an object"}),
+            400,
+        )
     data = complete_frontend_action(**payload)
-    status = 200 if data.get("success") else 404
+    status = 200 if data.get("success") else int(data.get("http_status") or 409)
     return jsonify(data), status
 
 
@@ -1094,6 +1102,160 @@ def mcp_json_rpc():
         resp = _rpc_error(req_id, -32603, str(exc))
         resp.status_code = 500
         for k, v in _cors_headers(origin).items():
+            resp.headers[k] = v
+        return resp
+
+
+# ── MCP Server Management (outbound) ───────────────────────────────────
+
+
+@mcp_bp.route("/servers", methods=["GET"])
+def mcp_servers_list():
+    """List connected outbound MCP servers and their tools."""
+    origin = request.headers.get("Origin", "")
+    headers = _cors_headers(origin)
+    try:
+        from app.core.agent.mcp_manager import get_mcp_status
+
+        status = get_mcp_status()
+        resp = jsonify({"success": True, **status})
+        for k, v in headers.items():
+            resp.headers[k] = v
+        return resp
+    except Exception as exc:
+        resp = jsonify({"success": False, "error": str(exc)})
+        resp.status_code = 500
+        for k, v in headers.items():
+            resp.headers[k] = v
+        return resp
+
+
+@mcp_bp.route("/servers/connect", methods=["POST"])
+def mcp_servers_connect():
+    """Connect to a new MCP server.
+
+    Body: {
+        "name": "my-server",
+        "type": "stdio",
+        "command": ["npx", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    }
+    or:
+    {
+        "name": "my-server",
+        "type": "http",
+        "url": "http://localhost:8080"
+    }
+    """
+    origin = request.headers.get("Origin", "")
+    headers = _cors_headers(origin)
+    try:
+        data = request.get_json(silent=True) or {}
+        name = data.get("name", "").strip()
+        server_type = data.get("type", "").strip()
+
+        if not name:
+            resp = jsonify({"success": False, "error": "name is required"})
+            resp.status_code = 400
+            for k, v in headers.items():
+                resp.headers[k] = v
+            return resp
+
+        from app.core.agent.mcp_adapter import MCPRegistry
+
+        registry = MCPRegistry()
+
+        if server_type == "stdio":
+            command = data.get("command", [])
+            if not command:
+                resp = jsonify(
+                    {"success": False, "error": "command is required for stdio servers"}
+                )
+                resp.status_code = 400
+                for k, v in headers.items():
+                    resp.headers[k] = v
+                return resp
+            registry.add_stdio_server(
+                name=name,
+                command=command,
+                env=data.get("env"),
+                cwd=data.get("cwd"),
+            )
+        elif server_type in ("http", "sse"):
+            url = data.get("url", "").strip()
+            if not url:
+                resp = jsonify(
+                    {"success": False, "error": "url is required for http/sse servers"}
+                )
+                resp.status_code = 400
+                for k, v in headers.items():
+                    resp.headers[k] = v
+                return resp
+            registry.add_http_server(name=name, url=url, headers=data.get("headers"))
+        else:
+            resp = jsonify(
+                {
+                    "success": False,
+                    "error": f"Unknown server type: {server_type!r}. Supported: stdio, http",
+                }
+            )
+            resp.status_code = 400
+            for k, v in headers.items():
+                resp.headers[k] = v
+            return resp
+
+        results = registry.connect_all()
+        status = registry.status()
+
+        resp = jsonify(
+            {
+                "success": results.get(name, False),
+                "server": status["servers"].get(name, {}),
+            }
+        )
+        for k, v in headers.items():
+            resp.headers[k] = v
+        return resp
+    except Exception as exc:
+        logger.warning("[MCPRoutes] connect server failed: %s", exc, exc_info=True)
+        resp = jsonify({"success": False, "error": str(exc)})
+        resp.status_code = 500
+        for k, v in headers.items():
+            resp.headers[k] = v
+        return resp
+
+
+@mcp_bp.route("/servers/<server_name>", methods=["DELETE"])
+def mcp_servers_disconnect(server_name: str):
+    """Disconnect from an MCP server."""
+    origin = request.headers.get("Origin", "")
+    headers = _cors_headers(origin)
+    try:
+        from app.core.agent.mcp_manager import get_mcp_runtime
+
+        runtime = get_mcp_runtime()
+        servers = runtime.registry._servers
+        entry = servers.get(server_name)
+        if entry is None:
+            resp = jsonify(
+                {"success": False, "error": f"Server {server_name!r} not found"}
+            )
+            resp.status_code = 404
+            for k, v in headers.items():
+                resp.headers[k] = v
+            return resp
+
+        # Disconnect the individual entry
+        entry.disconnect()
+        del servers[server_name]
+
+        resp = jsonify({"success": True, "message": f"Disconnected from {server_name}"})
+        for k, v in headers.items():
+            resp.headers[k] = v
+        return resp
+    except Exception as exc:
+        resp = jsonify({"success": False, "error": str(exc)})
+        resp.status_code = 500
+        for k, v in headers.items():
             resp.headers[k] = v
         return resp
 

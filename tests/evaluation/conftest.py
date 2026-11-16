@@ -1,8 +1,9 @@
 """Fixtures for Koto evaluation tests.
 
-By default these tests run in deterministic offline mode so the evaluation
-lane is usable as a daily regression gate. Set KOTO_LIVE_EVALUATION=1 to use
-real Gemini calls for both the agent under test and AI-as-Judge.
+By default these tests run in deterministic offline mode to check the
+execution and judging contracts. Fixed responses do not measure live model
+quality. Set KOTO_LIVE_EVALUATION=1 to use the application's configured runtime
+provider for both execution and judging.
 """
 
 import json
@@ -15,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.core.llm.gemini import GeminiProvider
+from app.core.llm.runtime_gateway import create_runtime_llm_gateway
 from tests.evaluation.judge import JudgeVerdict, LLMJudge
 
 
@@ -26,17 +27,6 @@ def _live_evaluation_enabled() -> bool:
         "yes",
         "on",
     }
-
-
-def _require_api_key():
-    if not _live_evaluation_enabled():
-        return ""
-    key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    if not key:
-        pytest.skip(
-            "Requires GOOGLE_API_KEY or GEMINI_API_KEY when KOTO_LIVE_EVALUATION=1"
-        )
-    return key
 
 
 class OfflineEvalProvider:
@@ -56,6 +46,29 @@ class OfflineEvalProvider:
             ),
             "model": model,
         }
+
+
+class RuntimeGatewayEvalProvider:
+    """Adapt the canonical runtime gateway to the evaluator provider protocol."""
+
+    def __init__(self):
+        try:
+            self._gateway = create_runtime_llm_gateway()
+        except Exception as exc:
+            pytest.fail(
+                "KOTO_LIVE_EVALUATION=1 requires a configured Koto runtime "
+                f"provider: {exc}",
+                pytrace=False,
+            )
+        self.model_id = self._gateway.model_id
+
+    def generate_content(self, prompt, model=None, **kwargs):
+        response = self._gateway.generate_content(
+            model=model or self.model_id,
+            contents=prompt,
+            config=kwargs,
+        )
+        return {"content": response.text, "usage": response.usage_metadata}
 
 
 class OfflineEvaluator:
@@ -173,103 +186,74 @@ def _offline_model_response(request) -> dict[str, Any]:
     }
 
 
-def _offline_summary_for_task(task: str) -> str:
-    if "翻译" in task:
-        return "Artificial intelligence is changing our lifestyle and work patterns."
-    if "销售" in task or "表格" in task:
-        return (
-            "销售分析：深圳鹏程电子有限公司贡献金额最高，MODULE-X3 产品销售金额最高。"
-        )
-    if "为什么" in task or "打不开" in task or "损坏" in task:
-        return "可能原因包括文件格式不匹配、文件损坏、权限不足或软件版本不兼容。建议先备份文件，再尝试修复或重新导出。"
-    if "建议" in task or "改进" in task:
-        return "改进建议：补充关键指标说明，压缩重复表述，明确下一阶段风险和行动项；当前不修改文件。"
-    if "润色" in task:
-        return "已润色报告：表达更流畅专业，并保留原有项目进展和营收信息。"
-    return "总结：报告展示了项目进展、营收增长和后续优化计划，核心信息包括模块完成、测试反馈良好以及技术债治理。"
-
-
 @pytest.fixture(autouse=True)
 def _offline_model_client(monkeypatch):
     if _live_evaluation_enabled():
         return
-    from app.core.agent.file_task_contract import FileTaskLedger
     from app.core.agent.file_task_model import FileTaskModelClient
-    from app.core.agent.file_task_runtime import FileTaskRuntime
 
     def fake_call(self, *, request, messages, system, tools):
-        del self, messages, system, tools
+        del self, system, tools
+        if any(message.get("role") == "tool" for message in messages):
+            return {
+                "content": "已根据实际工具结果完成报告修改，保留原始内容和数据。",
+                "tool_calls": [],
+            }
         return _offline_model_response(request)
 
-    def fake_run(self, request):
-        del self
-        ledger = FileTaskLedger(getattr(request, "run_id", "") or "offline_eval")
-        task = str(getattr(request, "task", "") or "")
-        summary = _offline_summary_for_task(task)
-        yield ledger.event(
-            "run.started",
-            {
-                "task": task,
-                "mode": "offline_evaluation",
-                "file_count": len(getattr(request, "files", []) or []),
-            },
+    def fake_stream_call(self, *, request, messages, system, tools, cancel_check=None):
+        response = fake_call(
+            self, request=request, messages=messages, system=system, tools=tools
         )
-        if str(getattr(request, "target_path", "") or "").strip() and "润色" in task:
-            yield ledger.event(
-                "file.changed",
-                {
-                    "path": str(getattr(request, "target_path", "") or ""),
-                    "file_type": "docx",
-                    "operation": "write_docx_content",
-                    "summary": "已写入离线评测润色结果",
-                    "paragraphs_written": 3,
-                },
-            )
-        yield ledger.event(
-            "run.finished",
-            {
-                "summary": summary,
-                "completed_task": True,
-                "runtime": {
-                    "execution_path": "offline_evaluation",
-                    "terminal_status": "completed",
-                },
-            },
-        )
+        text = str(response.get("content") or "")
+        accumulated = ""
+        for start in range(0, len(text), 8):
+            if cancel_check is not None and cancel_check():
+                return
+            piece = text[start : start + 8]
+            accumulated += piece
+            yield {"delta": piece, "content": accumulated, "tool_calls": []}
+        yield {
+            "delta": "",
+            "content": accumulated,
+            "tool_calls": response.get("tool_calls", []),
+            "stream_final": True,
+        }
 
     monkeypatch.setattr(FileTaskModelClient, "call", fake_call)
-    monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
+    monkeypatch.setattr(FileTaskModelClient, "stream_call", fake_stream_call)
+
+    def reject_native_generation(*_args, **_kwargs):
+        raise AssertionError(
+            "Offline evaluation must use its fixture, not a native model endpoint"
+        )
+
+    monkeypatch.setattr(FileTaskModelClient, "_call_cloud", reject_native_generation)
+    monkeypatch.setattr(FileTaskModelClient, "_call_local", reject_native_generation)
 
 
 @pytest.fixture(scope="session")
-def api_key():
-    return _require_api_key()
-
-
-@pytest.fixture(scope="session")
-def eval_provider(api_key):
-    """Real Gemini LLM provider used for the agent under test."""
+def eval_provider():
+    """Provider fixture aligned with the application's current runtime gateway."""
     if not _live_evaluation_enabled():
         return OfflineEvalProvider()
-    return GeminiProvider(api_key=api_key)
+    return RuntimeGatewayEvalProvider()
 
 
 @pytest.fixture(scope="session")
-def judge_provider(api_key):
-    """Separate Gemini LLM provider for AI-as-Judge evaluation.
-
-    Uses a different model from the agent to reduce self-evaluation bias.
-    """
+def judge_provider():
+    """Judge through the same provider boundary as the product runtime."""
     if not _live_evaluation_enabled():
         return OfflineEvalProvider()
-    return GeminiProvider(api_key=api_key)
+    return RuntimeGatewayEvalProvider()
 
 
 @pytest.fixture(scope="session")
 def evaluator(judge_provider):
     if not _live_evaluation_enabled():
         return OfflineEvaluator()
-    return LLMJudge(judge_provider, model_id="gemini-3-flash-preview")
+    model_id = os.getenv("KOTO_EVAL_JUDGE_MODEL", "").strip()
+    return LLMJudge(judge_provider, model_id=model_id)
 
 
 @pytest.fixture(scope="function")

@@ -5,9 +5,10 @@
 
 import { _escHtml, showToast, _FOLDER_SVG, _DEFAULT_FILE_SVG } from './infrastructure';
 import { state } from './state';
-import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import { getFeatureRegistry, registerFeatures } from '../shared/feature-registry';
+import { getVisualViewportBounds, placeFixedInViewport } from '../shared/ui-scale';
 
-const workspaceApi = getWorkspaceApi();
+const workspaceApi = getFeatureRegistry();
 
 // ── Interfaces ──
 
@@ -35,7 +36,6 @@ export interface BrowserEntry {
 // ── Context Menu State ──
 
 let _fsBrowserCtxTarget: ContextMenuConfig = { path: '', name: '', isFolder: false, supported: true };
-let _ctxTarget: { path: string | null; name: string | null } = { path: null, name: null };
 
 // ── Clone Serializable ──
 
@@ -56,59 +56,25 @@ function _csrfFetch(url: string, options: any = {}): Promise<Response> {
   return fetch(url, options);
 }
 
-// ── Context Menu Zoom & Position ──
-
-function _ctxMenuZoom(): number {
-  const inlineZoom = parseFloat(((document.documentElement as any)?.style?.zoom as string) || '');
-  if (Number.isFinite(inlineZoom) && inlineZoom > 0) return inlineZoom;
-  const computedZoom = parseFloat(window.getComputedStyle(document.documentElement).zoom || '');
-  return Number.isFinite(computedZoom) && computedZoom > 0 ? computedZoom : 1;
-}
-
-function _logicalCtxValue(value: number, zoom: number): number {
-  const number = Number(value);
-  return Number.isFinite(number) ? number / zoom : 0;
-}
-
-function _logicalCtxRect(rect: DOMRect | null | undefined, zoom: number): { left: number; top: number; right: number; bottom: number; width: number; height: number } {
-  return {
-    left: _logicalCtxValue(rect?.left ?? 0, zoom),
-    top: _logicalCtxValue(rect?.top ?? 0, zoom),
-    right: _logicalCtxValue(rect?.right ?? 0, zoom),
-    bottom: _logicalCtxValue(rect?.bottom ?? 0, zoom),
-    width: _logicalCtxValue(rect?.width ?? 0, zoom),
-    height: _logicalCtxValue(rect?.height ?? 0, zoom),
-  };
-}
+// ── Context Menu Position ──
 
 function _measureCtxMenu(menu: HTMLElement): {
-  zoom: number;
   viewportWidth: number;
   viewportHeight: number;
   width: number;
   height: number;
 } {
-  const zoom = _ctxMenuZoom();
-  const rect = _logicalCtxRect(menu.getBoundingClientRect(), zoom);
+  const viewport = getVisualViewportBounds();
+  const rect = menu.getBoundingClientRect();
   const itemCount = menu.querySelectorAll('.wa-ctx-item').length;
   const separatorCount = menu.querySelectorAll('.wa-ctx-separator').length;
   return {
-    zoom,
-    viewportWidth: window.innerWidth / zoom,
-    viewportHeight: window.innerHeight / zoom,
-    width: rect.width || menu.offsetWidth || 180,
+    viewportWidth: viewport.width,
+    viewportHeight: viewport.height,
+    width: rect.width || 180,
     height:
       rect.height ||
-      menu.scrollHeight ||
-      menu.offsetHeight ||
       itemCount * 28 + separatorCount * 7 + 8,
-  };
-}
-
-function _logicalCtxPoint(event: MouseEvent, zoom: number): { x: number; y: number } {
-  return {
-    x: _logicalCtxValue(event?.clientX ?? 0, zoom),
-    y: _logicalCtxValue(event?.clientY ?? 0, zoom),
   };
 }
 
@@ -117,39 +83,22 @@ function _clampCtxMenuPosition(
   y: number,
   menuW: number,
   menuH: number,
-  zoom: number,
   { clampToLeftPanel = false } = {}
 ): { x: number; y: number } {
-  const viewportWidth = window.innerWidth / zoom;
-  const viewportHeight = window.innerHeight / zoom;
+  const viewport = getVisualViewportBounds();
   if (clampToLeftPanel) {
     const leftPanel = document.getElementById('wa-left');
     if (leftPanel) {
-      const panelRect = _logicalCtxRect(leftPanel.getBoundingClientRect(), zoom);
+      const panelRect = leftPanel.getBoundingClientRect();
       if (x + menuW > panelRect.right) x = panelRect.right - menuW - 4;
       if (x < panelRect.left) x = panelRect.left + 4;
     }
   }
-  if (x + menuW > viewportWidth) x = viewportWidth - menuW - 4;
-  if (x < 4) x = 4;
-  if (y + menuH > viewportHeight - 2) y = Math.max(4, viewportHeight - menuH - 4);
-  if (y < 4) y = 4;
+  if (x + menuW > viewport.right) x = viewport.right - menuW - 4;
+  if (x < viewport.left + 4) x = viewport.left + 4;
+  if (y + menuH > viewport.bottom - 2) y = Math.max(viewport.top + 4, viewport.bottom - menuH - 4);
+  if (y < viewport.top + 4) y = viewport.top + 4;
   return { x, y };
-}
-
-function _clampMenuPos(menu: HTMLElement): void {
-  const zoom = _ctxMenuZoom();
-  const r = _logicalCtxRect(menu.getBoundingClientRect(), zoom);
-  const vw2 = window.innerWidth / zoom;
-  const vh2 = window.innerHeight / zoom;
-  let t = parseFloat(menu.style.top),
-    l = parseFloat(menu.style.left);
-  if (r.bottom > vh2 - 2) t = Math.max(4, t - (r.bottom - vh2 + 4));
-  if (r.right > vw2 - 2) l = Math.max(4, vw2 - r.width - 4);
-  if (t < 4) t = 4;
-  if (l < 4) l = 4;
-  menu.style.top = t + 'px';
-  menu.style.left = l + 'px';
 }
 
 function _positionCtxMenu(
@@ -165,12 +114,13 @@ function _positionCtxMenu(
   const metrics = _measureCtxMenu(menu);
   menu.style.visibility = '';
 
-  let { x, y } = _logicalCtxPoint(event, metrics.zoom);
+  let x = event.clientX;
+  let y = event.clientY;
   const btn = alignToButton
     ? ((event.currentTarget as HTMLElement)?.closest?.('button') || (event.target as HTMLElement)?.closest?.('button'))
     : null;
   if (btn) {
-    const btnRect = _logicalCtxRect(btn.getBoundingClientRect(), metrics.zoom);
+    const btnRect = btn.getBoundingClientRect();
     x = btnRect.right - metrics.width;
     y =
       btnRect.bottom + metrics.height + 4 <= metrics.viewportHeight
@@ -183,10 +133,8 @@ function _positionCtxMenu(
         : Math.max(4, y - metrics.height);
   }
 
-  ({ x, y } = _clampCtxMenuPosition(x, y, metrics.width, metrics.height, metrics.zoom, { clampToLeftPanel }));
-  menu.style.left = x + 'px';
-  menu.style.top = y + 'px';
-  _clampMenuPos(menu);
+  ({ x, y } = _clampCtxMenuPosition(x, y, metrics.width, metrics.height, { clampToLeftPanel }));
+  placeFixedInViewport(menu, x, y, 4);
 }
 
 // ── Close Context Menu ──
@@ -457,249 +405,7 @@ async function _fsBrowserAISummary(): Promise<void> {
   }, 600);
 }
 
-// ── Workspace File Operations (legacy) ──
-
-async function renameWorkspaceFile(path: string, currentName: string): Promise<void> {
-  const item = document.querySelector(`.wa-file-item[data-path="${CSS.escape(path)}"]`) as HTMLElement | null;
-  if (!item) return;
-  const labelSpan = item.querySelector('.wa-file-label') as HTMLElement | null;
-  if (!labelSpan) return;
-
-  const stem = currentName.includes('.') ? currentName.slice(0, currentName.lastIndexOf('.')) : currentName;
-  const input = document.createElement('input');
-  input.className = 'wa-rename-input';
-  input.value = stem;
-  labelSpan.replaceWith(input);
-  input.focus();
-  input.select();
-
-  const commit = async () => {
-    const newName = input.value.trim();
-    if (!newName || newName === stem) {
-      const loadWs = workspaceApi.refreshFiles;
-      if (typeof loadWs === 'function') await loadWs();
-      return;
-    }
-    try {
-      const res = await _csrfFetch('/api/v1/workspace/rename', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, name: newName }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || '重命名失败');
-      showToast('已重命名为 ' + json.name, 'success');
-    } catch (e: any) {
-      showToast(e.message, 'error');
-    }
-    const loadWs = workspaceApi.refreshFiles;
-    if (typeof loadWs === 'function') await loadWs();
-  };
-
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      commit();
-    }
-    if (e.key === 'Escape') {
-      const loadWs = workspaceApi.refreshFiles;
-      if (typeof loadWs === 'function') loadWs();
-    }
-  });
-  input.addEventListener('blur', commit);
-}
-
-async function deleteWorkspaceFile(filepath: string): Promise<void> {
-  if (!confirm(`确定要将 "${filepath.split('/').pop()}" 移入回收站吗？`)) return;
-  try {
-    const res = await _csrfFetch('/api/v1/workspace/file?path=' + encodeURIComponent(filepath), { method: 'DELETE' });
-    const json = await res.json();
-    if (!res.ok) {
-      if (res.status === 404) {
-        const loadWs = workspaceApi.refreshFiles;
-        if (typeof loadWs === 'function') loadWs();
-        showToast('文件已不存在，已从列表移除', 'info');
-      } else {
-        throw new Error(json.error || '删除失败');
-      }
-      return;
-    }
-    const removeFn = workspaceApi._removeOpenTabAfterFileDeleted;
-    if (typeof removeFn === 'function') {
-      await removeFn(filepath);
-    }
-    showToast('已移入回收站：' + filepath.split('/').pop(), 'success');
-    const loadWs = workspaceApi.refreshFiles;
-    if (typeof loadWs === 'function') loadWs();
-  } catch (e: any) {
-    showToast(e.message, 'error');
-  }
-}
-
-async function deleteFolderWorkspace(folderPath: string, folderName?: string): Promise<void> {
-  const name = folderName || folderPath.split('/').pop() || '';
-  if (!confirm(`确定要将文件夹 "${name}" 及其所有内容移入回收站吗？`)) return;
-  try {
-    const res = await _csrfFetch('/api/v1/workspace/folder?path=' + encodeURIComponent(folderPath), { method: 'DELETE' });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || '删除失败');
-    showToast(`已将文件夹 "${name}" 移入回收站`, 'success');
-    const loadWs = workspaceApi.refreshFiles;
-    if (typeof loadWs === 'function') await loadWs();
-  } catch (e: any) {
-    showToast(e.message, 'error');
-  }
-}
-
-async function renameFolderWorkspace(path: string, currentName: string): Promise<void> {
-  const item = document.querySelector(`.wa-file-item.folder[data-path="${CSS.escape(path)}"]`) as HTMLElement | null;
-  if (!item) return;
-  const labelSpan = item.querySelector('.wa-file-label') as HTMLElement | null;
-  if (!labelSpan) return;
-
-  const input = document.createElement('input');
-  input.className = 'wa-rename-input';
-  input.value = currentName;
-  labelSpan.replaceWith(input);
-  input.focus();
-  input.select();
-
-  const commit = async () => {
-    const newName = input.value.trim();
-    if (!newName || newName === currentName) {
-      const loadWs = workspaceApi.refreshFiles;
-      if (typeof loadWs === 'function') await loadWs();
-      return;
-    }
-    try {
-      const res = await _csrfFetch('/api/v1/workspace/rename', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, name: newName }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || '重命名失败');
-      showToast('已重命名为 ' + json.name, 'success');
-    } catch (e: any) {
-      showToast(e.message, 'error');
-    }
-    const loadWs = workspaceApi.refreshFiles;
-    if (typeof loadWs === 'function') await loadWs();
-  };
-
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      commit();
-    }
-    if (e.key === 'Escape') {
-      const loadWs = workspaceApi.refreshFiles;
-      if (typeof loadWs === 'function') loadWs();
-    }
-  });
-  input.addEventListener('blur', commit);
-}
-
-// ── Legacy Context Menu (workspace tree) ──
-
-function _showCtxMenu(event: MouseEvent, path: string, name: string): void {
-  event.preventDefault();
-  event.stopPropagation();
-  _ctxTarget = { path, name };
-  const menu = document.getElementById('wa-ctx-menu');
-  if (!menu) return;
-  menu.innerHTML = `
-    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-open">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      打开
-    </div>
-    <div class="wa-ctx-separator"></div>
-    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-rename">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-      重命名
-    </div>
-    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-copy-path">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-      复制路径
-    </div>
-    <div class="wa-ctx-separator"></div>
-    <div class="wa-ctx-item danger" data-wa-context-menu-action="workspace-delete">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-      删除
-    </div>`;
-  _positionCtxMenu(menu, event, { clampToLeftPanel: true });
-}
-
-function _showFolderCtxMenu(event: MouseEvent, path: string, name: string): void {
-  event.preventDefault();
-  event.stopPropagation();
-  _ctxTarget = { path, name };
-  const menu = document.getElementById('wa-ctx-menu');
-  if (!menu) return;
-  menu.innerHTML = `
-    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-new-file">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-      新建文件
-    </div>
-    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-new-folder">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
-      新建子文件夹
-    </div>
-    <div class="wa-ctx-separator"></div>
-    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-folder-rename">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-      重命名
-    </div>
-    <div class="wa-ctx-separator"></div>
-    <div class="wa-ctx-item danger" data-wa-context-menu-action="workspace-folder-delete">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-      删除文件夹
-    </div>`;
-  _positionCtxMenu(menu, event, { clampToLeftPanel: true });
-}
-
-function _ctxOpen(): void {
-  _closeCtxMenu();
-  if (_ctxTarget.path && typeof workspaceApi.openWorkspaceFile === 'function') {
-    workspaceApi.openWorkspaceFile(_ctxTarget.path);
-  }
-}
-
-function _ctxRename(): void {
-  _closeCtxMenu();
-  if (_ctxTarget.path && typeof renameWorkspaceFile === 'function') {
-    renameWorkspaceFile(_ctxTarget.path, _ctxTarget.name || '');
-  }
-}
-
-function _ctxCopyPath(): void {
-  _closeCtxMenu();
-  if (_ctxTarget.path) {
-    navigator.clipboard
-      .writeText(_ctxTarget.path)
-      .then(() => showToast('路径已复制', 'success'))
-      .catch(() => showToast(_ctxTarget.path || '', 'info'));
-  }
-}
-
-function _ctxDelete(): void {
-  _closeCtxMenu();
-  if (_ctxTarget.path && typeof deleteWorkspaceFile === 'function') {
-    deleteWorkspaceFile(_ctxTarget.path);
-  }
-}
-
-function _ctxFolderRename(): void {
-  _closeCtxMenu();
-  if (!_ctxTarget.path) return;
-  renameFolderWorkspace(_ctxTarget.path, _ctxTarget.name || '');
-}
-
-function _ctxFolderDelete(): void {
-  _closeCtxMenu();
-  if (!_ctxTarget.path) return;
-  deleteFolderWorkspace(_ctxTarget.path, _ctxTarget.name || '');
-}
+// ── Browser context menu action delegation ──
 
 let _contextMenuActionDelegationInstalled = false;
 
@@ -725,18 +431,6 @@ function _installContextMenuActionDelegation(): void {
       'browser-new-file': _fsBrowserNewFile,
       'browser-new-folder': _fsBrowserNewFolder,
       'browser-ai-summary': _fsBrowserAISummary,
-      'workspace-open': _ctxOpen,
-      'workspace-rename': _ctxRename,
-      'workspace-copy-path': _ctxCopyPath,
-      'workspace-delete': _ctxDelete,
-      'workspace-new-file': () => {
-        if (_ctxTarget.path && typeof workspaceApi.startNewFile === 'function') workspaceApi.startNewFile(_ctxTarget.path);
-      },
-      'workspace-new-folder': () => {
-        if (_ctxTarget.path && typeof workspaceApi.startNewFolder === 'function') workspaceApi.startNewFolder(_ctxTarget.path);
-      },
-      'workspace-folder-rename': _ctxFolderRename,
-      'workspace-folder-delete': _ctxFolderDelete,
     };
     const run = actions[action];
     if (!run) return;
@@ -762,7 +456,7 @@ document.addEventListener('keydown', (e) => {
 
 _installContextMenuActionDelegation();
 
-publishWorkspaceApi({
+registerFeatures({
   _showBrowserCtx,
   _closeCtxMenu,
   _fsBrowserOpen,

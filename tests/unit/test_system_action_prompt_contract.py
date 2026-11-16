@@ -11,10 +11,7 @@ def _read(rel_path: str) -> str:
 
 
 def test_system_prompts_limit_app_control_to_whitelisted_launches():
-    sources = [
-        _read("web/chat_system_instruction.py"),
-        _read("web/context_injector.py"),
-    ]
+    sources = [_read("app/core/services/chat_system_instruction.py")]
 
     for source in sources:
         assert "联动本地应用" not in source
@@ -25,12 +22,12 @@ def test_system_prompts_limit_app_control_to_whitelisted_launches():
     assert "把无法直接执行的系统或应用控制请求伪装成已完成" in sources[0]
 
 
-def test_agent_handler_uses_shared_local_model_helpers():
+def test_agent_handler_uses_shared_local_health_helper():
     source = _read("web/services/chat_stream/agent_handler.py")
 
     assert "from app.core.shared.llm_helpers import (" in source
-    assert "get_local_provider as _get_local_provider" in source
     assert "is_ollama_alive as _is_ollama_alive" in source
+    assert "get_local_provider" not in source
     assert (
         "from app.core.socket_handler import _is_ollama_alive, _get_local_provider"
         not in source

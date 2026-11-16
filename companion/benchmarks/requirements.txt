@@ -1,0 +1,2 @@
+# Isolated comparison environment only; never install into the production service.
+smolagents[openai]==1.26.0

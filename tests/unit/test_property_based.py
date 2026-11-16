@@ -9,7 +9,6 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from app.core.config.configuration_manager import ConfigurationManager
-from app.core.routing.ai_router import AIRouter
 from app.core.security.output_validator import OutputValidator, ValidationResult
 from app.core.security.pii_filter import MaskResult, PIIConfig, PIIFilter
 
@@ -194,50 +193,6 @@ class TestConfigurationManager:
         assume(not _is_valid_json(bad_json))
         cm = ConfigurationManager()
         assert cm.import_config(bad_json) is False
-
-
-# ════════════════════════════════════════════════════════════════════
-# 4. Cache Operations (AIRouter half-eviction cache)
-# ════════════════════════════════════════════════════════════════════
-
-
-class TestCacheOperations:
-    """Property-based tests for AIRouter's bounded cache."""
-
-    @given(n=st.integers(min_value=1, max_value=800))
-    @settings(max_examples=15)
-    def test_cache_never_exceeds_max_size(self, n):
-        """After N inserts the cache size never exceeds _CACHE_MAX_SIZE."""
-        AIRouter._cache = {}
-        for i in range(n):
-            AIRouter._cache_set(f"key_{i}", f"val_{i}")
-        assert len(AIRouter._cache) <= AIRouter._CACHE_MAX_SIZE
-        AIRouter._cache = {}
-
-    @given(
-        key=st.text(min_size=1, max_size=50), value=st.text(min_size=0, max_size=100)
-    )
-    @settings(max_examples=30)
-    def test_set_then_get(self, key, value):
-        """Value is retrievable immediately after _cache_set."""
-        AIRouter._cache = {}
-        AIRouter._cache_set(key, value)
-        assert AIRouter._cache[key] == value
-        AIRouter._cache = {}
-
-    @given(
-        keys=st.lists(
-            st.text(min_size=1, max_size=30), min_size=1, max_size=600, unique=True
-        )
-    )
-    @settings(max_examples=10)
-    def test_eviction_preserves_recent_entries(self, keys):
-        """After bulk inserts, the most recently inserted key is still present."""
-        AIRouter._cache = {}
-        for k in keys:
-            AIRouter._cache_set(k, "v")
-        assert keys[-1] in AIRouter._cache
-        AIRouter._cache = {}
 
 
 # ════════════════════════════════════════════════════════════════════

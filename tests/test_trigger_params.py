@@ -9,7 +9,7 @@ from pathlib import Path
 # 添加到路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from web.proactive_trigger import ProactiveTriggerSystem
+from app.core.services.proactive_trigger import ProactiveTriggerSystem
 
 
 def test_trigger_params():

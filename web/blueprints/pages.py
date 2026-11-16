@@ -4,25 +4,17 @@
 HTML page-rendering blueprint.
 
 Routes:
-  GET /                        — index
-  GET /app                     — app_main
-  GET /file-network            — file_network
-  GET /knowledge-graph         — knowledge_graph_page
-  GET /skills                  — skill_marketplace
-  GET /skill-marketplace       — skill_marketplace
-  GET /monitoring-dashboard    — monitoring_dashboard
-  GET /edit-ppt/<session_id>   — edit_ppt
-  GET /mini                    — mini_page
-  GET /m                       — mobile_page
-  GET /mobile                  — mobile_page
-  GET /notebook                — notebook_ui
-  GET /workspace               — unified_workspace_redirect
-  GET /workspace-assistant     — unified_workspace_redirect
+  GET /            - index
+  GET /favicon.ico - favicon
+  GET /app         - app_main
+  GET /addons      - addon center
+  GET /addon-center - addon center (compat)
+  GET /mini        - mini page
 """
 
 import os
 
-from flask import Blueprint, Response, make_response, redirect, render_template, request, send_from_directory, url_for
+from flask import Blueprint, Response, make_response, render_template, send_from_directory
 from web.runtime_context import service_registry
 
 pages_bp = Blueprint("pages", __name__)
@@ -69,85 +61,14 @@ def app_main() -> Response:
     return resp
 
 
-@pages_bp.route("/file-network")
-def file_network() -> str:
-    """文件网络界面"""
-    return render_template("file_network.html")
-
-
-@pages_bp.route("/knowledge-graph")
-def knowledge_graph_page() -> str:
-    """知识图谱可视化界面"""
-    return render_template("knowledge_graph.html")
-
-
-@pages_bp.route("/edit-ppt/<session_id>")
-def edit_ppt(session_id: str) -> str:
-    """PPT 生成后编辑页面（P1 功能）"""
-    return render_template("edit_ppt.html")
-
-
-@pages_bp.route("/pptx-editor/<file_id>")
-def pptx_editor(file_id: str) -> str:
-    """PPTX 文件编辑器 — 上传并编辑现有 PPTX 文件"""
-    return render_template("pptx_editor.html")
-
-
-@pages_bp.route("/skills")
-@pages_bp.route("/skill-marketplace")
-def skill_marketplace() -> str:
-    """Koto Skill 库 — GitHub Extension Marketplace 风格管理界面"""
-    return render_template("skill_marketplace.html")
-
-
-@pages_bp.route("/skill-community")
-def skill_community() -> str:
-    """Koto Skill 社区 — 精选社区 Skills，一键安装"""
-    return render_template("skill_community.html")
-
-
-@pages_bp.route("/monitoring-dashboard")
-def monitoring_dashboard() -> Response:
-    """Phase 4 System Monitoring Dashboard"""
-    return send_from_directory(
-        os.path.join(os.path.dirname(__file__), os.pardir, "static"),
-        "monitoring_dashboard.html",
-    )
+@pages_bp.route("/addons")
+@pages_bp.route("/addon-center")
+def addon_center() -> str:
+    """Independent Add-on protocol, admission and runtime surface."""
+    return render_template("addon_center.html")
 
 
 @pages_bp.route("/mini")
 def mini_page() -> str:
     """迷你模式页面（浏览器访问用）"""
     return render_template("mini_koto.html")
-
-
-@pages_bp.route("/m")
-@pages_bp.route("/mobile")
-def mobile_page() -> str:
-    """移动端优化页面"""
-    return render_template("mobile.html")
-
-
-@pages_bp.route("/notebook")
-def notebook_ui() -> str:
-    """NotebookLM 风格界面"""
-    return render_template("notebook_lm.html")
-
-
-@pages_bp.route("/workspace")
-@pages_bp.route("/workspace-assistant")
-def workspace_assistant_page() -> Response:
-    """Legacy workspace URLs kept as compatibility aliases for the unified app."""
-    target = url_for("pages.index")
-    if request.query_string:
-        target = f"{target}?{request.query_string.decode('utf-8', errors='ignore')}"
-    resp = redirect(target, code=302)
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-    resp.headers["Pragma"] = "no-cache"
-    return resp
-
-
-@pages_bp.route("/doc-compare")
-def doc_compare_ui() -> str:
-    """多文档对比界面"""
-    return render_template("doc_compare.html")

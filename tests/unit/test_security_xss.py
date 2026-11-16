@@ -1,7 +1,7 @@
 """Unit tests for XSS prevention in the Koto codebase.
 
 Covers:
-  - web.file_converter._md_to_html fallback path (markdown lib unavailable)
+  - app.core.file.exporters.converter._md_to_html fallback path (markdown lib unavailable)
   - Documents JS escapeHtml / showNotification (browser-only, not testable here)
 """
 
@@ -40,7 +40,7 @@ def _run_md_to_html_fallback(md_text: str) -> str:
             return real_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=_fake_import):
-            from web.file_converter import _md_to_html
+            from app.core.file.exporters.converter import _md_to_html
 
             _md_to_html(src, out)
 
@@ -175,7 +175,7 @@ class TestMdToHtmlXssPrevention:
                 return real_import(name, *args, **kwargs)
 
             with patch("builtins.__import__", side_effect=_fake_import):
-                from web.file_converter import _md_to_html
+                from app.core.file.exporters.converter import _md_to_html
 
                 _md_to_html(src, out)
 

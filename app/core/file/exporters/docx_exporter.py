@@ -16,6 +16,24 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+class UnsafeDocxHyperlink(ValueError):
+    """A rejected link must never be retried through the fallback exporter."""
+
+
+def _validated_hyperlink_target(value: Any) -> str:
+    from urllib.parse import urlsplit
+
+    target = str(value or "").strip()
+    if not target.startswith("#") and urlsplit(target).scheme.lower() not in {
+        "http",
+        "https",
+        "mailto",
+        "tel",
+    }:
+        raise UnsafeDocxHyperlink("Unsupported or unsafe DOCX hyperlink scheme")
+    return target
+
+
 def _css_color_to_hex(value: str) -> str | None:
     """Convert a CSS color string like '#aabbcc' or 'rgb(r,g,b)' to a 6-char hex string."""
     if not value:
@@ -263,9 +281,6 @@ def _apply_para_format(para: Any, pcss: dict[str, str]) -> None:
 
 def _add_paragraph_from_tag(doc: Any, tag: Any) -> None:
     """Convert a single <p>/<h1>-<h6>/<li> BS4 tag into a python-docx paragraph."""
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Pt
-
     tag_name = tag.name.lower()
     if tag_name in ("h1", "h2", "h3", "h4", "h5", "h6"):
         level = int(tag_name[1])
@@ -280,70 +295,10 @@ def _add_paragraph_from_tag(doc: Any, tag: Any) -> None:
         pcss = _parse_css_inline(style_str)
         _apply_para_format(para, pcss)
 
-    # Walk inline children (text nodes + <strong>, <em>, <span>, <a>, <u>)
-    for child in tag.children:
-        if hasattr(child, "name") and child.name is None:
-            # NavigableString
-            text = str(child)
-            if text:
-                run = para.add_run(text)
-                # Apply paragraph-level font info to bare text nodes
-                _apply_run_inline(run, pcss)
-        elif hasattr(child, "name"):
-            name = child.name.lower() if child.name else ""
-            # Inline image — void element with no text; insert as inline picture
-            if name == "img":
-                src = child.get("src", "")
-                img_bytes = _resolve_img_src(src)
-                if img_bytes:
-                    try:
-                        from docx.shared import Inches, Pt
-
-                        run = para.add_run()
-
-                        img_css = _parse_css_inline(child.get("style", ""))
-                        w_str = img_css.get("width", child.get("width", ""))
-                        w_val = None
-                        if w_str:
-                            try:
-                                if w_str.endswith("px"):
-                                    w_val = Pt(float(w_str.replace("px", "")) * 0.75)
-                                elif w_str.endswith("in"):
-                                    w_val = Inches(float(w_str.replace("in", "")))
-                                elif w_str.isdigit():
-                                    w_val = Pt(float(w_str) * 0.75)
-                            except Exception:
-                                import logging
-
-                                logging.getLogger(__name__).warning(
-                                    "Silenced exception caught", exc_info=True
-                                )
-                                pass
-
-                        if w_val:
-                            run.add_picture(io.BytesIO(img_bytes), width=w_val)
-                        else:
-                            run.add_picture(io.BytesIO(img_bytes), width=Inches(3))
-                    except Exception:
-                        pass
-                continue
-            text = child.get_text()
-            if not text:
-                continue
-            run = para.add_run(text)
-            child_css: dict[str, str] = _parse_css_inline(child.get("style", ""))
-            # Merge parent paragraph CSS as fallback for font properties
-            merged_css = dict(pcss)
-            merged_css.update(child_css)
-            if name in ("strong", "b"):
-                run.bold = True
-            if name in ("em", "i"):
-                run.italic = True
-            if name == "u":
-                run.underline = True
-            if name == "s":
-                run.font.strike = True
-            _apply_run_inline(run, merged_css)
+    if tag_name == "li":
+        list_kind = getattr(getattr(tag, "parent", None), "name", "")
+        para.style = "List Number" if list_kind == "ol" else "List Bullet"
+    _append_inline_html_to_paragraph(para, tag, pcss, {}, image_width_inches=3)
 
 
 def _set_cell_shading(cell: Any, fill_hex: str) -> None:
@@ -718,7 +673,7 @@ def _apply_docx_export_comments(doc: Any, raw_comments: Any) -> tuple[int, Any |
         from docx.oxml.ns import qn
         from lxml import etree
 
-        from web.track_changes_editor import TrackChangesEditor
+        from app.core.file.track_changes import TrackChangesEditor
     except ImportError as exc:
         logger.warning("[export_docx] comment support unavailable: %s", exc)
         return 0, None
@@ -776,7 +731,7 @@ def _inject_docx_comments_part(docx_bytes: bytes, comments_el: Any) -> bytes:
 
     from lxml import etree
 
-    from web.track_changes_editor import TrackChangesEditor
+    from app.core.file.track_changes import TrackChangesEditor
 
     helper = TrackChangesEditor(author="Koto Review")
     comments_xml = etree.tostring(
@@ -871,6 +826,7 @@ def _append_inline_html_to_paragraph(
     node: Any,
     inherited_css: dict[str, str] | None = None,
     marks: dict[str, bool] | None = None,
+    image_width_inches: float = 2.5,
 ) -> None:
     from bs4.element import NavigableString, Tag
     from docx.shared import Inches, Pt
@@ -909,6 +865,33 @@ def _append_inline_html_to_paragraph(
         if name == "sub":
             child_marks["subscript"] = True
 
+        if name == "a" and child.get("href"):
+            from docx.opc.constants import RELATIONSHIP_TYPE
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+
+            href = _validated_hyperlink_target(child.get("href"))
+            hyperlink = OxmlElement("w:hyperlink")
+            if href.startswith("#"):
+                hyperlink.set(qn("w:anchor"), href[1:])
+            else:
+                relation = para.part.relate_to(
+                    href, RELATIONSHIP_TYPE.HYPERLINK, is_external=True
+                )
+                hyperlink.set(qn("r:id"), relation)
+            if child.get("title"):
+                hyperlink.set(qn("w:tooltip"), str(child.get("title")))
+            # Reuse the same recursive inline renderer, preserving nested bold,
+            # font, Unicode and other run marks inside the relationship.
+            offset = len(para._p)
+            _append_inline_html_to_paragraph(
+                para, child, child_css, child_marks, image_width_inches
+            )
+            for element in list(para._p)[offset:]:
+                hyperlink.append(element)
+            para._p.append(hyperlink)
+            continue
+
         if name == "br":
             para.add_run().add_break()
             continue
@@ -940,12 +923,16 @@ def _append_inline_html_to_paragraph(
                     if w_val:
                         run.add_picture(io.BytesIO(img_bytes), width=w_val)
                     else:
-                        run.add_picture(io.BytesIO(img_bytes), width=Inches(2.5))
+                        run.add_picture(
+                            io.BytesIO(img_bytes), width=Inches(image_width_inches)
+                        )
                 except Exception:
                     pass
             continue
 
-        _append_inline_html_to_paragraph(para, child, child_css, child_marks)
+        _append_inline_html_to_paragraph(
+            para, child, child_css, child_marks, image_width_inches
+        )
 
 
 def _configure_header_footer_tabs(para: Any, section: Any) -> None:
@@ -1222,38 +1209,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                             merged_p = dict(cell_css)
                             merged_p.update(p_css)
                             _apply_para_format(cell_para, merged_p)
-                            for child in p_tag.children:
-                                if not hasattr(child, "name") or child.name is None:
-                                    text = str(child)
-                                    if text:
-                                        run = cell_para.add_run(text)
-                                        if is_header:
-                                            run.bold = True
-                                        _apply_run_inline(run, merged_p)
-                                else:
-                                    child_name = (
-                                        child.name.lower() if child.name else ""
-                                    )
-                                    text = child.get_text()
-                                    if not text:
-                                        continue
-                                    run = cell_para.add_run(text)
-                                    if is_header:
-                                        run.bold = True
-                                    child_css_inner = _parse_css_inline(
-                                        child.get("style", "")
-                                    )
-                                    merged = dict(merged_p)
-                                    merged.update(child_css_inner)
-                                    if child_name in ("strong", "b"):
-                                        run.bold = True
-                                    if child_name in ("em", "i"):
-                                        run.italic = True
-                                    if child_name == "u":
-                                        run.underline = True
-                                    if child_name == "s":
-                                        run.font.strike = True
-                                    _apply_run_inline(run, merged)
+                            _append_inline_html_to_paragraph(
+                                cell_para, p_tag, merged_p, {"bold": is_header}
+                            )
                     else:
                         # Flat cell content (no <p> wrappers)
                         cell_para = tbl_cell.add_paragraph()
@@ -1265,36 +1223,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                         elif align == "right":
                             cell_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-                        for child in cell_tag.children:
-                            if not hasattr(child, "name") or child.name is None:
-                                text = str(child).strip()
-                                if text:
-                                    run = cell_para.add_run(text)
-                                    if is_header:
-                                        run.bold = True
-                                    _apply_run_inline(run, cell_css)
-                            else:
-                                child_name = child.name.lower() if child.name else ""
-                                text = child.get_text()
-                                if not text:
-                                    continue
-                                run = cell_para.add_run(text)
-                                if is_header:
-                                    run.bold = True
-                                child_css_inner = _parse_css_inline(
-                                    child.get("style", "")
-                                )
-                                merged = dict(cell_css)
-                                merged.update(child_css_inner)
-                                if child_name in ("strong", "b"):
-                                    run.bold = True
-                                if child_name in ("em", "i"):
-                                    run.italic = True
-                                if child_name == "u":
-                                    run.underline = True
-                                if child_name == "s":
-                                    run.font.strike = True
-                                _apply_run_inline(run, merged)
+                        _append_inline_html_to_paragraph(
+                            cell_para, cell_tag, cell_css, {"bold": is_header}
+                        )
 
                     # ── Cell background colour ───────────────────────────
                     bg = cell_css.get("background-color", "") or cell_css.get(
@@ -1493,7 +1424,28 @@ def export_docx(docx_input: Any, original_path: str | None = None) -> bytes:
     Returns:
         bytes — .docx 文件内容
     """
-    html_content, _ = _extract_docx_save_parts(docx_input)
+    html_content, payload = _extract_docx_save_parts(docx_input)
+    # Validate links before either exporter can run, including fallback and
+    # headers/footers. A builder failure must not bypass this boundary.
+    from html.parser import HTMLParser
+
+    class LinkValidator(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if tag.lower() == "a":
+                href = dict(attrs).get("href")
+                if href:
+                    _validated_hyperlink_target(href)
+
+    validator = LinkValidator()
+    validator.feed(html_content)
+    for field in ("header_html", "footer_html"):
+        validator.feed(str(payload.get(field) or ""))
+    for section in payload.get("sections") or []:
+        if isinstance(section, dict):
+            for field, value in section.items():
+                if field.endswith("_html"):
+                    validator.feed(str(value or ""))
+    validator.close()
     logger.info(
         "[export_docx] html_content length=%d original=%s preview=%.200s",
         len(html_content or ""),
@@ -1504,6 +1456,8 @@ def export_docx(docx_input: Any, original_path: str | None = None) -> bytes:
     # ── Primary: rich python-docx builder ──────────────────────────────────
     try:
         return _export_docx_python(docx_input, original_path=original_path)
+    except UnsafeDocxHyperlink:
+        raise
     except Exception as exc:
         logger.warning(
             "[export_docx] python-docx builder failed (%s), falling back to html2docx",

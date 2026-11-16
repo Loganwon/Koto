@@ -7,14 +7,8 @@ import re
 from typing import List
 
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
-from app.core.agent.file_task_recipes import semantic_markers
 from app.core.agent.file_task_runtime_patterns import (
-    _ADVICE_CUE_WORDS,
-    _ANALYSIS_ADVICE_PATTERNS,
-    _ANALYSIS_CUE_WORDS,
     _ARTIFACT_CREATION_INTENT_PATTERNS,
-    _DIAGNOSTIC_NEW_TASK_PATTERNS,
-    _DIAGNOSTIC_REQUEST_PATTERNS,
     _EXPLICIT_WRITE_INTENT_WORDS,
     _GLOBAL_READONLY_WRITE_NEGATION_PATTERNS,
     _IMPERATIVE_WRITE_PATTERNS,
@@ -72,7 +66,7 @@ _TARGET_SCOPED_WRITE_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?P<action>写入|写回|追加|添加|插入|保存|导出|write|append|insert|save|export)"
+        r"(?P<action>写入|写回|追加|加入|添加|插入|放入|保存|导出|复制|拷贝|write|append|insert|save|export|copy|put|place|apply)"
         r".{0,80}(?:\.(?:docx|xlsx|pptx|pdf|md|txt|csv)|docx|word|excel|ppt|目标\s*(?:文件|文档|表格|幻灯片|docx|xlsx|pptx)|target\s+(?:file|document|spreadsheet|slides?))",
         re.IGNORECASE,
     ),
@@ -86,34 +80,50 @@ _CONFIRMATION_ONLY_NEGATION_PATTERN = re.compile(
     r"(?:询问|确认|等待确认|中途确认|ask|confirm|confirmation)",
     re.IGNORECASE,
 )
-_DOCX_OR_TABLE_WRITE_REQUEST_PATTERN = re.compile(
-    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入).{0,32}"
-    r"(?:docx|word|文档|文件|报告|表格|table)"
-    r"|(?:docx|word|文档|文件|报告|表格|table).{0,32}"
-    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入)",
+# This is an execution prohibition, not a positive task classifier. It must
+# remain authoritative even when the explanation quotes a write operation.
+_NO_EXECUTION_PATTERN = re.compile(
+    r"(?:不要|不用|无需|不需要|不必|别)(?:实际|真正|直接|立即|立刻)?(?:执行|实施|操作)"
+    r"|\b(?:do\s+not|don't|dont|without)\s+(?:actually\s+)?(?:execute|perform|apply)\b",
     re.IGNORECASE,
 )
-_PPT_WRITE_REQUEST_PATTERN = re.compile(
-    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入|补充|扩写|更新)"
-    r".{0,32}(?:pptx?|演示文稿|幻灯片|slides?)"
-    r"|(?:pptx?|演示文稿|幻灯片|slides?).{0,32}"
-    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入|补充|扩写|更新)",
+_WRITE_DESCRIPTION_PREFIX = re.compile(
+    r"^(?:请|只|仅|先|麻烦|帮我)?\s*(?:(?:说明|解释|介绍|告诉我|讲解).{0,16})?(?:如何|怎么|怎样)"
+    r"|^(?:please\s+)?(?:(?:explain|describe|show\s+me)\s+)?how\s+(?:to|can\s+I|do\s+I)\b",
     re.IGNORECASE,
 )
+
+
+def describes_write_without_execution(task: str) -> bool:
+    """A how-to description cannot grant write permission by quoting a verb.
+
+    Independent operation clauses retain their existing write-contract grammar;
+    explaining A and then explicitly writing B is not an answer-only request.
+    """
+    clauses = [
+        part.strip()
+        for part in re.split(
+            r"[,，;；。\n]|\b(?:and\s+then|then)\b|然后|再(?=把|将)",
+            str(task or ""),
+            flags=re.IGNORECASE,
+        )
+        if part.strip()
+    ]
+    described = any(_WRITE_DESCRIPTION_PREFIX.search(clause) for clause in clauses)
+    if not described:
+        return False
+    return not any(
+        not _WRITE_DESCRIPTION_PREFIX.search(clause)
+        and not has_readonly_write_negation(clause)
+        and (has_strong_write_intent(clause) or has_target_scoped_write_intent(clause))
+        for clause in clauses
+    )
 
 
 def has_write_intent(task: str) -> bool:
-    if is_diagnostic_request(task):
-        return False
-    if is_readonly_existing_artifact_followup(task):
-        return False
     if has_readonly_write_negation(task):
         return False
-    strong_write_intent = has_strong_write_intent(task)
-    explicit_write_intent = has_explicit_write_intent(task)
-    if is_advisory_analysis_request(task) and not strong_write_intent:
-        return False
-    return explicit_write_intent or strong_write_intent
+    return has_explicit_write_intent(task) or has_strong_write_intent(task)
 
 
 def has_strong_write_intent(task: str) -> bool:
@@ -129,34 +139,7 @@ def has_strong_write_intent(task: str) -> bool:
         return True
     if _TARGETED_ARTIFACT_CREATION_PATTERN.search(task_text):
         return True
-    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(
-        task_text
-    ) or _PPT_WRITE_REQUEST_PATTERN.search(task_text):
-        return True
-    markers = semantic_markers(task_text)
-    if (
-        markers.get("docx_write_phrase")
-        or markers.get("docx_create_phrase")
-        or markers.get("ppt_slide_write_request")
-        or markers.get("ppt_design_request")
-        or markers.get("docx_template_fill_request")
-        or markers.get("docx_pdf_export_request")
-        or markers.get("file_format_convert_request")
-        or markers.get("spreadsheet_write_request")
-        or markers.get("text_selection_replace_request")
-        or markers.get("file_copy_request")
-        or markers.get("cross_file_extract_request")
-    ):
-        return True
-    return bool(
-        _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text)
-        or _PPT_WRITE_REQUEST_PATTERN.search(task_text)
-        or re.search(
-            r"(?:加入|添加|插入|放入|写入).{0,18}(?:docx|word|文档|pptx?|幻灯片|slides?)",
-            task_text,
-            re.IGNORECASE,
-        )
-    )
+    return False
 
 
 def has_explicit_write_intent(task: str) -> bool:
@@ -172,35 +155,21 @@ def has_explicit_write_intent(task: str) -> bool:
         return True
     if any(pattern.search(task_text) for pattern in _IMPERATIVE_WRITE_PATTERNS):
         return True
-    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(
-        task_text
-    ) or _PPT_WRITE_REQUEST_PATTERN.search(task_text):
-        return True
     has_soft_action = any(word in lowered for word in _SOFT_WRITE_ACTION_WORDS)
     has_target_hint = any(word in lowered for word in _WRITE_TARGET_HINT_WORDS)
     if has_soft_action and has_target_hint:
         return True
-    markers = semantic_markers(task_text)
-    if (
-        markers.get("docx_write_phrase")
-        or markers.get("docx_create_phrase")
-        or markers.get("ppt_design_request")
-        or markers.get("docx_template_fill_request")
-        or markers.get("docx_pdf_export_request")
-        or markers.get("file_format_convert_request")
-        or markers.get("spreadsheet_write_request")
-        or markers.get("text_selection_replace_request")
-        or markers.get("file_copy_request")
-        or markers.get("cross_file_extract_request")
-    ):
-        return True
-    return any(word in lowered for word in _WRITE_INTENT_WORDS)
+    return any(word in lowered for word in _WRITE_INTENT_WORDS) or bool(
+        has_target_scoped_write_intent(task_text)
+    )
 
 
 def has_readonly_write_negation(task: str) -> bool:
     task_text = str(task or "").strip()
     if not task_text:
         return False
+    if _NO_EXECUTION_PATTERN.search(task_text):
+        return True
     if (
         has_artifact_creation_intent(task_text)
         and has_source_scoped_write_negation(task_text)
@@ -250,6 +219,8 @@ def has_global_readonly_write_negation(task: str) -> bool:
     task_text = str(task or "").strip()
     if not task_text:
         return False
+    if _NO_EXECUTION_PATTERN.search(task_text):
+        return True
     global_matches = [
         match
         for pattern in _GLOBAL_READONLY_WRITE_NEGATION_PATTERNS
@@ -350,23 +321,7 @@ def has_artifact_creation_intent(task: str) -> bool:
         return True
     if _TARGETED_ARTIFACT_CREATION_PATTERN.search(task_text):
         return True
-    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(
-        task_text
-    ) or _PPT_WRITE_REQUEST_PATTERN.search(task_text):
-        return True
-    markers = semantic_markers(task_text)
-    return bool(
-        markers.get("docx_create_phrase")
-        or markers.get("ppt_slide_write_request")
-        or markers.get("ppt_design_request")
-        or markers.get("docx_template_fill_request")
-        or markers.get("docx_pdf_export_request")
-        or markers.get("file_format_convert_request")
-        or markers.get("spreadsheet_write_request")
-        or markers.get("text_selection_replace_request")
-        or markers.get("file_copy_request")
-        or markers.get("cross_file_extract_request")
-    )
+    return False
 
 
 def is_readonly_existing_artifact_followup(task: str) -> bool:
@@ -386,32 +341,14 @@ def is_readonly_existing_artifact_followup(task: str) -> bool:
     return True
 
 
-def is_advisory_analysis_request(task: str) -> bool:
-    task_text = str(task or "").strip()
-    if not task_text:
-        return False
-    lowered = task_text.lower()
-    if any(pattern.search(task_text) for pattern in _ANALYSIS_ADVICE_PATTERNS):
-        return True
-    has_analysis_cue = any(word in lowered for word in _ANALYSIS_CUE_WORDS)
-    has_advice_cue = any(word in lowered for word in _ADVICE_CUE_WORDS)
-    return (
-        has_analysis_cue and has_advice_cue and not has_explicit_write_intent(task_text)
-    )
-
-
-def is_diagnostic_request(task: str) -> bool:
-    task_text = str(task or "").strip()
-    if not task_text:
-        return False
-    if any(pattern.search(task_text) for pattern in _DIAGNOSTIC_NEW_TASK_PATTERNS):
-        return False
-    return any(pattern.search(task_text) for pattern in _DIAGNOSTIC_REQUEST_PATTERNS)
-
-
 def explicit_output_mode(request: FileTaskRequest) -> str:
     options = request.options if isinstance(request.options, dict) else {}
     normalized = str(options.get("output_mode") or "").strip().lower()
+    # ``edit`` is an explicit client transport contract, not a word inferred
+    # from the user's task. Keep older editor clients on the canonical write
+    # authorization path instead of silently projecting them as read-only.
+    if normalized == "edit":
+        return "write"
     if normalized in {"answer", "write", "hybrid"}:
         return normalized
     return ""
@@ -423,29 +360,6 @@ def has_target_context(request: FileTaskRequest, files: List[FileTaskFile]) -> b
     if request.current_file is not None:
         return True
     return any(bool(file_info and file_info.target) for file_info in files)
-
-
-def infer_output_mode(
-    request: FileTaskRequest,
-    files: List[FileTaskFile],
-    *,
-    write_intent: bool,
-    diagnostic_request: bool,
-    docx_annotation_request: bool,
-    advisory_analysis_request: bool,
-) -> str:
-    explicit_mode = explicit_output_mode(request)
-    if explicit_mode:
-        if explicit_mode == "answer" and not diagnostic_request and write_intent:
-            return "write"
-        return explicit_mode
-    if diagnostic_request:
-        return "answer"
-    if write_intent or docx_annotation_request:
-        return "write"
-    if advisory_analysis_request and has_target_context(request, files):
-        return "hybrid"
-    return "answer"
 
 
 def quick_action_mode(request: FileTaskRequest) -> str:

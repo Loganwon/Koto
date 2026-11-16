@@ -8,14 +8,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from app.core.config.atomic_json_store import (
+    load_json_document,
+    save_json_document,
+    update_json_document,
+)
+
 _LOCK = threading.Lock()
+_PLAN_MIGRATION_LOCK = threading.Lock()
+_PLAN_MIGRATION_DONE = False
 
 
 def _default_store_path() -> Path:
     return Path(
         os.environ.get(
             "KOTO_FILE_TASK_SUMMARY_PATH",
-            Path(__file__).resolve().parents[3] / "config" / "file_task_summaries.json",
+            Path(__file__).resolve().parents[3] / "data" / "file_task_summaries.json",
         )
     )
 
@@ -48,12 +56,7 @@ def _path_keys(value: Any) -> set[str]:
 
 def _load_records(path: Optional[str | Path] = None) -> List[Dict[str, Any]]:
     store_path = Path(path) if path else _default_store_path()
-    if not store_path.exists():
-        return []
-    try:
-        raw = json.loads(store_path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
+    raw = load_json_document(store_path, default=[])
     if not isinstance(raw, list):
         return []
     return [item for item in raw if isinstance(item, dict)]
@@ -63,12 +66,7 @@ def _write_records(
     records: List[Dict[str, Any]], path: Optional[str | Path] = None
 ) -> None:
     store_path = Path(path) if path else _default_store_path()
-    store_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = store_path.with_suffix(store_path.suffix + ".tmp")
-    temp_path.write_text(
-        json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    temp_path.replace(store_path)
+    save_json_document(store_path, records)
 
 
 def save_task_summary(
@@ -94,11 +92,19 @@ def save_task_summary(
         "created_at": now,
         "updated_at": now,
     }
-    with _LOCK:
-        records = _load_records(path)
+    store_path = Path(path) if path else _default_store_path()
+
+    def _append(current: Any) -> List[Dict[str, Any]]:
+        records = (
+            [item for item in current if isinstance(item, dict)]
+            if isinstance(current, list)
+            else []
+        )
         records.append(record)
-        records = records[-500:]
-        _write_records(records, path)
+        return records[-500:]
+
+    with _LOCK:
+        update_json_document(store_path, _append, default=[])
     return dict(record)
 
 
@@ -154,25 +160,63 @@ def _plan_store_path() -> Path:
     return Path(
         os.environ.get(
             "KOTO_FILE_TASK_PLAN_PATH",
-            Path(__file__).resolve().parents[3] / "config" / "file_task_plans.json",
+            Path(__file__).resolve().parents[3] / "data" / "file_task_plans.json",
         )
     )
+
+
+def _legacy_plan_store_paths() -> List[Path]:
+    primary = _plan_store_path()
+    paths = [primary]
+    if "KOTO_FILE_TASK_PLAN_PATH" not in os.environ:
+        old_source_path = (
+            Path(__file__).resolve().parents[3] / "config" / "file_task_plans.json"
+        )
+        if old_source_path != primary:
+            paths.append(old_source_path)
+    return paths
+
+
+def _migrate_legacy_plan_store_once() -> None:
+    """Import the former JSON plan ledger into SQLite without deleting it."""
+    global _PLAN_MIGRATION_DONE
+    if _PLAN_MIGRATION_DONE:
+        return
+    with _PLAN_MIGRATION_LOCK:
+        if _PLAN_MIGRATION_DONE:
+            return
+        for legacy_path in _legacy_plan_store_paths():
+            if not legacy_path.exists():
+                continue
+            records = load_json_document(legacy_path, default=[])
+            if not isinstance(records, list):
+                raise RuntimeError("legacy file-task plans must be a JSON array")
+            from app.core.tasks.task_ledger import get_ledger
+
+            ledger = get_ledger()
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                run_id = str(record.get("run_id") or "").strip()
+                if run_id:
+                    ledger.upsert_task_plan(run_id, record)
+        _PLAN_MIGRATION_DONE = True
 
 
 def save_task_plan(
     *,
     run_id: str,
-    recipe_id: str = "",
-    task: str = "",
-    target_path: str = "",
-    source_path: str = "",
-    total_steps: int = 0,
-    completed_steps: int = 0,
-    current_page_start: int = 0,
-    current_page_end: int = 0,
-    total_pages: int = 0,
-    total_paragraphs: int = 0,
-    status: str = "in_progress",
+    recipe_id: Optional[str] = None,
+    task: Optional[str] = None,
+    target_path: Optional[str] = None,
+    source_path: Optional[str] = None,
+    total_steps: Optional[int] = None,
+    completed_steps: Optional[int] = None,
+    current_page_start: Optional[int] = None,
+    current_page_end: Optional[int] = None,
+    total_pages: Optional[int] = None,
+    total_paragraphs: Optional[int] = None,
+    status: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Save or update a task plan for cross-step continuity."""
@@ -180,57 +224,61 @@ def save_task_plan(
     if not clean_run_id:
         return {}
 
-    now = _now_iso()
-    plan = {
-        "run_id": clean_run_id,
-        "recipe_id": str(recipe_id or ""),
-        "task": str(task or "")[:500],
-        "target_path": _normalize_path(target_path),
-        "source_path": _normalize_path(source_path),
-        "total_steps": max(0, int(total_steps or 0)),
-        "completed_steps": max(0, int(completed_steps or 0)),
-        "current_page_start": max(0, int(current_page_start or 0)),
-        "current_page_end": max(0, int(current_page_end or 0)),
-        "total_pages": max(0, int(total_pages or 0)),
-        "total_paragraphs": max(0, int(total_paragraphs or 0)),
-        "status": str(status or "in_progress")[:32],
-        "extra": dict(extra) if isinstance(extra, dict) else {},
-        "created_at": now,
-        "updated_at": now,
+    from app.core.tasks.task_ledger import get_ledger
+
+    _migrate_legacy_plan_store_once()
+
+    patch: Dict[str, Any] = {}
+    text_fields = {
+        "recipe_id": recipe_id,
+        "task": task,
+        "target_path": target_path,
+        "source_path": source_path,
+        "status": status,
     }
+    for key, value in text_fields.items():
+        if value is None:
+            continue
+        if key in {"target_path", "source_path"}:
+            patch[key] = _normalize_path(value)
+        elif key == "task":
+            patch[key] = str(value or "")[:500]
+        elif key == "status":
+            patch[key] = str(value or "in_progress")[:32]
+        else:
+            patch[key] = str(value or "")
+    for key, value in {
+        "total_steps": total_steps,
+        "completed_steps": completed_steps,
+        "current_page_start": current_page_start,
+        "current_page_end": current_page_end,
+        "total_pages": total_pages,
+        "total_paragraphs": total_paragraphs,
+    }.items():
+        if value is not None:
+            patch[key] = max(0, int(value or 0))
+    if isinstance(extra, dict):
+        patch["extra"] = dict(extra)
 
-    store_path = _plan_store_path()
-    store_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with _LOCK:
-        records = []
-        if store_path.exists():
-            try:
-                records = json.loads(store_path.read_text(encoding="utf-8"))
-            except Exception:
-                records = []
-        if not isinstance(records, list):
-            records = []
-
-        # Update existing or append
-        found = False
-        for i, rec in enumerate(records):
-            if isinstance(rec, dict) and rec.get("run_id") == clean_run_id:
-                plan["created_at"] = rec.get("created_at", now)
-                records[i] = plan
-                found = True
-                break
-        if not found:
-            records.append(plan)
-
-        records = records[-200:]
-        temp_path = store_path.with_suffix(store_path.suffix + ".tmp")
-        temp_path.write_text(
-            json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        temp_path.replace(store_path)
-
-    return dict(plan)
+    existing = get_ledger().get_task_plan(clean_run_id)
+    if existing is None:
+        defaults = {
+            "recipe_id": "",
+            "task": "",
+            "target_path": "",
+            "source_path": "",
+            "total_steps": 0,
+            "completed_steps": 0,
+            "current_page_start": 0,
+            "current_page_end": 0,
+            "total_pages": 0,
+            "total_paragraphs": 0,
+            "status": "in_progress",
+            "extra": {},
+        }
+        defaults.update(patch)
+        patch = defaults
+    return get_ledger().upsert_task_plan(clean_run_id, patch)
 
 
 def load_task_plan(run_id: str) -> Optional[Dict[str, Any]]:
@@ -239,56 +287,33 @@ def load_task_plan(run_id: str) -> Optional[Dict[str, Any]]:
     if not clean_run_id:
         return None
 
-    store_path = _plan_store_path()
-    if not store_path.exists():
-        return None
+    from app.core.tasks.task_ledger import get_ledger
 
-    with _LOCK:
-        try:
-            records = json.loads(store_path.read_text(encoding="utf-8"))
-        except Exception:
-            return None
-
-    if not isinstance(records, list):
-        return None
-
-    for rec in reversed(records):
-        if isinstance(rec, dict) and rec.get("run_id") == clean_run_id:
-            return dict(rec)
-    return None
+    _migrate_legacy_plan_store_once()
+    return get_ledger().get_task_plan(clean_run_id)
 
 
 def load_active_plans(limit: int = 10) -> List[Dict[str, Any]]:
     """Load all active (in_progress) task plans."""
-    store_path = _plan_store_path()
-    if not store_path.exists():
-        return []
+    from app.core.tasks.task_ledger import get_ledger
 
-    with _LOCK:
-        try:
-            records = json.loads(store_path.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-
-    if not isinstance(records, list):
-        return []
-
-    active = [
-        dict(r)
-        for r in records
-        if isinstance(r, dict) and r.get("status") == "in_progress"
-    ]
-    return active[-limit:]
+    _migrate_legacy_plan_store_once()
+    return get_ledger().list_task_plans(status="in_progress", limit=limit)
 
 
 def mark_plan_complete(run_id: str) -> bool:
     """Mark a task plan as completed."""
-    return bool(
-        save_task_plan(
-            run_id=run_id,
-            status="completed",
-        )
-    )
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return False
+    from app.core.tasks.task_ledger import get_ledger
+
+    _migrate_legacy_plan_store_once()
+    if get_ledger().get_task_plan(clean_run_id) is None:
+        return False
+    get_ledger().upsert_task_plan(clean_run_id, {"status": "completed"})
+    get_ledger().mark_control_terminal(clean_run_id, "completed")
+    return True
 
 
 def format_plan_as_context(plan: Optional[Dict[str, Any]]) -> str:

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xsi:type="TaskPaneApp">
+  <Id>eaedbd83-a37e-486f-ae91-f49b96278272</Id><Version>1.0.0.0</Version><ProviderName>Koto</ProviderName><DefaultLocale>zh-CN</DefaultLocale>
+  <DisplayName DefaultValue="Koto"/><Description DefaultValue="在 PowerPoint 中逐个检查文本框修改。"/>
+  <IconUrl DefaultValue="https://127.0.0.1:19742/icon.png"/><HighResolutionIconUrl DefaultValue="https://127.0.0.1:19742/icon.png"/>
+  <SupportUrl DefaultValue="https://127.0.0.1:19742/ui/?host=powerpoint"/>
+  <AppDomains><AppDomain>https://127.0.0.1:19742</AppDomain></AppDomains>
+  <Hosts><Host Name="Presentation"/></Hosts><Requirements><Sets DefaultMinVersion="1.6"><Set Name="PowerPointApi"/></Sets></Requirements>
+  <DefaultSettings><SourceLocation DefaultValue="https://127.0.0.1:19742/ui/?host=powerpoint"/></DefaultSettings><Permissions>ReadWriteDocument</Permissions>
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts><Host xsi:type="Presentation"><DesktopFormFactor>
+      <GetStarted><Title resid="Koto.Title"/><Description resid="Koto.Description"/><LearnMoreUrl resid="Koto.Url"/></GetStarted>
+      <FunctionFile resid="Koto.Url"/>
+      <ExtensionPoint xsi:type="PrimaryCommandSurface"><CustomTab id="Koto.Tab"><Group id="Koto.Group"><Label resid="Koto.Title"/><Icon><bt:Image size="16" resid="Koto.Icon"/><bt:Image size="32" resid="Koto.Icon"/><bt:Image size="80" resid="Koto.Icon"/></Icon><Control xsi:type="Button" id="Koto.Open"><Label resid="Koto.OpenLabel"/><Supertip><Title resid="Koto.Title"/><Description resid="Koto.Description"/></Supertip><Icon><bt:Image size="16" resid="Koto.Icon"/><bt:Image size="32" resid="Koto.Icon"/><bt:Image size="80" resid="Koto.Icon"/></Icon><Action xsi:type="ShowTaskpane"><TaskpaneId>Office.AutoShowTaskpaneWithDocument</TaskpaneId><SourceLocation resid="Koto.Url"/></Action></Control></Group><Label resid="Koto.Title"/></CustomTab></ExtensionPoint>
+    </DesktopFormFactor></Host></Hosts>
+    <Resources><bt:Images><bt:Image id="Koto.Icon" DefaultValue="https://127.0.0.1:19742/icon.png"/></bt:Images><bt:Urls><bt:Url id="Koto.Url" DefaultValue="https://127.0.0.1:19742/ui/?host=powerpoint"/></bt:Urls><bt:ShortStrings><bt:String id="Koto.Title" DefaultValue="Koto"/><bt:String id="Koto.OpenLabel" DefaultValue="打开 Koto"/></bt:ShortStrings><bt:LongStrings><bt:String id="Koto.Description" DefaultValue="选择文字或文本框后直接提要求；每次修改后检查并反馈。"/></bt:LongStrings></Resources>
+  </VersionOverrides>
+</OfficeApp>

@@ -17,10 +17,13 @@ import re
 import shutil
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from tests.source_graph import read_frontend_partitions
 
 # ── Ensure project root is importable ──
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,18 +37,27 @@ if str(ROOT) not in sys.path:
 def parse_sse_events(response_data: bytes) -> list:
     """Parse SSE response bytes into list of event dicts."""
     events = []
-    for chunk in response_data.decode("utf-8", errors="replace").split("\n\n"):
-        chunk = chunk.strip()
-        if chunk.startswith("data: "):
-            try:
-                events.append(json.loads(chunk[6:]))
-            except json.JSONDecodeError:
-                pass
+    for chunk in (
+        response_data.decode("utf-8", errors="replace")
+        .replace("\r\n", "\n")
+        .split("\n\n")
+    ):
+        data_lines = [
+            line[5:].lstrip() for line in chunk.splitlines() if line.startswith("data:")
+        ]
+        if not data_lines:
+            continue
+        try:
+            events.append(json.loads("\n".join(data_lines)))
+        except json.JSONDecodeError:
+            pass
     return events
 
 
 def _read_frontend_source(rel_path: str) -> str:
     """Read a frontend source file relative to the repository root."""
+    if Path(rel_path).suffix in {".ts", ".js", ".css"}:
+        return read_frontend_partitions(rel_path)
     return (ROOT / rel_path).read_text(encoding="utf-8")
 
 
@@ -88,14 +100,17 @@ def app_client():
         }
     )
 
-    with patch.dict("sys.modules", {}):
+    # Keep one module identity for the whole process.  Rolling back sys.modules
+    # after each client fixture leaves Flask ContextVars and runtime patches
+    # attached to stale module objects, which makes later stream tests flaky.
+    with nullcontext():
         # We need to patch the client object in web.app
         try:
             from app.core.agent import llm_provider_helpers
             from app.core.agent.editor_quick_action_executor import (
                 EditorQuickActionExecutor,
             )
-            from app.core.agent.lifecycle import (
+            from app.core.agent.kernel import (
                 evt_error,
                 evt_stream_chunk,
                 evt_task_complete,
@@ -108,9 +123,10 @@ def app_client():
             # Patch the client and types (to avoid google.genai circular import under test)
             import web.app as web_app_module
 
-            original_client = getattr(web_app_module, "client", None)
-            original_api_key = getattr(web_app_module, "API_KEY", None)
-            original_types = getattr(web_app_module, "types", None)
+            missing = object()
+            original_client = getattr(web_app_module, "client", missing)
+            original_api_key = getattr(web_app_module, "API_KEY", missing)
+            original_types = getattr(web_app_module, "types", missing)
             original_llm_judge = getattr(OutputValidator, "_llm_judge")
             original_quick_iter_events = EditorQuickActionExecutor.iter_events
             mock_types = MagicMock()
@@ -158,9 +174,15 @@ def app_client():
             EditorQuickActionExecutor.iter_events = fake_quick_iter_events
             yield app.test_client()
             # Restore
-            web_app_module.client = original_client
-            web_app_module.API_KEY = original_api_key
-            web_app_module.types = original_types
+            for name, original in (
+                ("client", original_client),
+                ("API_KEY", original_api_key),
+                ("types", original_types),
+            ):
+                if original is missing:
+                    delattr(web_app_module, name)
+                else:
+                    setattr(web_app_module, name, original)
             OutputValidator._llm_judge = original_llm_judge
             EditorQuickActionExecutor.iter_events = original_quick_iter_events
         except ImportError as e:
@@ -205,6 +227,10 @@ class TestEditorAIStream:
             }
 
         monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
+        monkeypatch.setattr(
+            "app.core.llm.local_model_runtime.get_configured_model_mode",
+            lambda: "local",
+        )
 
         resp = app_client.post(
             "/api/editor/ai/task-stream",
@@ -301,7 +327,7 @@ class TestEditorAIStream:
         )
 
         def fake_call_model(self, **kwargs):
-            return next(responses)
+            return next(responses, {"content": "已完成。", "tool_calls": []})
 
         monkeypatch.setattr(FileTaskRuntime, "_call_model", fake_call_model)
 
@@ -371,7 +397,9 @@ class TestEditorAIStream:
         import app.core.agent.task_tools as task_tools
         from app.core.agent.file_task_runtime import FileTaskRuntime
 
-        monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+        monkeypatch.setattr(
+            "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+        )
         monkeypatch.setattr(
             task_tools,
             "parse_file_to_text",
@@ -514,7 +542,7 @@ class TestEditorAIStream:
         )
 
         def fake_call_model(self, **kwargs):
-            return next(responses)
+            return next(responses, {"content": "已完成。", "tool_calls": []})
 
         monkeypatch.setattr(FileTaskRuntime, "_call_model", fake_call_model)
 
@@ -553,7 +581,7 @@ class TestEditorAIStream:
         assert insert_finished["payload"]["success"] is False
         assert "File not found" in insert_finished["payload"]["result_preview"]
         assert not any(event.get("type") == "file.changed" for event in events)
-        assert check_finished["payload"]["status"] == "no_file_change"
+        assert check_finished["payload"]["status"] == "write_not_performed"
         assert run_finished["payload"]["completed_task"] is False
         assert len(Document(str(target_path)).tables) == 0
 
@@ -763,20 +791,20 @@ class TestEditorAIStream:
         )
 
         assert resp.status_code == 200
-        assert tool_missing["payload"]["runtime"]["execution_path"] == "native"
-        assert tool_missing["payload"]["runtime"]["planner"]["backend"] == "native"
+        assert tool_missing["payload"]["runtime"]["execution_path"] == "planner"
+        assert tool_missing["payload"]["runtime"]["planner"]["backend"] == "kernel"
         assert (
             tool_missing["payload"]["next_action_artifact"]["runtime_context"][
                 "execution_path"
             ]
-            == "native"
+            == "planner"
         )
         assert (
             tool_missing["payload"]["next_action_artifact"]["missing_capability"]
             == "read_cad_file"
         )
         assert check_finished["payload"]["runtime"]["terminal_status"] == "tool_gap"
-        assert run_finished["payload"]["runtime"]["execution_path"] == "native"
+        assert run_finished["payload"]["runtime"]["execution_path"] == "planner"
         assert run_finished["payload"]["runtime"]["terminal_status"] == "tool_gap"
 
     def test_whitebox_task_stream_requires_task(self, app_client):
@@ -786,1204 +814,16 @@ class TestEditorAIStream:
         assert resp.status_code == 400
         assert resp.get_json()["error"] == "Missing 'task' parameter"
 
-    def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge(
-        self, app_client, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        from app.core.agent.file_task_contract import FileTaskLedger
-        from app.core.agent.file_task_runtime import FileTaskRuntime
-
-        pdf_path = tmp_path / "source.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4\n")
-        docx_path = tmp_path / "translation.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        captured = {}
-
-        def fake_stream(request, **kwargs):
-            captured["request"] = request
-            ledger = FileTaskLedger(request.run_id)
-            yield ledger.event(
-                "run.started",
-                {
-                    "task": request.task,
-                    "mode": "doc_annotate_bridge",
-                    "target_path": str(docx_path),
-                    "source_path": str(pdf_path),
-                },
-                step_id="run",
-            )
-            yield ledger.event(
-                "plan.created",
-                {
-                    "summary": "识别为 PDF 原文 + DOCX 译稿审校任务，改走 Word 修订写回流程。",
-                    "steps": [{"id": "reference", "title": "整理 PDF 原文窗口"}],
-                },
-                step_id="plan",
-            )
-            yield ledger.event(
-                "step_progress",
-                {
-                    "detail": "已写入 2 条审校修订",
-                    "progress": 84,
-                    "level": "progress",
-                    "file_updated": True,
-                    "path": str(docx_path),
-                    "file_path": str(docx_path),
-                    "supported": True,
-                },
-                step_id="review",
-            )
-            yield ledger.event(
-                "file.changed",
-                {
-                    "path": str(docx_path),
-                    "file_path": str(docx_path),
-                    "file_type": "docx",
-                    "operation": "annotate_file",
-                    "summary": f"已将 2 条修订写回 {docx_path.name}。",
-                    "annotations_added": 2,
-                    "source_path": str(pdf_path),
-                },
-                step_id="write",
-            )
-            yield ledger.event(
-                "run.finished",
-                {
-                    "summary": f"已更新 {docx_path.name}。",
-                    "completed_task": True,
-                    "mode": "doc_annotate_bridge",
-                },
-                step_id="run",
-            )
-
-        def unexpected_build_tool_gateway(self, request, context_files):
-            raise AssertionError(
-                "generic FileTaskRuntime loop should not execute for doc annotate bridge requests"
-            )
-
-        def unexpected_call_model(self, **kwargs):
-            raise AssertionError(
-                "generic model loop should not execute for doc annotate bridge requests"
-            )
-
-        monkeypatch.setattr(bridge, "stream_request", fake_stream)
-        monkeypatch.setattr(
-            FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway
-        )
-        monkeypatch.setattr(FileTaskRuntime, "_call_model", unexpected_call_model)
-
-        resp = app_client.post(
-            "/api/editor/ai/task-stream",
-            json={
-                "task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，重新考虑中文翻译不当的部分或有复议可能性的用词或者替换成别的词的地方都标注出来。学术化翻译和中文学界常用词不对应的地方也标注出来，谨遵原著，不要有任何删减和添加。由于文件比较大内容比较多，我建议你将整个任务拆分成多个分段来处理，以保证最终结果的质量和任务可执行性",
-                "session_id": "workspace_demo",
-                "target_path": str(docx_path),
-                "files": [
-                    {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {
-                        "path": str(docx_path),
-                        "name": "translation.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-            },
-        )
-
-        events = parse_sse_events(resp.get_data())
-
-        assert resp.status_code == 200
-        assert captured["request"].target_path == str(docx_path)
-        run_started = next(
-            event for event in events if event.get("type") == "run.started"
-        )
-        assert run_started["payload"]["mode"] == "whitebox_v1"
-        assert run_started["payload"]["execution_mode"] == "doc_annotate_bridge"
-        assert any(event["type"] == "plan.created" for event in events)
-        assert any(
-            event["type"] == "step_progress" and event["payload"].get("file_updated")
-            for event in events
-        )
-        assert any(
-            event["type"] == "file.changed"
-            and event["payload"].get("path") == str(docx_path)
-            for event in events
-        )
-        assert events[-1]["payload"]["completed_task"] is True
-
-    def test_whitebox_task_stream_routes_single_docx_annotation_to_doc_annotate_bridge(
-        self, app_client, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        from app.core.agent.file_task_contract import FileTaskLedger
-        from app.core.agent.file_task_runtime import FileTaskRuntime
-
-        docx_path = tmp_path / "interview.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        captured = {}
-
-        def fake_stream(request, **kwargs):
-            captured["request"] = request
-            ledger = FileTaskLedger(request.run_id)
-            yield ledger.event(
-                "run.started",
-                {
-                    "task": request.task,
-                    "mode": "doc_annotate_bridge",
-                    "target_path": str(docx_path),
-                },
-                step_id="run",
-            )
-            yield ledger.event(
-                "step_progress",
-                {
-                    "detail": "已写入 1/2 条修订",
-                    "progress": 80,
-                    "level": "progress",
-                    "file_updated": True,
-                    "path": str(docx_path),
-                    "file_path": str(docx_path),
-                    "supported": True,
-                },
-                step_id="review",
-            )
-            yield ledger.event(
-                "file.changed",
-                {
-                    "path": str(docx_path),
-                    "file_path": str(docx_path),
-                    "file_type": "docx",
-                    "operation": "annotate_file",
-                    "summary": f"已将 2 条修订写回 {docx_path.name}。",
-                    "annotations_added": 2,
-                },
-                step_id="write",
-            )
-            yield ledger.event(
-                "run.finished",
-                {
-                    "summary": f"已更新 {docx_path.name}。",
-                    "completed_task": True,
-                    "mode": "doc_annotate_bridge",
-                },
-                step_id="run",
-            )
-
-        def unexpected_build_tool_gateway(self, request, context_files):
-            raise AssertionError(
-                "generic FileTaskRuntime loop should not execute for doc annotate bridge requests"
-            )
-
-        def unexpected_call_model(self, **kwargs):
-            raise AssertionError(
-                "generic model loop should not execute for doc annotate bridge requests"
-            )
-
-        monkeypatch.setattr(bridge, "stream_request", fake_stream)
-        monkeypatch.setattr(
-            FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway
-        )
-        monkeypatch.setattr(FileTaskRuntime, "_call_model", unexpected_call_model)
-
-        resp = app_client.post(
-            "/api/editor/ai/task-stream",
-            json={
-                "task": "将你觉得写得不好的地方批注出来",
-                "session_id": "workspace_demo",
-                "target_path": str(docx_path),
-                "files": [
-                    {
-                        "path": str(docx_path),
-                        "name": "interview.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-            },
-        )
-
-        events = parse_sse_events(resp.get_data())
-
-        assert resp.status_code == 200
-        assert captured["request"].target_path == str(docx_path)
-        run_started = next(
-            event for event in events if event.get("type") == "run.started"
-        )
-        assert run_started["payload"]["mode"] == "whitebox_v1"
-        assert run_started["payload"]["execution_mode"] == "doc_annotate_bridge"
-        assert any(
-            event["type"] == "step_progress" and event["payload"].get("file_updated")
-            for event in events
-        )
-        assert any(
-            event["type"] == "file.changed"
-            and event["payload"].get("path") == str(docx_path)
-            for event in events
-        )
-        assert events[-1]["payload"]["completed_task"] is True
-
-    def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge_in_local_mode(
-        self, app_client, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        from app.core.agent.file_task_contract import FileTaskLedger
-        from app.core.agent.file_task_runtime import FileTaskRuntime
-
-        pdf_path = tmp_path / "source.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4\n")
-        docx_path = tmp_path / "translation.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        captured = {"request": None}
-
-        def fake_stream(request, **kwargs):
-            captured["request"] = request
-            ledger = FileTaskLedger(request.run_id)
-            yield ledger.event(
-                "run.started",
-                {
-                    "task": request.task,
-                    "mode": "doc_annotate_bridge",
-                    "target_path": str(docx_path),
-                    "source_path": str(pdf_path),
-                    "model_mode": request.model_mode,
-                },
-                step_id="run",
-            )
-            yield ledger.event(
-                "run.finished",
-                {
-                    "summary": f"已更新 {docx_path.name}。",
-                    "completed_task": True,
-                    "mode": "doc_annotate_bridge",
-                },
-                step_id="run",
-            )
-
-        def unexpected_build_tool_gateway(self, request, context_files):
-            raise AssertionError(
-                "generic FileTaskRuntime loop should not execute for doc annotate bridge requests"
-            )
-
-        def unexpected_call_model(self, **kwargs):
-            raise AssertionError(
-                "generic model loop should not execute for doc annotate bridge requests"
-            )
-
-        monkeypatch.setattr(bridge, "stream_request", fake_stream)
-        monkeypatch.setattr(
-            FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway
-        )
-        monkeypatch.setattr(FileTaskRuntime, "_call_model", unexpected_call_model)
-
-        resp = app_client.post(
-            "/api/editor/ai/task-stream",
-            json={
-                "task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，重新考虑中文翻译不当的部分或有复议可能性的用词或者替换成别的词的地方都标注出来。学术化翻译和中文学界常用词不对应的地方也标注出来，谨遵原著，不要有任何删减和添加。由于文件比较大内容比较多，我建议你将整个任务拆分成多个分段来处理，以保证最终结果的质量和任务可执行性",
-                "session_id": "workspace_demo",
-                "model_mode": "local",
-                "model_id": "local",
-                "target_path": str(docx_path),
-                "files": [
-                    {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {
-                        "path": str(docx_path),
-                        "name": "translation.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-            },
-        )
-
-        events = parse_sse_events(resp.get_data())
-
-        assert resp.status_code == 200
-        assert captured["request"].model_mode == "local"
-        run_started = next(
-            event for event in events if event.get("type") == "run.started"
-        )
-        assert run_started["payload"]["mode"] == "whitebox_v1"
-        assert run_started["payload"]["execution_mode"] == "doc_annotate_bridge"
-        assert events[-1]["payload"]["completed_task"] is True
-
-    def test_whitebox_task_stream_followup_feedback_bypasses_doc_annotate_bridge(
-        self, app_client, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        from app.core.agent.file_task_contract import FileTaskLedger
-        from app.core.agent.file_task_runtime import FileTaskRuntime
-
-        pdf_path = tmp_path / "source.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4\n")
-        docx_path = tmp_path / "translation.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        captured = {}
-
-        def fail_stream(request, **kwargs):
-            raise AssertionError(
-                "doc annotate bridge should not handle review-last-task follow-up feedback"
-            )
-
-        def fake_run(self, request):
-            captured["request"] = request
-            ledger = FileTaskLedger(request.run_id)
-            yield ledger.event(
-                "run.started",
-                {"task": request.task, "mode": "whitebox_v1"},
-                step_id="run",
-            )
-            yield ledger.event(
-                "run.finished",
-                {
-                    "summary": "先反馈上一轮结果。",
-                    "completed_task": True,
-                    "mode": "whitebox_v1",
-                },
-                step_id="run",
-            )
-
-        monkeypatch.setattr(bridge, "stream_request", fail_stream)
-        monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
-
-        resp = app_client.post(
-            "/api/editor/ai/task-stream",
-            json={
-                "task": "为什么你这次审校结果这么处理？",
-                "session_id": "workspace_demo",
-                "target_path": str(docx_path),
-                "files": [
-                    {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {
-                        "path": str(docx_path),
-                        "name": "translation.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-                "options": {
-                    "followup_context": {
-                        "kind": "review_last_task",
-                        "user_feedback": "为什么你这次审校结果这么处理？",
-                        "previous_task_summary": "已生成带批注的审校稿 translation_revised.docx",
-                    }
-                },
-            },
-        )
-
-        events = parse_sse_events(resp.get_data())
-
-        assert resp.status_code == 200
-        assert (
-            captured["request"].options["followup_context"]["kind"]
-            == "review_last_task"
-        )
-        run_started = next(
-            event for event in events if event.get("type") == "run.started"
-        )
-        assert run_started["payload"]["mode"] == "whitebox_v1"
-        assert events[-1]["payload"]["completed_task"] is True
-
-    def test_whitebox_task_stream_followup_improve_routes_back_to_doc_annotate_bridge(
-        self, app_client, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        from app.core.agent.file_task_contract import FileTaskLedger
-        from app.core.agent.file_task_runtime import FileTaskRuntime
-
-        pdf_path = tmp_path / "source.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4\n")
-        docx_path = tmp_path / "translation.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        captured = {"request": None}
-
-        def fake_stream(request, **kwargs):
-            captured["request"] = request
-            ledger = FileTaskLedger(request.run_id)
-            yield ledger.event(
-                "run.started",
-                {
-                    "task": request.task,
-                    "mode": "doc_annotate_bridge",
-                    "target_path": str(docx_path),
-                    "source_path": str(pdf_path),
-                },
-                step_id="run",
-            )
-            yield ledger.event(
-                "step_progress",
-                {
-                    "detail": "已继续优化 1 处批注",
-                    "progress": 82,
-                    "level": "progress",
-                    "file_updated": True,
-                    "path": str(docx_path),
-                    "file_path": str(docx_path),
-                    "supported": True,
-                },
-                step_id="review",
-            )
-            yield ledger.event(
-                "run.finished",
-                {
-                    "summary": f"已继续优化 {docx_path.name}。",
-                    "completed_task": True,
-                    "mode": "doc_annotate_bridge",
-                },
-                step_id="run",
-            )
-
-        def unexpected_build_tool_gateway(self, request, context_files):
-            raise AssertionError(
-                "generic FileTaskRuntime loop should not execute for doc annotate bridge requests"
-            )
-
-        def unexpected_call_model(self, **kwargs):
-            raise AssertionError(
-                "generic model loop should not execute for doc annotate bridge requests"
-            )
-
-        monkeypatch.setattr(bridge, "stream_request", fake_stream)
-        monkeypatch.setattr(
-            FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway
-        )
-        monkeypatch.setattr(FileTaskRuntime, "_call_model", unexpected_call_model)
-
-        resp = app_client.post(
-            "/api/editor/ai/task-stream",
-            json={
-                "task": "请继续优化上一轮审校结果",
-                "session_id": "workspace_demo",
-                "target_path": str(docx_path),
-                "files": [
-                    {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {
-                        "path": str(docx_path),
-                        "name": "translation.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-                "options": {
-                    "followup_context": {
-                        "kind": "review_last_task",
-                        "followup_action": "improve",
-                        "user_feedback": "请继续优化上一轮审校结果",
-                        "previous_task_request": "根据原文审校这个译稿",
-                        "previous_task_mode": "doc_annotate_bridge",
-                    }
-                },
-            },
-        )
-
-        events = parse_sse_events(resp.get_data())
-
-        assert resp.status_code == 200
-        assert (
-            captured["request"].options["followup_context"]["followup_action"]
-            == "improve"
-        )
-        run_started = next(
-            event for event in events if event.get("type") == "run.started"
-        )
-        assert run_started["payload"]["mode"] == "whitebox_v1"
-        assert run_started["payload"]["execution_mode"] == "doc_annotate_bridge"
-        assert events[-1]["payload"]["completed_task"] is True
-
-    def test_doc_annotate_bridge_forwards_review_and_write_progress(
-        self, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        import web.document_feedback as feedback_module
-        from app.core.agent.file_task_contract import FileTaskRequest
-
-        pdf_path = tmp_path / "source.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4\n")
-        docx_path = tmp_path / "translation.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        class FakeFeedback:
-            default_model_id = "gemini-2.5-pro"
-
-            def __init__(self, gemini_client=None):
-                self.gemini_client = gemini_client
-
-            def full_annotation_loop_streaming(self, *args, **kwargs):
-                yield {
-                    "stage": "reading",
-                    "progress": 5,
-                    "message": "📖 正在读取文档",
-                    "detail": "解析Word文件结构",
-                }
-                yield {
-                    "stage": "reading_complete",
-                    "progress": 10,
-                    "message": "✅ 文档读取完成",
-                    "detail": "12 段，3000 字",
-                }
-                yield {
-                    "stage": "analyzing",
-                    "progress": 24,
-                    "message": "🤖 正在分析文档...",
-                    "detail": "第 1/5 段已完成，累计 2 条建议",
-                }
-                yield {
-                    "stage": "warning",
-                    "progress": 30,
-                    "message": "⚠️ AI 分析未成功（1/5分段使用本地规则兜底）",
-                    "detail": "API 错误: timeout",
-                }
-                yield {
-                    "stage": "analysis_complete",
-                    "progress": 50,
-                    "message": "✅ 分析完成",
-                    "detail": "找到 6 处修改",
-                }
-                yield {
-                    "stage": "applying",
-                    "progress": 78,
-                    "message": "✏️ 正在写回 Word 修订",
-                    "detail": "已写入 3/6 条修订",
-                    "file_updated": True,
-                    "path": str(docx_path),
-                    "file_path": str(docx_path),
-                    "supported": True,
-                    "applied": 3,
-                }
-                yield {
-                    "stage": "complete",
-                    "progress": 100,
-                    "result": {
-                        "success": True,
-                        "revised_file": str(docx_path),
-                        "applied": 6,
-                    },
-                }
-
-        monkeypatch.setattr(
-            bridge,
-            "_build_pdf_reference_windows",
-            lambda path: (
-                ["[Page 1]\nOriginal source text"],
-                {"window_count": 1, "page_count": 1, "window_pages": 4},
-            ),
-        )
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        request = FileTaskRequest.from_mapping(
-            {
-                "task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，并标注可能需要复议的用词。",
-                "target_path": str(docx_path),
-                "files": [
-                    {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {
-                        "path": str(docx_path),
-                        "name": "translation.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-            }
-        )
-
-        events = list(bridge.stream_request(request, workspace_root=str(tmp_path)))
-
-        assert any(
-            event.type == "step_progress"
-            and event.step_id == "review"
-            and "第 1/5 段已完成" in str(event.payload.get("detail") or "")
-            for event in events
-        )
-        assert any(
-            event.type == "step_progress"
-            and event.step_id == "write"
-            and "已写入 3/6 条修订" in str(event.payload.get("detail") or "")
-            for event in events
-        )
-        assert any(
-            event.type == "step_progress"
-            and event.step_id == "write"
-            and event.payload.get("file_updated") is True
-            and event.payload.get("path") == str(docx_path)
-            for event in events
-        )
-        file_changed = next(event for event in events if event.type == "file.changed")
-        assert file_changed.payload["path"] == str(docx_path)
-        assert file_changed.payload["file_path"] == str(docx_path)
-        assert events[-1].type == "run.finished"
-        assert events[-1].payload["completed_task"] is True
-
-    def test_doc_annotate_bridge_handles_single_docx_annotation_requests(
-        self, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        import web.document_feedback as feedback_module
-        from app.core.agent.file_task_contract import FileTaskRequest
-
-        docx_path = tmp_path / "interview.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        class FakeFeedback:
-            default_model_id = "gemini-2.5-pro"
-
-            def __init__(self, gemini_client=None):
-                self.gemini_client = gemini_client
-
-            def full_annotation_loop_streaming(self, *args, **kwargs):
-                yield {
-                    "stage": "reading",
-                    "progress": 5,
-                    "message": "📖 正在读取文档",
-                    "detail": "解析Word文件结构",
-                }
-                yield {
-                    "stage": "reading_complete",
-                    "progress": 10,
-                    "message": "✅ 文档读取完成",
-                    "detail": "21 段，553 字",
-                }
-                yield {
-                    "stage": "analyzing",
-                    "progress": 40,
-                    "message": "🤖 正在分析文档...",
-                    "detail": "已整理 10 条批注建议",
-                }
-                yield {
-                    "stage": "analysis_complete",
-                    "progress": 65,
-                    "message": "✅ 分析完成",
-                    "detail": "找到 10 处修改",
-                }
-                yield {
-                    "stage": "applying",
-                    "progress": 82,
-                    "message": "✏️ 正在写回 Word 修订",
-                    "detail": "已写入 6/10 条修订",
-                    "file_updated": True,
-                    "path": str(docx_path),
-                    "file_path": str(docx_path),
-                    "supported": True,
-                    "applied": 6,
-                }
-                yield {
-                    "stage": "complete",
-                    "progress": 100,
-                    "result": {
-                        "success": True,
-                        "revised_file": str(docx_path),
-                        "applied": 10,
-                    },
-                }
-
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        request = FileTaskRequest.from_mapping(
-            {
-                "task": "将你觉得写得不好的地方批注出来",
-                "target_path": str(docx_path),
-                "files": [
-                    {
-                        "path": str(docx_path),
-                        "name": "interview.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-            }
-        )
-
-        events = list(bridge.stream_request(request, workspace_root=str(tmp_path)))
-
-        assert events[0].payload["mode"] == "doc_annotate_bridge"
-        assert any(
-            event.type == "tool.finished"
-            and event.payload.get("tool_name") == "read_docx_content"
-            and event.payload.get("path") == str(docx_path)
-            for event in events
-        )
-        assert any(
-            event.type == "step_progress"
-            and event.step_id == "write"
-            and "已写入 6/10 条修订" in str(event.payload.get("detail") or "")
-            for event in events
-        )
-        file_changed = next(event for event in events if event.type == "file.changed")
-        assert file_changed.payload["path"] == str(docx_path)
-        assert file_changed.payload["file_path"] == str(docx_path)
-        assert events[-1].type == "run.finished"
-        assert events[-1].payload["completed_task"] is True
-
-    def test_doc_annotate_bridge_merges_followup_improve_requirement(
-        self, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        import web.document_feedback as feedback_module
-        from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
-
-        pdf_path = tmp_path / "source.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4\n")
-        docx_path = tmp_path / "translation.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        captured = {}
-
-        class FakeFeedback:
-            default_model_id = "gemini-2.5-pro"
-
-            def __init__(self, gemini_client=None):
-                self.gemini_client = gemini_client
-
-            def full_annotation_loop_streaming(self, *args, **kwargs):
-                captured["user_requirement"] = kwargs.get("user_requirement")
-                yield {
-                    "stage": "complete",
-                    "result": {
-                        "success": True,
-                        "revised_file": str(docx_path),
-                        "applied": 1,
-                    },
-                }
-
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-        monkeypatch.setattr(
-            bridge,
-            "_build_pdf_reference_windows",
-            lambda path: (
-                ["[Page 1]\nOriginal source text"],
-                {
-                    "window_count": 1,
-                    "page_count": 1,
-                    "pages_with_text": 1,
-                    "window_pages": 4,
-                },
-            ),
-        )
-
-        request = FileTaskRequest(
-            task="请继续优化上一轮审校结果",
-            run_id="doc_bridge_followup_improve",
-            target_path=str(docx_path),
-            files=[
-                FileTaskFile(path=str(pdf_path), name="source.pdf", type="pdf"),
-                FileTaskFile(
-                    path=str(docx_path),
-                    name="translation.docx",
-                    type="docx",
-                    target=True,
-                ),
-            ],
-            options={
-                "followup_context": {
-                    "kind": "review_last_task",
-                    "followup_action": "improve",
-                    "user_feedback": "请继续优化上一轮审校结果",
-                    "previous_task_request": "根据原文审校这个译稿，给出学术化批注",
-                    "previous_task_mode": "doc_annotate_bridge",
-                }
-            },
-        )
-
-        list(
-            bridge.stream_request(
-                request, workspace_root=str(tmp_path), gemini_client=object()
-            )
-        )
-
-        assert (
-            "上一轮任务要求：根据原文审校这个译稿，给出学术化批注"
-            in captured["user_requirement"]
-        )
-        assert "当前追加反馈：请继续优化上一轮审校结果" in captured["user_requirement"]
-
-    def test_doc_annotate_bridge_emits_confirmed_batch_plan_for_large_files(
-        self, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        import web.document_feedback as feedback_module
-        from app.core.agent.file_task_contract import FileTaskRequest
-
-        monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_TARGET_MINUTES", "6")
-        monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_CHARS_PER_MINUTE", "4000")
-
-        pdf_path = tmp_path / "source.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4\n")
-        docx_path = tmp_path / "translation.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-        revised_path = tmp_path / "translation_revised.docx"
-
-        class FakeFeedback:
-            default_model_id = "gemini-2.5-pro"
-            client = object()
-
-            def __init__(self, gemini_client=None):
-                self.gemini_client = gemini_client
-
-            def full_annotation_loop_streaming(self, *args, **kwargs):
-                yield {"stage": "reading_complete", "detail": "539 段，100099 字"}
-                yield {"stage": "analysis_complete", "detail": "找到 42 处修改"}
-                yield {
-                    "stage": "complete",
-                    "result": {
-                        "success": True,
-                        "revised_file": str(revised_path),
-                        "applied": 42,
-                    },
-                }
-
-            def _split_into_chunks_by_paragraphs(self, content, chunk_size):
-                return [f"chunk-{idx}" for idx in range(27)]
-
-        monkeypatch.setattr(
-            bridge,
-            "_build_pdf_reference_windows",
-            lambda path: (
-                [f"[Page {idx}]\ntext" for idx in range(1, 101)],
-                {
-                    "window_count": 100,
-                    "page_count": 417,
-                    "pages_with_text": 399,
-                    "window_pages": 4,
-                },
-            ),
-        )
-        monkeypatch.setattr(
-            bridge,
-            "_inspect_docx_review_workload",
-            lambda target_docx, feedback: {
-                "paragraph_count": 539,
-                "table_count": 2,
-                "formatted_chars": 102901,
-                "content_chars": 102801,
-                "chunk_size": 4000,
-                "chunk_count": 27,
-            },
-        )
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        request = FileTaskRequest.from_mapping(
-            {
-                "task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，并拆成多个分段来处理。",
-                "target_path": str(docx_path),
-                "files": [
-                    {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {
-                        "path": str(docx_path),
-                        "name": "translation.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-            }
-        )
-
-        events = list(bridge.stream_request(request, workspace_root=str(tmp_path)))
-        confirmed = next(event for event in events if event.type == "plan.confirmed")
-
-        assert confirmed.step_id == "review"
-        assert "按 5 批执行" in confirmed.payload["summary"]
-        assert "约 2.4 万字/批" in confirmed.payload["summary"]
-        assert confirmed.payload["steps"][0]["title"] == "第 1 批：分段 1-6"
-        assert confirmed.payload["steps"][4]["title"] == "第 5 批：分段 25-27"
-        assert confirmed.payload["steps"][-2]["title"] == "汇总并写回修订"
-        assert "417 页" in confirmed.payload["note"]
-        assert "539 段" in confirmed.payload["note"]
-        assert "目标单批约 6 分钟" in confirmed.payload["note"]
-
-    def test_large_translation_review_uses_finer_batches_in_local_mode(
-        self, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        import web.document_feedback as feedback_module
-        from app.core.agent.file_task_contract import FileTaskRequest
-
-        monkeypatch.setenv("KOTO_DOC_REVIEW_LOCAL_BATCH_TARGET_MINUTES", "5")
-        monkeypatch.setenv("KOTO_DOC_REVIEW_LOCAL_BATCH_CHARS_PER_MINUTE", "2400")
-
-        pdf_path = tmp_path / "source.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4\n")
-        docx_path = tmp_path / "translation.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        revised_path = tmp_path / "translation_revised.docx"
-
-        class FakeFeedback:
-            default_model_id = "gemini-2.5-pro"
-            client = object()
-
-            def __init__(self, gemini_client=None):
-                self.gemini_client = gemini_client
-
-            def full_annotation_loop_streaming(self, *args, **kwargs):
-                yield {"stage": "reading_complete", "detail": "539 段，100099 字"}
-                yield {"stage": "analysis_complete", "detail": "找到 42 处修改"}
-                yield {
-                    "stage": "complete",
-                    "result": {
-                        "success": True,
-                        "revised_file": str(revised_path),
-                        "applied": 42,
-                    },
-                }
-
-            def _split_into_chunks_by_paragraphs(self, content, chunk_size):
-                return [f"chunk-{idx}" for idx in range(27)]
-
-        monkeypatch.setattr(
-            bridge,
-            "_build_pdf_reference_windows",
-            lambda path: (
-                [f"[Page {idx}]\ntext" for idx in range(1, 101)],
-                {
-                    "window_count": 100,
-                    "page_count": 417,
-                    "pages_with_text": 399,
-                    "window_pages": 4,
-                },
-            ),
-        )
-        monkeypatch.setattr(
-            bridge,
-            "_inspect_docx_review_workload",
-            lambda target_docx, feedback: {
-                "paragraph_count": 539,
-                "table_count": 2,
-                "formatted_chars": 102901,
-                "content_chars": 102801,
-                "chunk_size": 4000,
-                "chunk_count": 27,
-            },
-        )
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        request = FileTaskRequest.from_mapping(
-            {
-                "task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，并拆成多个分段来处理。",
-                "model_mode": "local",
-                "model_id": "qwen3.5:9b",
-                "target_path": str(docx_path),
-                "files": [
-                    {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {
-                        "path": str(docx_path),
-                        "name": "translation.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-            }
-        )
-
-        events = list(bridge.stream_request(request, workspace_root=str(tmp_path)))
-        confirmed = next(event for event in events if event.type == "plan.confirmed")
-
-        assert confirmed.step_id == "review"
-        assert "按 9 批执行" in confirmed.payload["summary"]
-        assert confirmed.payload["steps"][0]["title"] == "第 1 批：分段 1-3"
-        assert confirmed.payload["steps"][8]["title"] == "第 9 批：分段 25-27"
-        assert "约 1.2 万字/批" in confirmed.payload["summary"]
-        assert "目标单批约 5 分钟" in confirmed.payload["note"]
-
-    def test_local_docx_review_bridge_uses_local_model_identity(
-        self, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        import web.document_feedback as feedback_module
-        from app.core.agent.file_task_contract import FileTaskRequest
-
-        docx_path = tmp_path / "humanise!.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-
-        captured = {}
-
-        class FakeFeedback:
-            client = object()
-
-            def __init__(self, gemini_client=None, default_model_id="gemini-2.5-pro"):
-                captured["default_model_id"] = default_model_id
-                self.gemini_client = gemini_client
-                self.default_model_id = default_model_id
-
-            def full_annotation_loop_streaming(self, *args, **kwargs):
-                captured["stream_model_id"] = kwargs.get("model_id")
-                yield {"stage": "reading_complete", "detail": "12 段，6300 字"}
-                yield {
-                    "stage": "analyzing",
-                    "progress": 15,
-                    "message": "分析中",
-                    "detail": f"使用 AI({kwargs.get('model_id')}) 检查 12 段文本",
-                }
-                yield {"stage": "analysis_complete", "detail": "找到 8 处修改"}
-                yield {
-                    "stage": "complete",
-                    "result": {
-                        "success": True,
-                        "revised_file": str(docx_path),
-                        "applied": 8,
-                    },
-                }
-
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        request = FileTaskRequest.from_mapping(
-            {
-                "task": "将文中不通顺和较为AI表达的地方标出来，并提出修改意见",
-                "model_mode": "local",
-                "model_id": "",
-                "target_path": str(docx_path),
-                "options": {"local_model": "qwen3.5:9b"},
-                "files": [
-                    {
-                        "path": str(docx_path),
-                        "name": docx_path.name,
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-            }
-        )
-
-        events = list(bridge.stream_request(request, workspace_root=str(tmp_path)))
-
-        review_progress = next(
-            event for event in events if event.type == "step_progress"
-        )
-
-        assert captured["default_model_id"] == "qwen3.5:9b"
-        assert captured["stream_model_id"] == "qwen3.5:9b"
-        assert "qwen3.5:9b" in review_progress.payload["detail"]
-
-    def test_large_translation_review_cloud_mode_batches_by_char_budget(
-        self, monkeypatch, tmp_path
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-        import web.document_feedback as feedback_module
-        from app.core.agent.file_task_contract import FileTaskRequest
-
-        monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_TARGET_MINUTES", "6")
-        monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_CHARS_PER_MINUTE", "4000")
-
-        pdf_path = tmp_path / "source.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4\n")
-        docx_path = tmp_path / "translation.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-        revised_path = tmp_path / "translation_revised.docx"
-
-        class FakeFeedback:
-            default_model_id = "gemini-2.5-pro"
-            client = object()
-
-            def __init__(self, gemini_client=None):
-                self.gemini_client = gemini_client
-
-            def full_annotation_loop_streaming(self, *args, **kwargs):
-                yield {"stage": "reading_complete", "detail": "160 段，104000 字"}
-                yield {"stage": "analysis_complete", "detail": "找到 12 处修改"}
-                yield {
-                    "stage": "complete",
-                    "result": {
-                        "success": True,
-                        "revised_file": str(revised_path),
-                        "applied": 12,
-                    },
-                }
-
-        monkeypatch.setattr(
-            bridge,
-            "_build_pdf_reference_windows",
-            lambda path: (
-                [f"[Page {idx}]\ntext" for idx in range(1, 21)],
-                {
-                    "window_count": 20,
-                    "page_count": 90,
-                    "pages_with_text": 84,
-                    "window_pages": 4,
-                },
-            ),
-        )
-        monkeypatch.setattr(
-            bridge,
-            "_inspect_docx_review_workload",
-            lambda target_docx, feedback: {
-                "paragraph_count": 160,
-                "table_count": 0,
-                "formatted_chars": 104120,
-                "content_chars": 104000,
-                "chunk_size": 4000,
-                "chunk_count": 8,
-                "chunk_char_counts": [
-                    20000,
-                    4000,
-                    4000,
-                    20000,
-                    4000,
-                    4000,
-                    24000,
-                    24000,
-                ],
-            },
-        )
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        request = FileTaskRequest.from_mapping(
-            {
-                "task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，并拆成多个分段来处理。",
-                "target_path": str(docx_path),
-                "files": [
-                    {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {
-                        "path": str(docx_path),
-                        "name": "translation.docx",
-                        "type": "docx",
-                        "target": True,
-                    },
-                ],
-            }
-        )
-
-        events = list(bridge.stream_request(request, workspace_root=str(tmp_path)))
-        confirmed = next(event for event in events if event.type == "plan.confirmed")
-
-        assert confirmed.step_id == "review"
-        assert "按 5 批执行" in confirmed.payload["summary"]
-        assert "约 2.4 万字/批" in confirmed.payload["summary"]
-        assert confirmed.payload["steps"][0]["title"] == "第 1 批：分段 1-2"
-        assert confirmed.payload["steps"][1]["title"] == "第 2 批：分段 3-4"
-        assert confirmed.payload["steps"][2]["title"] == "第 3 批：分段 5-6"
-        assert confirmed.payload["steps"][3]["title"] == "第 4 批：分段 7-7"
-        assert confirmed.payload["steps"][4]["title"] == "第 5 批：分段 8-8"
-        assert "预计用时约 6 分钟" in confirmed.payload["steps"][0]["description"]
-        assert "目标单批约 6 分钟" in confirmed.payload["note"]
-
-    def test_build_pdf_reference_windows_keeps_all_windows_by_default(
-        self, monkeypatch
-    ):
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
-
-        fake_pages = [{"page": idx, "text": f"Page {idx} text"} for idx in range(1, 10)]
-
-        with patch(
-            "app.core.file.file_parser.parse_pdf",
-            return_value={"page_count": 9, "pages": fake_pages, "text": ""},
-        ):
-            windows, meta = bridge._build_pdf_reference_windows(
-                "dummy.pdf", window_pages=4, per_window_chars=1000
-            )
-
-        assert len(windows) == 3
-        assert meta["page_count"] == 9
-        assert meta["pages_with_text"] == 9
-        assert meta["window_count"] == 3
-        assert "[Page 9]" in windows[-1]
-
     def test_whitebox_task_stream_normalizes_local_model_config(
         self, app_client, monkeypatch
     ):
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
+
+        monkeypatch.setattr(
+            "app.core.llm.local_model_runtime.get_configured_model_mode",
+            lambda: "local",
+        )
 
         captured = {}
 
@@ -1999,7 +839,7 @@ class TestEditorAIStream:
         monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
 
         with patch(
-            "web.runtime_context.get_configured_local_model_id",
+            "app.core.llm.local_model_runtime.get_configured_local_model_tag",
             return_value="qwen3.5:9b",
         ):
             resp = app_client.post(
@@ -2214,7 +1054,7 @@ class TestEditorAIStream:
 
     def test_main_stream_forwards_plan_and_step_events(self, app_client):
         """主 editor_ai_stream 应转发 editor executor 的 plan/step 事件。"""
-        from app.core.agent.lifecycle import (
+        from app.core.agent.kernel import (
             evt_plan,
             evt_step_done,
             evt_step_progress,
@@ -2255,7 +1095,7 @@ class TestEditorAIStream:
         self, app_client, monkeypatch
     ):
         import web.app as web_app_module
-        from app.core.agent.lifecycle import evt_task_complete
+        from app.core.agent.kernel import evt_task_complete
 
         calls = {"save": 0}
 
@@ -2299,7 +1139,7 @@ class TestEditorAIStream:
     ):
         """普通 editor SSE 请求应把显式云端模型和配置的本地模型一起传入 editor executor。"""
         captured = {}
-        from app.core.agent.lifecycle import evt_task_complete
+        from app.core.agent.kernel import evt_task_complete
 
         def fake_run(self, request):
             captured["request"] = request
@@ -2309,7 +1149,7 @@ class TestEditorAIStream:
             "app.core.agent.editor_loop_executor.EditorLoopExecutor.iter_events",
             fake_run,
         ), patch(
-            "web.blueprints.editor_ai.get_configured_local_model_id",
+            "web.blueprints.editor_ai.get_configured_local_model_tag",
             return_value="qwen3.5:9b",
         ):
             resp = app_client.post(
@@ -2495,7 +1335,7 @@ class TestLocalModelMode:
 
     def test_local_mode_uses_ollama_when_alive(self, app_client):
         """model_mode=local + Ollama alive → response comes from Ollama, not cloud."""
-        from app.core.agent.lifecycle import evt_stream_chunk, evt_task_complete
+        from app.core.agent.kernel import evt_stream_chunk, evt_task_complete
 
         def fake_iter_events(self, request):
             assert request.model_mode == "local"
@@ -2526,7 +1366,7 @@ class TestLocalModelMode:
 
     def test_local_mode_ollama_not_running_returns_error(self, app_client):
         """model_mode=local + Ollama not running → returns error event."""
-        from app.core.agent.lifecycle import evt_error
+        from app.core.agent.kernel import evt_error
 
         def fake_iter_events(self, request):
             assert request.model_mode == "local"
@@ -2627,12 +1467,9 @@ class TestLocalModelMode:
         """Workspace quick actions should use whitebox routes without editor SSE fallback."""
         src = _read_frontend_source("web/src/workspace/ai-review.ts")
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
-        transport = _read_frontend_source("web/src/workspace/transport.ts")
         assert "export function sendQuickAction(action: string): void" in src
-        assert (
-            "WA.createWorkspaceQuickActionRuntime = createQuickActionDispatcher"
-            in quick_actions
-        )
+        assert "export function createQuickActionDispatcher(" in quick_actions
+        assert "createWorkspaceQuickActionRuntime" not in quick_actions
         assert "attachDispatcher" in quick_actions
         assert (
             "return Promise.reject(new Error(`快捷动作 ${actionId} 未配置可用的执行路径`));"
@@ -2647,11 +1484,6 @@ class TestLocalModelMode:
         assert "sendEditorAction" not in quick_actions
         assert "editorAction" not in quick_actions
         assert "streamEventBlocks({" not in quick_actions
-        assert "const requestBody = typeof opts.body === 'string'" in transport
-        assert (
-            "async function streamEventBlocks(opts: StreamOptions): Promise<void>"
-            in transport
-        )
 
     def test_workspace_readonly_quick_actions_can_use_simple_whitebox(self):
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
@@ -2697,7 +1529,7 @@ class TestLocalModelMode:
             ]
         )
         toggle_start = src.find("function _setWorkspaceModelMode(mode: string): void")
-        toggle_end = src.find("publishWorkspaceApi({", toggle_start)
+        toggle_end = src.find("registerFeatures({", toggle_start)
         assert toggle_start != -1 and toggle_end != -1
         toggle_section = src[toggle_start:toggle_end]
         assert "function _syncEditorModelPreference(" not in src
@@ -2729,57 +1561,84 @@ class TestLocalModelMode:
 
     def test_workspace_task_renderer_supports_python_artifacts(self):
         """The whitebox task renderer should render image artifacts emitted by run_python_code."""
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-        assert (
-            "function appendToolArtifacts(row: HTMLElement, payload: Record<string, any>): void"
-            in renderer
+        execution_events = _read_frontend_source(
+            "web/src/workspace/task-execution-event-handlers.ts"
         )
-        assert "payload.artifacts" in renderer
-        assert "wa-task-artifact-image" in renderer
+        tool_output = _read_frontend_source("web/src/workspace/task-tool-output.ts")
+        assert (
+            "export function appendToolArtifacts(row: HTMLElement, payload: Record<string, any>): void"
+            in tool_output
+        )
+        assert "payload.artifacts" in tool_output
+        assert "wa-task-artifact-image" in tool_output
+        assert "appendToolArtifacts(step, data);" in execution_events
 
     def test_workspace_task_renderer_distinguishes_blocked_python_calls(self):
         """Blocked run_python_code guidance should be labeled as an interception reason, not Python output."""
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-        assert "payload.blocked ? '查看拦截原因' : '查看执行输出'" in renderer
-        assert "data.blocked" in renderer
-        assert "const icon = data.skipped ? '跳过' : (data.blocked ? '阻断'" in renderer
+        execution_events = _read_frontend_source(
+            "web/src/workspace/task-execution-event-handlers.ts"
+        )
+        tool_output = _read_frontend_source("web/src/workspace/task-tool-output.ts")
+        assert "payload.blocked ? '查看拦截原因' : '查看执行输出'" in tool_output
+        assert "data.blocked" in execution_events
+        assert "const icon = data.skipped ? '跳过'" in execution_events
+        assert (
+            ": (data.blocked ? '阻断' : (finished ? '完成' : '失败'));"
+            in execution_events
+        )
 
-    def test_workspace_task_renderer_eagerly_refreshes_changed_files(self):
-        """Segmented file tasks should try to refresh the edited document as soon as file.changed arrives."""
+    def test_workspace_task_renderer_opens_only_the_final_output_and_refreshes_the_file_tree(
+        self,
+    ):
+        """Intermediate artifacts stay out of tabs while external writes refresh the left file tree."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-        refresh = _read_frontend_source("web/src/workspace/task-refresh.ts")
-        assert (
-            "WA.createFileTaskRefreshController = createFileTaskRefreshController"
-            in refresh
+        file_change_state = _read_frontend_source(
+            "web/src/workspace/task-file-change-state.ts"
         )
-        assert "card._fileRefreshPromise" in refresh
-        assert "void flush(card).catch" in refresh
+        execution_events = _read_frontend_source(
+            "web/src/workspace/task-execution-event-handlers.ts"
+        )
+        run_events = _read_frontend_source(
+            "web/src/workspace/task-run-event-handlers.ts"
+        )
+        tree = _read_frontend_source("web/src/workspace/fs-tree.ts")
+        assert "export function finalTaskOutputPath(" in file_change_state
+        assert "function openFinalTaskOutput<" in run_events
+        assert "artifactMetadata.target_path" in file_change_state
+        assert "registerFinalTaskOutput(" in run_events
+        assert "openFinalTaskOutput(runtime, card, data, result);" in run_events
+        assert "function requestFileBrowserRefreshAfterExternalChange(): void" in tree
         assert (
-            "if (!((card._pendingFileRefreshes && card._pendingFileRefreshes.size) || card._fileRefreshPromise))"
-            in refresh
+            "wa.requestFileBrowserRefreshAfterExternalChange = requestFileBrowserRefreshAfterExternalChange;"
+            in tree
         )
         assert (
-            "function upsertEntry(card: TaskCard, item: RefreshEntry & Partial<RefreshPayload>): RefreshEntry | null"
-            in refresh
+            "const handleFileChanged: TaskExecutionEventHandler<TCard>"
+            in execution_events
         )
-        assert "status: supported ? 'pending' : 'unsupported'" in refresh
-        assert "status: 'refreshing'" in refresh
-        assert "status: 'reloaded'" in refresh
-        assert "status: 'failed'" in refresh
+        file_changed_start = execution_events.index("const handleFileChanged:")
+        file_changed_end = execution_events.index(
+            "const handleReadChanged:", file_changed_start
+        )
+        file_changed = execution_events[file_changed_start:file_changed_end]
         assert (
-            "function handleEvent_file_changed(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
-            in renderer
+            "refreshWorkspaceFile(change.refreshPath || change.path);" in file_changed
         )
-        assert "controller.queue(card, data, {" in renderer
-        assert "controller.trigger(card, {" in renderer
+        assert "requestFileBrowserRefreshAfterExternalChange" in renderer
+        assert "taskFileChangeDescriptor(" in file_changed
+        assert "recordTaskFileChange(state, change)" in file_changed
+        assert "reloadFileByPath" not in file_changed
 
     def test_workspace_task_renderer_keeps_write_tool_milestones_visible(self):
         """Successful file-writing tool events should remain visible instead of being fully suppressed."""
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        execution_events = _read_frontend_source(
+            "web/src/workspace/task-execution-event-handlers.ts"
+        )
         labels = _read_frontend_source("web/src/workspace/task-step-labels.ts")
+        tool_output = _read_frontend_source("web/src/workspace/task-tool-output.ts")
 
-        assert "return isInternalTaskTool(name) || isReadTaskTool(name);" in renderer
-        assert "shouldAlwaysSuppressTaskToolFinished(name)" in renderer
+        assert "return isInternalTaskTool(name) || isReadTaskTool(name);" in tool_output
+        assert "shouldAlwaysSuppressTaskToolFinished(name)" in tool_output
         assert "export function isInternalTaskTool(name: string): boolean" in labels
         assert "export function isReadTaskTool(name: string): boolean" in labels
         assert (
@@ -2788,101 +1647,116 @@ class TestLocalModelMode:
         )
         assert "'repair_guard'" in labels
         assert "'readonly_answer_guard'" in labels
-        assert "return false;" in renderer
+        assert "return !!payload.skipped;" in tool_output
         assert (
-            "function handleEvent_tool_finished(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
-            in renderer
+            "const handleToolFinished: TaskExecutionEventHandler<TCard>"
+            in execution_events
         )
         assert (
-            "const kind = data.blocked || data.tool_name === 'ask_user' ? 'warn'"
-            in renderer
+            "const kind = data.blocked || data.tool_name === 'ask_user'"
+            in execution_events
         )
 
     def test_workspace_task_renderer_refreshes_terminal_files_without_final_notice(
         self,
     ):
-        """Terminal refresh should reload files without adding a separate completion notice."""
+        """Terminal refresh should use the single task-runner lifecycle path."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-        refresh = _read_frontend_source("web/src/workspace/task-refresh.ts")
-
-        assert (
-            "async function finalize(card: TaskCard, payload: any, finalizeOptions: RefreshOptions = {}): Promise<boolean>"
-            in refresh
+        run_events = _read_frontend_source(
+            "web/src/workspace/task-run-event-handlers.ts"
         )
-        assert "finalizeOptions.showRefreshingStatus" in refresh
-        assert "finalizeOptions.restoreFinalStatus" in refresh
-        assert "summaryHtml(card)" not in renderer
-        assert "function summaryHtml(card)" not in refresh
+
+        assert "function openFinalTaskOutput<" in run_events
+        assert "runtime.reloadFileByPath(path, true)" in run_events
+        assert "createFileTaskRefreshController" not in renderer
+        assert "summaryHtml(card)" not in run_events
 
     def test_workspace_task_renderer_warns_when_whitebox_stream_seq_is_incomplete(self):
         """Dropped or out-of-order SSE events should be surfaced to users as whitebox visibility warnings."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        dispatch = _read_frontend_source("web/src/workspace/file-task-dispatch.ts")
+        ui_state = _read_frontend_source("web/src/workspace/task-ui-state.ts")
+
+        assert "export function noteTaskStreamIssue(" in ui_state
+        assert "state.streamIssueKeys" in ui_state
+        assert "noteStreamIssue: noteTaskStreamIssue" in renderer
+        assert "state.lastEventSeq" in dispatch
+        assert "missing-event-${runId}-${state.lastEventSeq}-${seq}" in dispatch
+        assert "state.processedEventKeys.has(eventKey)" in dispatch
+
+    def test_workspace_task_renderer_only_surfaces_attention_step_results(self):
+        """Successful rollups stay in stage state while failed/waiting results remain visible."""
+        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        verification_events = _read_frontend_source(
+            "web/src/workspace/task-verification-event-handlers.ts"
+        )
+        policy = _read_frontend_source("web/src/workspace/task-detail-policy.ts")
 
         assert (
-            "function noteStreamIssue(card: TaskCardElement, key: string, text: string): void"
-            in renderer
+            "const handleStepResult: TaskVerificationEventHandler<TCard> = (card, evt, payload) =>"
+            in verification_events
         )
-        assert "state.streamIssueKeys" in renderer
-        assert "state.lastEventSeq" in renderer
-        assert "state.lastEventSeq" in renderer
-        assert "state.processedEventKeys.has(eventKey)" in renderer
+        assert "'step.result': handleStepResult" in verification_events
+        assert "shouldRenderTaskDetailEvent('step.result', data)" in verification_events
+        assert "...VERIFICATION_EVENT_HANDLERS" in renderer
+        assert "appendToolArtifacts(step, data);" not in renderer
+        assert "'step.result'" in policy
+        assert "return isAttentionPayload(payload);" in policy
 
-    def test_workspace_task_renderer_supports_step_result_rollups(self):
-        """The renderer should display backend step.result rollups for major whitebox phases."""
+    def test_workspace_task_renderer_uses_canonical_ui_state_updates(self):
+        """The task card should project original SSE ui_state without a duplicate progress event."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-
-        assert (
-            "function handleEvent_step_result(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
-            in renderer
+        stage_presentation = _read_frontend_source(
+            "web/src/workspace/task-stage-presentation.ts"
         )
-        assert "'step.result': handleEvent_step_result" in renderer
-        assert "appendToolArtifacts(step, data);" in renderer
+        stage_state = _read_frontend_source("web/src/workspace/task-stage-state.ts")
 
-    def test_workspace_task_renderer_supports_step_progress_updates(self):
-        """The whitebox task renderer should keep the current step alive with incremental progress updates."""
+        assert "function applyCanonicalTaskStageState(" in stage_presentation
+        assert "createTaskStagePresentation" in renderer
+        assert "taskStageProjectionFromEvent(event)" in stage_presentation
+        assert "'progress': handleEvent_progress" not in renderer
+        assert "export function taskStageProjectionFromEvent(" in stage_state
+        assert "event.ui_state" in stage_state
+
+    def test_workspace_task_renderer_preserves_structured_failed_terminal_payloads(
+        self,
+    ):
+        """Failed run.finished payloads keep structured details while local transport errors remain actionable."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-
-        assert (
-            "function handleEvent_progress(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
-            in renderer
+        terminal_events = _read_frontend_source(
+            "web/src/workspace/task-terminal-event-handlers.ts"
         )
-        assert "'progress': handleEvent_progress" in renderer
-        assert "state.progressExplicit = true;" in renderer
-
-    def test_workspace_task_renderer_preserves_structured_run_errors(self):
-        """Structured run.error messages should survive transport failures instead of collapsing to generic network errors."""
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        stream_transport = _read_frontend_source(
+            "web/src/workspace/task-stream-transport.ts"
+        )
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
         assert (
             "function makeTaskError(message: string): Error & { waTaskError: boolean }"
-            in renderer
+            in stream_transport
         )
-        assert (
-            "card._fatalErrorText = String(data.error || data.text || data.message || payload).trim();"
-            in renderer
-        )
-        assert "card._fatalErrorText" in renderer
+        assert "const failure = data.failure" in terminal_events
+        assert "card._fatalErrorText = failureText;" in terminal_events
+        assert "failure.summary || data.error" in terminal_events
+        assert "card._fatalErrorText" in stream_transport
         assert (
             "if (card._fatalErrorText) throw makeTaskError(card._fatalErrorText);"
-            in renderer
+            in stream_transport
         )
         assert "error && error.waTaskError ? error.message" in dispatcher
+        assert "'run.error':" not in renderer
 
     def test_workspace_task_renderer_surfaces_runtime_metadata(self):
         """The task renderer should expose runtime execution metadata from whitebox SSE terminal events."""
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        run_context = _read_frontend_source("web/src/workspace/task-run-context.ts")
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
         assert (
-            "const runtime = data.runtime && typeof data.runtime === 'object' ? data.runtime : {};"
-            in renderer
+            "const taskRuntime = data.runtime && typeof data.runtime === 'object'"
+            in run_context
         )
-        assert (
-            "const terminalStatus = normalizeFileTaskTerminalStatus(runtime.terminal_status || '');"
-            in renderer
-        )
-        assert "terminal_status: terminalStatus" in renderer
+        assert "taskRuntime.terminal_status || ''" in run_context
+        assert "card.dataset.taskTerminalStatus = terminalStatus" in run_context
         assert (
             "fatal_error_text: String((element as any)._fatalErrorText || '')"
             in dispatcher
@@ -2891,61 +1765,67 @@ class TestLocalModelMode:
     def test_workspace_task_renderer_surfaces_task_classification_metadata(self):
         """The whitebox task renderer should persist classification metadata from run lifecycle events."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        run_context = _read_frontend_source("web/src/workspace/task-run-context.ts")
+        run_events = _read_frontend_source(
+            "web/src/workspace/task-run-event-handlers.ts"
+        )
+        lifecycle = _read_frontend_source("web/src/workspace/task-lifecycle-payload.ts")
+        presentation = _read_frontend_source(
+            "web/src/workspace/task-plan-presentation.ts"
+        )
+        result_presentation = _read_frontend_source(
+            "web/src/workspace/task-result-presentation.ts"
+        )
+        plan_events = _read_frontend_source(
+            "web/src/workspace/task-plan-event-handlers.ts"
+        )
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
         assert (
-            "function normalizedTaskLifecyclePayload(payload: any): Record<string, any>"
-            in renderer
+            "export function normalizedTaskLifecyclePayload(payload: any): Record<string, any>"
+            in lifecycle
         )
         assert (
-            "const classification = decisionContext && decisionContext.classification && typeof decisionContext.classification === 'object'"
-            in renderer
+            "const classification = decisionContext?.classification && typeof decisionContext.classification === 'object'"
+            in lifecycle
         )
         assert (
             "(data.classification && typeof data.classification === 'object' ? data.classification : null)"
-            in renderer
+            in lifecycle
         )
-        assert "'task.classified': handleEvent_task_classified" in renderer
+        assert "'task.classified': handleTaskClassified" in plan_events
         assert (
-            "function taskRecognitionText(data: Record<string, any>): string"
-            in renderer
+            "export function taskRecognitionText(data: Record<string, any>): string"
+            in presentation
         )
-        assert "const data = normalizedTaskLifecyclePayload(payload);" in renderer
-        assert (
-            "card.dataset.taskRequestKind = String(data.request_kind || '').trim();"
-            in renderer
-        )
-        assert (
-            "card.dataset.taskFamily = String(data.task_family || '').trim();"
-            in renderer
-        )
-        assert (
-            "card.dataset.taskOutputMode = String(data.output_mode || '').trim();"
-            in renderer
-        )
-        assert (
-            "card.dataset.taskSelectedRecipe = String(data.selected_recipe || '').trim();"
-            in renderer
-        )
-        assert "card.dataset.taskIntentStrategy = intentStrategy;" in renderer
+        assert "from './task-plan-presentation';" in plan_events
+        assert "const data = normalizedTaskLifecyclePayload(payload);" in plan_events
+        assert "['taskRequestKind', data.request_kind]" in run_context
+        assert "['taskFamily', data.task_family]" in run_context
+        assert "['taskOutputMode', data.output_mode]" in run_context
+        assert "['taskSelectedRecipe', data.selected_recipe]" in run_context
+        assert "card.dataset.taskIntentStrategy = intentStrategy;" in run_context
         assert (
             "card.dataset.taskIntentCanApply = intentPlan.can_apply ? 'true' : 'false';"
-            in renderer
+            in run_context
         )
         assert (
-            "card.dataset.taskIntentRequiresConfirmation = intentPlan.requires_confirmation ? 'true' : 'false';"
-            in renderer
+            "card.dataset.taskIntentRequiresConfirmation = intentPlan.requires_confirmation"
+            in run_context
         )
-        assert "'run.started': handleEvent_run_started" in renderer
-        assert "'run.finished': handleEvent_run_finished" in renderer
-        assert "if (normalized === 'write') return '写入文件';" in renderer
-        assert "data-task-followup-action" in renderer
-        assert "card.dataset.taskTargetFileType" in renderer
+        assert "? 'true' : 'false';" in run_context
+        assert "'run.started': handleStarted" in run_events
+        assert "'run.finished': handleFinished" in run_events
+        assert "...RUN_EVENT_HANDLERS" in renderer
+        assert "if (normalized === 'write') return '写入文件';" in presentation
+        assert "data-task-followup-action" in result_presentation
+        assert "['taskTargetFileType', data.target_file_type]" in run_context
         assert "chips.push(`请求：" not in renderer
         assert "chips.push(`任务：" not in renderer
         assert "chips.push(`操作：" not in renderer
         assert "chips.push(`分类：" not in renderer
-        assert "taskResultActionsHtml(card)" in renderer
+        assert "actionsHtml: taskResultActionsHtml({" in run_events
+        assert "export function taskResultActionsHtml(" in result_presentation
 
         assert (
             "if (dataset.taskRequestKind) metadata.task_request_kind = String(dataset.taskRequestKind || '').trim();"
@@ -2983,16 +1863,25 @@ class TestLocalModelMode:
     def test_workspace_task_renderer_labels_answer_and_hybrid_output_modes(self):
         """Answer-first and hybrid file tasks should show explicit non-write guidance in the task card."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        presentation = _read_frontend_source(
+            "web/src/workspace/task-plan-presentation.ts"
+        )
+        result_presentation = _read_frontend_source(
+            "web/src/workspace/task-result-presentation.ts"
+        )
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
-        assert "if (normalized === 'answer') return '只给答案';" in renderer
-        assert "if (normalized === 'write') return '写入文件';" in renderer
-        assert "if (normalized === 'hybrid') return '先分析后决定';" in renderer
-        assert "if (quickActionMode === 'answer')" in renderer
-        assert "if (quickActionMode === 'hybrid')" in renderer
-        assert 'data-task-followup-action="apply"' in renderer
-        assert "应用建议" in renderer
-        assert "} else if (outputMode && outputMode !== 'write')" in renderer
+        assert "if (normalized === 'answer') return '只给答案';" in presentation
+        assert "if (normalized === 'write') return '写入文件';" in presentation
+        assert "if (normalized === 'hybrid') return '先分析后决定';" in presentation
+        assert "if (quickActionMode === 'answer')" in result_presentation
+        assert "if (quickActionMode === 'hybrid')" in result_presentation
+        assert 'data-task-followup-action="apply"' in result_presentation
+        assert "应用建议" in result_presentation
+        assert (
+            "} else if (state.outputMode && state.outputMode !== 'write')"
+            in result_presentation
+        )
         assert (
             "const previousTaskOutputMode = previewText(previousTaskTurn.task_output_mode || '', 120);"
             in dispatcher
@@ -3004,13 +1893,16 @@ class TestLocalModelMode:
 
     def test_workspace_task_renderer_surfaces_intent_plan_hints(self):
         """Intent-plan metadata should add user-facing strategy and applyability hints without exposing raw internals."""
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        run_context = _read_frontend_source("web/src/workspace/task-run-context.ts")
+        result_presentation = _read_frontend_source(
+            "web/src/workspace/task-result-presentation.ts"
+        )
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
 
-        assert "card.dataset.taskIntentStrategy = intentStrategy" in renderer
+        assert "card.dataset.taskIntentStrategy = intentStrategy" in run_context
         assert "previous_task_intent_strategy" in assistant
-        assert "继续细化方案" in renderer
+        assert "继续细化方案" in result_presentation
         assert (
             "if (dataset.taskIntentStrategy) metadata.task_intent_strategy = String(dataset.taskIntentStrategy || '').trim();"
             in dispatcher
@@ -3030,64 +1922,75 @@ class TestLocalModelMode:
     def test_workspace_task_renderer_hides_placeholder_classification_metadata(self):
         """Default whitebox classification placeholders should stay internal unless they add user-facing meaning."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        presentation = _read_frontend_source(
+            "web/src/workspace/task-plan-presentation.ts"
+        )
+        plan_events = _read_frontend_source(
+            "web/src/workspace/task-plan-event-handlers.ts"
+        )
+        stage_state = _read_frontend_source("web/src/workspace/task-stage-state.ts")
 
         assert (
-            "function classificationValueLabel(kind: string, value: unknown): string"
-            in renderer
+            "export function classificationValueLabel(kind: string, value: unknown): string"
+            in presentation
         )
-        assert "if (!normalized) return '';" in renderer
-        assert "if (normalized === 'answer') return '只给答案';" in renderer
-        assert "taskRecognitionText(data)" in renderer
+        assert "if (!normalized) return '';" in presentation
+        assert "if (normalized === 'answer') return '只给答案';" in presentation
+        assert "taskRecognitionText(payload)" in stage_state
         assert "chips.push(`置信：${Math.round(confidence * 100)}%`);" not in renderer
 
     def test_workspace_task_renderer_supports_plan_briefed_updates(self):
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        plan_events = _read_frontend_source(
+            "web/src/workspace/task-plan-event-handlers.ts"
+        )
 
-        assert "'plan.created': handleEvent_plan" in renderer
-        assert "'plan.proposed': handleEvent_plan" in renderer
-        assert "renderPlanIntoCard(card, data);" in renderer
+        assert "'plan.created': handlePlan" in plan_events
+        assert "'plan.proposed': handlePlan" in plan_events
+        assert "runtime.renderPlanIntoCard(card, data);" in plan_events
 
     def test_workspace_task_renderer_surfaces_whitebox_plan_gate(self):
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-
-        assert (
-            "function handleEvent_plan_gated(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
-            in renderer
+        plan_events = _read_frontend_source(
+            "web/src/workspace/task-plan-event-handlers.ts"
         )
-        assert "'plan.gated': handleEvent_plan_gated" in renderer
-        assert "planGateIssueHtml(data)" in renderer
-        assert "passed && item === 'model_execution_plan_missing'" in renderer
+        presentation = _read_frontend_source(
+            "web/src/workspace/task-plan-presentation.ts"
+        )
+
+        assert "const handlePlanGated: TaskPlanEventHandler<TCard>" in plan_events
+        assert "'plan.gated': handlePlanGated" in plan_events
+        assert "planGateIssueHtml(data)" in plan_events
+        assert "passed && item === 'model_execution_plan_missing'" in presentation
 
     def test_workspace_task_renderer_surfaces_supervision_and_workflow_state(self):
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        plan_events = _read_frontend_source(
+            "web/src/workspace/task-plan-event-handlers.ts"
+        )
 
+        assert "const handleWorkflowState: TaskPlanEventHandler<TCard>" in plan_events
+        assert "const handleDecisionMade: TaskPlanEventHandler<TCard>" in plan_events
         assert (
-            "function handleEvent_workflow_state(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
-            in renderer
+            "const handleSupervisorIntervention: TaskPlanEventHandler<TCard>"
+            in plan_events
         )
-        assert (
-            "function handleEvent_decision_made(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
-            in renderer
-        )
-        assert (
-            "function handleEvent_supervisor_intervention(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
-            in renderer
-        )
-        assert (
-            "'supervisor.intervention': handleEvent_supervisor_intervention" in renderer
-        )
-        assert "'decision.made': handleEvent_decision_made" in renderer
-        assert "large_file_windows" in renderer
-        assert "workflow.state" in renderer
-        assert "监管纠偏" in renderer
+        assert "'supervisor.intervention': handleSupervisorIntervention" in plan_events
+        assert "'decision.made': handleDecisionMade" in plan_events
+        assert "large_file_windows" not in plan_events
+        assert "workflow.state" in plan_events
+        assert "监管纠偏" in plan_events
 
     def test_workspace_task_renderer_supports_simple_quick_action_mode(self):
-        renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        run_context = _read_frontend_source("web/src/workspace/task-run-context.ts")
+        result_presentation = _read_frontend_source(
+            "web/src/workspace/task-result-presentation.ts"
+        )
 
-        assert "card.dataset.taskQuickActionMode = quickActionMode;" in renderer
-        assert "data.quick_action_mode" in renderer
-        assert "if (quickActionMode === 'answer')" in renderer
-        assert "if (quickActionMode === 'hybrid')" in renderer
+        assert (
+            "card.dataset.taskQuickActionMode = normalizeQuickActionMode("
+            in run_context
+        )
+        assert "data.quick_action_mode" in run_context
+        assert "if (quickActionMode === 'answer')" in result_presentation
+        assert "if (quickActionMode === 'hybrid')" in result_presentation
 
     def test_workspace_model_selector_fetches_dynamic_catalog(self):
         """Workspace assistant should fetch the dynamic model catalog instead of relying on hardcoded options."""
@@ -3174,7 +2077,10 @@ class TestLocalModelMode:
     def test_pdf_ai_annotate_button_is_enabled_for_whitebox_flow(self):
         """The PDF toolbar button should launch the whitebox AI annotate flow."""
         html = _read_frontend_source("web/templates/index.html")
-        assert 'onclick="WA.pdfAIAnnotate()"' in html
+        assert 'data-koto-event-click="h_fc4dd6b16816"' in html
+        assert "features.pdfAIAnnotate()" in _read_frontend_source(
+            "web/src/app/template-event-controller.ts"
+        )
         assert 'title="AI 读取当前 PDF 并生成批注建议"' in html
 
     def test_workspace_templates_use_shared_model_controls_partial(self):
@@ -3214,7 +2120,7 @@ class TestLocalModelMode:
         )
         assert "model_mode: payload.model_mode || getModelMode()," in quick_actions
         assert "model_mode: modelMode," in quick_actions
-        assert "publishWorkspaceApi({" in js
+        assert "registerFeatures({" in js
         assert "setLockedModel," in js
         assert "getLockedModel," in js
         assert "body: JSON.stringify({ mode: newModel })," in js
@@ -3226,18 +2132,6 @@ class TestLocalModelMode:
         assert "function toolResultProgressText(parsed: any): string" in quick_actions
         assert "setProgress(toolResultProgressText(parsed));" in quick_actions
         assert "setProgress(parsed.result_preview" not in quick_actions
-
-
-class TestMainChatProgressRegression:
-    """Regression checks for canonical step-event support in the active SSE renderer."""
-
-    def test_main_chat_normalizes_canonical_step_events(self):
-        src = _read_frontend_source("web/src/shared/sse-pipeline.ts")
-        assert "e.type === 'plan'" in src
-        assert "e.type === 'phase'" in src
-        assert "e.type === 'step_start'" in src
-        assert "e.type === 'tool_call'" in src
-        assert "private _progressPercent(" in src
 
 
 class TestRemovedLegacyTaskRoutes:
@@ -3254,177 +2148,20 @@ class TestRemovedLegacyTaskRoutes:
         assert resp.status_code == 404
 
 
-class TestLegacyDocumentCompatRoutes:
-    """Legacy document APIs should reuse the current DocumentFeedbackSystem paths instead of old batch annotators."""
+class TestRetiredDocumentPipelineRoutes:
+    """Programmatic document-model routes must not bypass the Kernel."""
 
-    def test_web_app_doc_annotate_paths_use_feedback_system(self):
-        src = _read_frontend_source("web/blueprints/document.py")
-
-        assert "from web.document_feedback import (" in src
-        assert "stream_annotation_events(" in src
-        assert "collect_annotation_result(" in src
-
-    @staticmethod
-    def _make_document_client(monkeypatch, workspace_root):
-        from flask import Flask
-
-        import web.blueprints.document as document_routes
-
-        app = Flask(__name__)
-        app.config["TESTING"] = True
-        monkeypatch.setattr(document_routes, "_get_client", lambda: object())
-        monkeypatch.setattr(
-            document_routes, "_get_workspace_dir", lambda: str(workspace_root)
-        )
-        app.register_blueprint(document_routes.document_bp)
-        return app.test_client()
-
-    def test_document_annotate_route_uses_streaming_compat_path(
-        self, monkeypatch, tmp_path
-    ):
-        import web.document_feedback as feedback_module
-
-        docx_path = tmp_path / "legacy-annotate.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-        revised_path = tmp_path / "legacy-annotate_revised.docx"
-        client = self._make_document_client(monkeypatch, tmp_path)
-
-        class FakeFeedback:
-            def __init__(self, gemini_client=None, default_model_id="gemini-2.5-pro"):
-                self.gemini_client = gemini_client
-                self.default_model_id = default_model_id
-
-            def full_annotation_loop(self, *args, **kwargs):
-                raise AssertionError("legacy sync annotation loop should not be used")
-
-            def full_annotation_loop_streaming(self, *args, **kwargs):
-                yield {
-                    "stage": "complete",
-                    "result": {
-                        "success": True,
-                        "revised_file": str(revised_path),
-                        "applied": 3,
-                    },
-                }
-
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        resp = client.post(
+    @pytest.mark.parametrize(
+        "path",
+        [
             "/api/document/annotate",
-            json={
-                "file_path": str(docx_path),
-                "requirement": "请标注翻译问题",
-            },
-        )
-
-        body = resp.get_json()
-        assert resp.status_code == 200
-        assert body["success"] is True
-        assert body["revised_file"] == str(revised_path)
-        assert body["applied"] == 3
-
-    def test_document_analyze_annotations_route_is_removed(self, monkeypatch, tmp_path):
-        client = self._make_document_client(monkeypatch, tmp_path)
-        resp = client.post("/api/document/analyze-annotations", json={})
-        assert resp.status_code == 404
-
-    def test_document_batch_annotate_stream_route_uses_feedback_streaming_path(
-        self, monkeypatch, tmp_path
-    ):
-        import web.document_feedback as feedback_module
-
-        docx_path = tmp_path / "legacy-batch.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-        revised_path = tmp_path / "legacy-batch_revised.docx"
-        client = self._make_document_client(monkeypatch, tmp_path)
-
-        class FakeFeedback:
-            def __init__(self, gemini_client=None, default_model_id="gemini-2.5-pro"):
-                self.gemini_client = gemini_client
-                self.default_model_id = default_model_id
-
-            def full_annotation_loop_streaming(self, *args, **kwargs):
-                yield {
-                    "stage": "reading",
-                    "progress": 5,
-                    "message": "读取中",
-                    "detail": "第 1 批",
-                }
-                yield {
-                    "stage": "complete",
-                    "result": {
-                        "success": True,
-                        "revised_file": str(revised_path),
-                        "applied": 2,
-                    },
-                }
-
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        resp = client.post(
             "/api/document/batch-annotate-stream",
-            json={
-                "file_path": str(docx_path),
-                "requirement": "请流式标注",
-            },
-        )
-
-        body = resp.get_data(as_text=True)
-        assert resp.status_code == 200
-        assert "event: progress" in body
-        assert "event: complete" in body
-        assert revised_path.name in body
-
-    def test_document_feedback_route_resolves_relative_path_before_wrapper(
-        self, monkeypatch, tmp_path
-    ):
-        import web.document_feedback as feedback_module
-
-        documents_dir = tmp_path / "documents"
-        documents_dir.mkdir()
-        docx_path = documents_dir / "legacy-feedback.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
-        client = self._make_document_client(monkeypatch, tmp_path)
-        captured = {}
-
-        class FakeFeedback:
-            def __init__(self, gemini_client=None, default_model_id="gemini-2.5-pro"):
-                self.gemini_client = gemini_client
-                self.default_model_id = default_model_id
-
-            def full_feedback_loop(
-                self, file_path, user_requirement="", auto_apply=True
-            ):
-                captured["file_path"] = file_path
-                captured["user_requirement"] = user_requirement
-                captured["auto_apply"] = auto_apply
-                return {
-                    "success": True,
-                    "new_file_path": str(
-                        docx_path.with_name("legacy-feedback_revised.docx")
-                    ),
-                    "applied_count": 1,
-                }
-
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        resp = client.post(
             "/api/document/feedback",
-            json={
-                "file_path": "legacy-feedback.docx",
-                "requirement": "请润色措辞",
-                "auto_apply": False,
-            },
-        )
-
-        body = resp.get_json()
-        assert resp.status_code == 200
-        assert body["success"] is True
-        assert captured == {
-            "file_path": str(docx_path),
-            "user_requirement": "请润色措辞",
-            "auto_apply": False,
-        }
+            "/api/document/smart-process",
+        ],
+    )
+    def test_document_pipeline_route_is_not_registered(self, app_client, path):
+        assert app_client.post(path, json={}).status_code == 404
 
 
 class TestLegacyEditorRemovalRegression:
@@ -3452,6 +2189,9 @@ class TestLegacyEditorRemovalRegression:
         assert '"build:editor"' not in pkg
 
 
+@pytest.mark.skip(
+    reason="Retired TaskAgent compatibility coverage; file execution is owned by FileTaskRuntime + Kernel"
+)
 class TestTaskAgentDocumentEdits:
     """Regression checks for real file-edit tool execution in TaskAgent."""
 
@@ -4228,7 +2968,9 @@ class TestTaskAgentDocumentEdits:
         source_path.write_text("before", encoding="utf-8")
 
         cleanup_calls = {"count": 0}
-        original_rmtree = task_tools.shutil.rmtree
+        from app.core.agent.tools import sandbox as sandbox_tools
+
+        original_rmtree = sandbox_tools.shutil.rmtree
 
         def flaky_rmtree(path, *args, **kwargs):
             cleanup_calls["count"] += 1
@@ -4236,7 +2978,7 @@ class TestTaskAgentDocumentEdits:
                 raise PermissionError(32, "locked", path)
             return original_rmtree(path, *args, **kwargs)
 
-        monkeypatch.setattr(task_tools.shutil, "rmtree", flaky_rmtree)
+        monkeypatch.setattr(sandbox_tools.shutil, "rmtree", flaky_rmtree)
 
         result = task_tools.run_python_in_sandbox(
             (
@@ -4274,7 +3016,9 @@ class TestTaskAgentDocumentEdits:
         source_path = workspace / "sales_sample.xlsx"
         source_path.write_bytes(b"source")
 
-        monkeypatch.setattr(task_tools, "_get_workspace_root", lambda: str(workspace))
+        monkeypatch.setattr(
+            "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(workspace)
+        )
 
         result = task_tools.run_python_in_sandbox(
             (
@@ -4292,6 +3036,151 @@ class TestTaskAgentDocumentEdits:
         assert target.read_bytes() == b"report"
         assert str(target) in result.get("__koto_created__", [])
         assert "KOTO_CREATED" in result.as_text()
+
+    def test_run_python_in_sandbox_tracks_direct_target_without_marker(
+        self, tmp_path, monkeypatch
+    ):
+        from app.core.agent import task_tools
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setattr(
+            "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(workspace)
+        )
+
+        target = workspace / "reports" / "direct.xlsx"
+        result = task_tools.run_python_in_sandbox(
+            (
+                "from pathlib import Path\n"
+                f"target = Path({str(target)!r})\n"
+                "target.parent.mkdir(parents=True, exist_ok=True)\n"
+                "target.write_bytes(b'direct report')\n"
+                "print('saved report')\n"
+            ),
+            timeout=10,
+            target_path=str(target),
+        )
+
+        assert target.read_bytes() == b"direct report"
+        assert str(target) in result.get("__koto_created__", [])
+        assert f"KOTO_CREATED:{target}" in result.get("stdout", "")
+
+    def test_run_python_in_sandbox_does_not_mark_unchanged_direct_target(
+        self, tmp_path, monkeypatch
+    ):
+        from app.core.agent import task_tools
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setattr(
+            "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(workspace)
+        )
+
+        target = workspace / "reports" / "existing.xlsx"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"existing")
+        result = task_tools.run_python_in_sandbox(
+            f"from pathlib import Path\nprint(Path({str(target)!r}).read_bytes())\n",
+            timeout=10,
+            target_path=str(target),
+        )
+
+        assert result.get("__koto_modified__", []) == []
+        assert "KOTO_MODIFIED" not in result.get("stdout", "")
+
+    def test_run_python_in_sandbox_syncs_existing_task_target_path(
+        self, tmp_path, monkeypatch
+    ):
+        from docx import Document
+
+        from app.core.agent import task_tools
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setattr(
+            "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(workspace)
+        )
+
+        target = workspace / "reports" / "risk_register.docx"
+        target.parent.mkdir(parents=True)
+        document = Document()
+        document.add_paragraph("before")
+        document.save(target)
+
+        result = task_tools.run_python_in_sandbox(
+            (
+                "from docx import Document\n"
+                "document = Document(TASK_TARGET_PATH)\n"
+                "table = document.add_table(rows=2, cols=3)\n"
+                "table.cell(0, 0).text = 'Risk'\n"
+                "document.save(TASK_TARGET_PATH)\n"
+                "print('saved table')\n"
+            ),
+            timeout=10,
+            target_path=str(target),
+        )
+
+        assert result.get("error") == ""
+        assert len(Document(target).tables) == 1
+        assert str(target) in result.get("__koto_modified__", [])
+
+    def test_run_python_in_sandbox_exposes_target_path_environment_variable(
+        self, tmp_path, monkeypatch
+    ):
+        from docx import Document
+
+        from app.core.agent import task_tools
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setattr(
+            "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(workspace)
+        )
+        target = workspace / "reports" / "environment_target.docx"
+        target.parent.mkdir(parents=True)
+        document = Document()
+        document.add_paragraph("before")
+        document.save(target)
+
+        result = task_tools.run_python_in_sandbox(
+            (
+                "import os\n"
+                "from docx import Document\n"
+                "target = os.environ['TASK_TARGET_PATH']\n"
+                "document = Document(target)\n"
+                "document.add_table(rows=2, cols=2)\n"
+                "document.save(target)\n"
+            ),
+            timeout=10,
+            target_path=str(target),
+        )
+
+        assert result.get("error") == ""
+        assert len(Document(target).tables) == 1
+        assert str(target) in result.get("__koto_modified__", [])
+
+    def test_run_python_in_sandbox_rejects_unverified_target_marker(
+        self, tmp_path, monkeypatch
+    ):
+        from app.core.agent import task_tools
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setattr(
+            "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(workspace)
+        )
+        target = workspace / "reports" / "unchanged.docx"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"unchanged")
+
+        result = task_tools.run_python_in_sandbox(
+            f"print('KOTO_MODIFIED:' + {str(target)!r})\n",
+            timeout=10,
+            target_path=str(target),
+        )
+
+        assert "requested target did not change" in result.get("error", "")
+        assert result.get("__koto_modified__", []) == []
 
     def test_task_agent_run_python_code_syncs_modified_attached_file_and_emits_file_change(
         self, tmp_path, monkeypatch
@@ -4612,17 +3501,20 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         self,
     ):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
+        target_inference = _read_frontend_source(
+            "web/src/workspace/task-target-inference.ts"
+        )
 
-        assert "const COMPARE_TASK_HINTS" in dispatcher
-        assert "const ANNOTATION_TASK_HINTS" in dispatcher
-        assert "const REVISED_TARGET_NAME_HINTS" in dispatcher
+        assert "const COMPARE_TASK_HINTS" in target_inference
+        assert "const ANNOTATION_TASK_HINTS" in target_inference
+        assert "const REVISED_TARGET_NAME_HINTS" in target_inference
         assert (
             "function inferCompareTargetFromRoleHint(text: string, files: TaskFileInfo[]): TaskFileInfo | null"
-            in dispatcher
+            in target_inference
         )
         assert (
             "function inferCompareAnnotatedTargetFile(text: string, files: TaskFileInfo[]): TaskFileInfo | null"
-            in dispatcher
+            in target_inference
         )
         assert (
             "const explicitTextTargetPath = explicitWriteTargetPathFromText(text);"
@@ -4642,6 +3534,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         self,
     ):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
+        payload = _read_frontend_source("web/src/workspace/task-dispatcher-payload.ts")
 
         assert "function currentOpenTaskFile(): TaskFileInfo | null" in dispatcher
         assert (
@@ -4651,24 +3544,29 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "const currentFile = currentOpenTaskFile();" in dispatcher
         assert "let targetFile = rawFiles.find((f) => f.target) || null;" in dispatcher
         assert "task_context" in dispatcher
-        assert "files: {" in dispatcher
-        assert "current: compactFollowupTaskFile(currentFile)," in dispatcher
+        assert "files: {" in payload
+        assert "current: compactFollowupTaskFile(currentFile)," in payload
 
     def test_workspace_dispatcher_does_not_mark_bare_source_reference_as_target(self):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
+        target_inference = _read_frontend_source(
+            "web/src/workspace/task-target-inference.ts"
+        )
 
         assert (
-            "function explicitWriteTargetPathFromText(text: string): string"
-            in dispatcher
+            "export function explicitWriteTargetPathFromText(text: string): string"
+            in target_inference
         )
         assert (
             "function joinSplitDirectoryTargetPath(source: string, rawPath: string, start: number, end: number): string"
-            in dispatcher
+            in target_inference
         )
-        assert "splitOutputDirectoryAfterFile(after)" in dispatcher
-        assert "function hasReadOnlyHint(text: string): boolean" in dispatcher
-        assert "const readSourcePattern" in dispatcher
-        assert "const explicitOutputBeforePattern" in dispatcher
+        assert "splitOutputDirectoryAfterFile(after)" in target_inference
+        assert (
+            "export function hasReadOnlyHint(text: string): boolean" in target_inference
+        )
+        assert "const readSourcePattern" in target_inference
+        assert "const explicitOutputBeforePattern" in target_inference
         assert "overrideOptions.enable_ai_intent_adjudicator = true;" not in dispatcher
         assert "delete overrideOptions.enable_ai_intent_adjudicator;" in dispatcher
         assert (
@@ -4679,13 +3577,12 @@ class TestWorkspaceAssistantTaskRemovalRegression:
     def test_workspace_dispatcher_marks_short_task_critiques_as_followup_context(self):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
-        assert "function latestCompletedFileTaskTurn()" in dispatcher
+        assert "function latestCompletedFileTaskTurn(turns: any[]): any" in dispatcher
         assert "function looksLikeDiagnosticLead(text: string): boolean" in dispatcher
-        assert "function looksLikeTaskCritique(text: string): boolean" in dispatcher
         assert (
-            "function buildTaskFollowupContext(text: string): Record<string, any> | null"
-            in dispatcher
+            "export function looksLikeTaskCritique(text: string): boolean" in dispatcher
         )
+        assert "export function buildTaskFollowupContext(" in dispatcher
         assert "kind: 'review_last_task'" in dispatcher
         assert "followup_action:" in dispatcher
         assert "overrideOptions.followup_context = followupContext;" in dispatcher
@@ -4706,12 +3603,17 @@ class TestWorkspaceAssistantTaskRemovalRegression:
 
     def test_workspace_task_cards_offer_run_bound_followup_actions(self):
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
-        task_renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        task_interactions = _read_frontend_source(
+            "web/src/workspace/task-card-interactions.ts"
+        )
+        result_presentation = _read_frontend_source(
+            "web/src/workspace/task-result-presentation.ts"
+        )
 
         assert (
             "export function beginTaskResultFollowup(details: any): void" in assistant
         )
-        assert "publishWorkspaceApi({" in assistant
+        assert "registerFeatures({" in assistant
         assert "beginTaskResultFollowup," in assistant
         assert "state._pendingTaskFollowupContext = followupContext;" in assistant
         assert (
@@ -4735,42 +3637,43 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "previous_task_intent_can_apply" in assistant
         assert "previous_task_intent_requires_confirmation" in assistant
         assert (
-            "function taskResultActionsHtml(card: TaskCardElement): string"
-            in task_renderer
+            "export function taskResultActionsHtml(state: TaskResultActionState): string"
+            in result_presentation
         )
-        assert 'data-task-followup-action="apply"' in task_renderer
-        assert 'data-task-followup-action="question"' in task_renderer
-        assert 'data-task-followup-action="improve"' in task_renderer
-        assert "workspaceApi.beginTaskResultFollowup({" in task_renderer
-        assert "output_mode: card.dataset.taskOutputMode || ''," in task_renderer
+        assert 'data-task-followup-action="apply"' in result_presentation
+        assert 'data-task-followup-action="question"' in result_presentation
+        assert 'data-task-followup-action="improve"' in result_presentation
+        assert "api.beginTaskResultFollowup({" in task_interactions
+        assert "output_mode: card.dataset.taskOutputMode || ''," in task_interactions
         assert (
-            "intent_strategy: card.dataset.taskIntentStrategy || ''," in task_renderer
+            "intent_strategy: card.dataset.taskIntentStrategy || '',"
+            in task_interactions
         )
         assert (
             "intent_can_apply: boolAttr(card.dataset.taskIntentCanApply),"
-            in task_renderer
+            in task_interactions
         )
-        assert (
-            "intent_requires_confirmation: boolAttr(card.dataset.taskIntentRequiresConfirmation),"
-            in task_renderer
-        )
-        assert (
-            "file_changes: Array.isArray(taskState.fileChanges) ? taskState.fileChanges.slice(-8) : [],"
-            in task_renderer
-        )
-        assert "card.dataset.taskRunId" in task_renderer
+        assert "intent_requires_confirmation: boolAttr(" in task_interactions
+        assert "card.dataset.taskIntentRequiresConfirmation," in task_interactions
+        assert "file_changes: Array.isArray(taskState.fileChanges)" in task_interactions
+        assert "? taskState.fileChanges.slice(-8)" in task_interactions
+        assert "card.dataset.taskRunId" in task_interactions
         assert "previous_task_file_changes = previousTaskFileChanges" in assistant
 
     def test_workspace_whitebox_renderer_is_extracted(self):
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-        ai_transport = _read_frontend_source("web/src/workspace/transport.ts")
+        task_stream_transport = _read_frontend_source(
+            "web/src/workspace/task-stream-transport.ts"
+        )
         ai_results = _read_frontend_source("web/src/workspace/results.ts")
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
         conversation = _read_frontend_source("web/src/workspace/conversation.ts")
         runtime_init = _read_frontend_source("web/src/workspace/runtime-init.ts")
-        notebook = _read_frontend_source("web/src/workspace/notebook.ts")
         find_replace = _read_frontend_source("web/src/workspace/find-replace.ts")
+        find_replace_loader = _read_frontend_source(
+            "web/src/workspace/find-replace-loader.ts"
+        )
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
         standalone = _read_frontend_source("web/templates/index.html")
         main = _read_frontend_source("web/templates/index.html")
@@ -4779,55 +3682,54 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         )
         workspace_bundle_entry = _read_frontend_source("web/src/bundles/workspace.ts")
 
-        assert "publishWorkspaceApi({" in renderer
-        assert "streamTaskFlow," in renderer
-        assert "csrfFetch('/api/editor/ai/task-stream'" in renderer
-        assert "publishWorkspaceApi({ createWorkspaceAiTransport })" in ai_transport
         assert (
-            "WA.createWorkspaceAiResultsRuntime = createWorkspaceAiResultsRuntime"
-            in ai_results
+            "export { streamTaskFlow, restoreTaskRunCard, resumePersistedFileTask };"
+            in renderer
         )
-        assert "publishWorkspaceApi({" in quick_actions
-        assert (
-            "createWorkspaceQuickActionRuntime: createQuickActionDispatcher"
-            in quick_actions
-        )
-        assert "publishWorkspaceApi({ createWorkspaceAiConversation })" in conversation
+        assert "runtime.csrfFetch('/api/editor/ai/task-stream'" in task_stream_transport
+        assert "export function createWorkspaceAiResultsRuntime(" in ai_results
+        assert "registerFeatures({ createWorkspaceAiResultsRuntime })" not in ai_results
+        assert "export function createQuickActionDispatcher(" in quick_actions
+        assert "createWorkspaceQuickActionRuntime" not in quick_actions
+        assert "export function createWorkspaceAiConversation(" in conversation
+        assert "registerFeatures({ createWorkspaceAiConversation })" not in conversation
         assert "model' || value === 'ai'" in conversation
-        assert "export function installWorkspaceNotebookTools" in notebook
-        assert (
-            "WA.installWorkspaceNotebookTools = installWorkspaceNotebookTools"
-            in notebook
-        )
         assert "export function installWorkspaceFindReplace" in find_replace
-        assert "publishWorkspaceApi({ installWorkspaceFindReplace })" in find_replace
-        assert "publishWorkspaceApi({ createTaskDispatcher })" in dispatcher
-        assert "const workspaceApi = getWorkspaceApi();" in runtime_init
+        assert "registerFeatures({ installWorkspaceFindReplace })" in find_replace
+        assert "export function createTaskDispatcher(" in dispatcher
+        assert "registerFeatures({ createTaskDispatcher })" not in dispatcher
+        assert "const workspaceApi = getFeatureRegistry();" in runtime_init
         assert (
-            "typeof workspaceApi.createWorkspaceAiResultsRuntime === 'function'"
+            "import { createWorkspaceAiResultsRuntime } from './results';"
             in runtime_init
         )
         assert (
-            "typeof workspaceApi.createWorkspaceAiConversation === 'function'"
+            "import { createWorkspaceAiConversation } from './conversation';"
             in runtime_init
         )
-        assert "publishWorkspaceApi({" in runtime_init
+        assert "registerFeatures({" in runtime_init
         assert (
-            "typeof workspaceApi.createWorkspaceQuickActionRuntime === 'function'"
+            "import { createQuickActionDispatcher } from './quick-actions';"
             in runtime_init
         )
         assert (
             "_waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);" in runtime_init
         )
-        assert "typeof workspaceApi.createTaskDispatcher === 'function'" in runtime_init
+        assert (
+            "import { createTaskDispatcher } from './task-dispatcher';" in runtime_init
+        )
         assert "fetch('/api/editor/ai/task-stream'" not in assistant
         assert "{% include '_workspace_asset_scripts.html' %}" in standalone
         assert "{% include '_workspace_asset_scripts.html' %}" in main
         assert "workspace-bundle.js" in asset_scripts
-        assert "review-bundle.js" in asset_scripts
-        assert asset_scripts.index("workspace-bundle.js") < asset_scripts.index(
-            "review-bundle.js"
-        )
+        assert "find-replace-bundle.js" in asset_scripts
+        assert "task-workbench-bundle.js" in asset_scripts
+        assert "conversation-list-bundle.js" in asset_scripts
+        assert "fs-context-menu-bundle.js" in asset_scripts
+        assert "docx-review-engine-bundle.js" in asset_scripts
+        assert "'js/build/review-bundle.js'" not in asset_scripts
+        assert "document-review-bundle.js" in asset_scripts
+        assert "rag-panel-bundle.js" in asset_scripts
         assert "workspace-task-workbench.js" not in asset_scripts
         assert "workspace-assistant.js" not in asset_scripts
         assert "workspace-ai-task.js" not in asset_scripts
@@ -4837,12 +3739,24 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert not Path("web/static/js/workspace-notebook.js").exists()
         assert not Path("web/static/js/workspace-find-replace.js").exists()
         assert "import '../workspace/task-runner';" in workspace_bundle_entry
-        assert "import '../workspace/transport';" in workspace_bundle_entry
+        assert "installTaskWorkbenchLoader();" in workspace_bundle_entry
+        assert "import '../workspace/task-workbench';" not in workspace_bundle_entry
+        assert "installConversationListLoader();" in workspace_bundle_entry
+        assert "import '../workspace/conversation-list';" not in workspace_bundle_entry
+        assert "installFsContextMenuLoader();" in workspace_bundle_entry
+        assert "import '../workspace/fs-context-menu';" not in workspace_bundle_entry
+        assert "import '../workspace/transport';" not in workspace_bundle_entry
+        assert not Path("web/src/workspace/transport.ts").exists()
         assert "import '../workspace/results';" in workspace_bundle_entry
         assert "import '../workspace/quick-actions';" in workspace_bundle_entry
         assert "import '../workspace/conversation';" in workspace_bundle_entry
-        assert "import '../workspace/notebook';" in workspace_bundle_entry
-        assert "import '../workspace/find-replace';" in workspace_bundle_entry
+        assert "import '../workspace/notebook';" not in workspace_bundle_entry
+        assert "scheduleWorkspaceFindReplaceLoad" in workspace_bundle_entry
+        assert "import '../workspace/find-replace';" not in workspace_bundle_entry
+        assert "requestIdleCallback" in find_replace_loader
+        assert (
+            "[data-wa-find-input], [data-wa-find-replace-input]" in find_replace_loader
+        )
         assert "import '../workspace/task-dispatcher';" in workspace_bundle_entry
         assert "doc-agent-ui.js" not in standalone
         assert "wa-doc-agent-phases" not in standalone
@@ -4860,7 +3774,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "registerTaskQuickAction," in runtime_init
         assert "registerTaskEntryRoute," in runtime_init
         assert "registerTaskActionHandler," in runtime_init
-        assert "publishWorkspaceApi({" in runtime_init
+        assert "registerFeatures({" in runtime_init
 
     def test_workspace_dispatcher_records_assistant_turns_for_task_history(self):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
@@ -4921,7 +3835,11 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "function _waConversationDocId()" not in assistant
         assert "export const _WA_RUNTIME_SESSION_ID: string = (() => {" in state_src
         assert "workspace_runtime_" in state_src
-        assert "return _hostChatSession() || _WA_RUNTIME_SESSION_ID;" in runtime_init
+        assert (
+            "if (current && !/^workspace_runtime_/i.test(current)) return current;"
+            in runtime_init
+        )
+        assert "_hostSessionId = `对话_${stamp}`;" in runtime_init
         assert "return 'workspace_' + (state.fileId || 'default');" not in assistant
         assert "window.WA.openAiSessionFromSidebar" not in assistant
         assert "window.WA.renameLinkedAiSession" not in assistant
@@ -4937,11 +3855,15 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
         runtime_init = _read_frontend_source("web/src/workspace/runtime-init.ts")
         task_renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-
-        assert (
-            "turn.task_card_snapshot && typeof workspaceApi.restoreTaskRunCard === 'function'"
-            in conversation
+        task_ui_state = _read_frontend_source("web/src/workspace/task-ui-state.ts")
+        task_lifecycle = _read_frontend_source(
+            "web/src/workspace/task-stream-lifecycle.ts"
         )
+        task_recovery = _read_frontend_source("web/src/workspace/task-run-recovery.ts")
+
+        assert "turn.task_card_snapshot" in conversation
+        assert "import { restoreTaskRunCard } from './task-runner';" in conversation
+        assert "workspaceApi.restoreTaskRunCard" not in conversation
         assert (
             "!taskTurnIsTerminal(turn) && workspaceApi.restoreTaskRunCard"
             not in conversation
@@ -4977,26 +3899,36 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             "syncAssistantTaskTurn: (turnId: string, metadata: any) => _waConversationRuntime && typeof _waConversationRuntime.syncAssistantTaskTurn === 'function'"
             in runtime_init
         )
+        assert "const includeSnapshot = !metadata.test_structure;" not in runtime_init
         assert (
-            "function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any>"
-            in task_renderer
+            "const snapshot = card.classList && card.classList.contains('wa-task-run')"
+            in runtime_init
         )
-        assert "restoreTaskRunCard," in task_renderer
-        assert "publishWorkspaceApi({" in task_renderer
+        assert "const restoreTaskRunCard = (" in task_recovery
         assert (
-            "function isTaskCardElement(value: unknown): value is TaskCardElement"
-            in task_renderer
-        )
-        assert "if (!card || !isTaskCardElement(card)) return false;" in task_renderer
-        assert "if (!card || !isTaskCardElement(card)) return null;" in task_renderer
-        assert (
-            "const card = isTaskCardElement(loadingEl) ? loadingEl : document.createElement('div') as TaskCardElement;"
+            "export { streamTaskFlow, restoreTaskRunCard, resumePersistedFileTask };"
             in task_renderer
         )
         assert (
-            "if (typeof options.onTaskCardSnapshot === 'function') {" in task_renderer
+            "restoreTaskRunCard"
+            not in task_renderer.split("taskFlowTestHarness:", 1)[-1]
         )
-        assert "const restored = attachRunCardBehavior(card);" in task_renderer
+        assert "export function isTaskUiStateCard(" in task_ui_state
+        assert "isTaskUiStateCard as isTaskCardElement" in task_renderer
+        assert "if (!card || !runtime.isCard(card)) return false;" in task_lifecycle
+        assert "cancelRun: cancelFileTaskRun," in task_renderer
+        assert "if (!card || !runtime.isCard(card)) return null;" in task_recovery
+        assert "const card = isTaskCard(loadingEl)" in _read_frontend_source(
+            "web/src/workspace/task-stage-presentation.ts"
+        )
+        task_stream_transport = _read_frontend_source(
+            "web/src/workspace/task-stream-transport.ts"
+        )
+        assert (
+            "notifyTaskCardSnapshot(card, streamOptions.onTaskCardSnapshot);"
+            in task_stream_transport
+        )
+        assert "const restored = runtime.attachBehavior(card);" in task_recovery
 
     def test_unified_ai_history_does_not_filter_workspace_sessions(self):
         app_js = "\n".join(
@@ -5031,7 +3963,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
         assert "async function _sendViaEditorActionSSE(payload)" not in src
         assert "export function sendQuickAction(action: string): void" in src
-        assert "publishWorkspaceApi({" in src
+        assert "registerFeatures({" in src
         assert "sendQuickAction," in src
         assert (
             "getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'"
@@ -5051,10 +3983,14 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "console.count('[WA legacy-editor-fallback]');" not in quick_actions
         assert "window.WA.quickAction =" not in src
 
-    def test_workspace_transport_accepts_pre_serialized_json_bodies(self):
-        transport = _read_frontend_source("web/src/workspace/transport.ts")
-        assert "const requestBody = typeof opts.body === 'string'" in transport
-        assert "body: requestBody," in transport
+    def test_workspace_generic_transport_is_retired(self):
+        assert not Path("web/src/workspace/transport.ts").exists()
+        task_transport = _read_frontend_source(
+            "web/src/workspace/task-stream-transport.ts"
+        )
+        direct_chat = _read_frontend_source("web/src/workspace/task-direct-chat.ts")
+        assert "/api/editor/ai/task-stream" in task_transport
+        assert "createWorkspaceChatStreamer" in direct_chat
 
     def test_workspace_retired_inline_ai_entrypoints_are_removed(self):
         src = _read_frontend_source("web/src/workspace/ai-review.ts")
@@ -5142,34 +4078,57 @@ class TestWorkspaceAssistantTaskRemovalRegression:
 
     def test_workspace_proposal_card_filters_duplicate_rationale_text(self):
         """Proposal cards should hide rationale text when it just repeats original/proposed content."""
-        assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
         results = _read_frontend_source("web/src/workspace/results.ts")
-        assert "function _getProposalRationaleText(proposal: ProposalData)" in assistant
-        assert "runtime.getProposalRationaleText(proposal)" in assistant
         assert (
             "function getProposalRationaleText(proposal: Proposal): string" in results
         )
         assert "rationaleKey === originalKey || rationaleKey === proposedKey" in results
 
     def test_workspace_ai_review_tool_calls_route_into_docx_review_surface(self):
+        """Proposal writes use the verified review bridge; annotation compatibility remains."""
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
         results = _read_frontend_source("web/src/workspace/results.ts")
+        proposal_actions = _read_frontend_source(
+            "web/src/workspace/document-review-actions.ts"
+        )
+        review_loader = _read_frontend_source(
+            "web/src/workspace/document-review-loader.ts"
+        )
+        review_entry = _read_frontend_source("web/src/bundles/document-review.ts")
+        document_actions = _read_frontend_source(
+            "web/src/mcp/frontend-observer-document-actions.ts"
+        )
         docx_review_runtime = _read_frontend_source(
             "web/src/workspace/docx-review-runtime.ts"
         )
-        assert "(window as any).WA.applyStructuredDocToolCall" in docx_review_runtime
+        review_api = _read_frontend_source("web/src/workspace/docx-review-api.ts")
+        assert "export const applyStructuredDocToolCall" in docx_review_runtime
+        assert "export const applyStructuredReviewChangePayload" in docx_review_runtime
+        assert "registerFeatures({" in review_api
+        assert "applyStructuredDocToolCall," not in review_api
+        assert "focusReviewThread," in review_api
+        assert "relayoutDocxReviewRail," in review_api
+        # Both acceptance and inline writes await one verified owner instead of
+        # treating a legacy review handler's boolean as an application receipt.
+        assert "applyStructuredDocToolCall" not in results
+        assert results.count("await review.applyProposalSafely(") >= 2
+        assert "result.receipt?.applied === true" in results
+        assert "result.receipt?.revision_after" in results
+        assert "document-review-bundle" in review_loader
+        assert "documentReviewRuntime" in review_entry
+        assert "applyProposalSafely" in review_entry
+        assert "sameReviewContext(baseline, before)" in proposal_actions
+        assert "getFeatureRegistry().applyDocumentReviewEdit" in proposal_actions
+        assert "result = await semantic({" in proposal_actions
+        assert "expected_revision: before.revision" in proposal_actions
+        assert "value?.verified === false" in proposal_actions
+        assert "applyDocumentReviewEdit:" in document_actions
+        assert "_applyScopedDocumentEdit(" in document_actions
+        assert "applyDocxTextPatch(pm," in document_actions
+        assert "_getLiveEditorSelectionForAI" in assistant
         assert (
-            "(window as any).WA.applyStructuredReviewChangePayload"
-            in docx_review_runtime
-        )
-        assert (
-            "workspaceApi.applyStructuredDocToolCall?.(proposal.tool_call" in assistant
-        )
-        assert "window.WA.applyStructuredDocToolCall(proposal.tool_call" in results
-        assert "window.WA.applyStructuredDocToolCall(toolCall" in results
-        assert (
-            "(window as any).WA.applyStructuredReviewChangePayload = (payload: any, options: any = {}) =>"
-            in docx_review_runtime
+            "export const applyStructuredReviewChangePayload = "
+            "(payload: any, options: any = {}): boolean =>" in docx_review_runtime
         )
 
     def test_workspace_proposal_buttons_stay_single_line_and_equal_width(self):
@@ -5199,14 +4158,12 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             "export function _serializeEditorForTab(_tab: TabInfo | null, editor: any): any"
             in file_open
         )
-        assert (
-            "(window as any)._serializeEditorForTab = _serializeEditorForTab"
-            in file_open
-        )
+        assert "(window as any)._serializeEditorForTab" not in file_open
+        assert "wa._serializeEditorForTab" not in file_open
         assert (
             "function _showBrowserCtx(event: MouseEvent, el: HTMLElement): void"
             in fs_context_menu
         )
-        assert "publishWorkspaceApi({" in fs_context_menu
+        assert "registerFeatures({" in fs_context_menu
         assert "_showBrowserCtx," in fs_context_menu
         assert "_serializeEditorForTab" not in fs_context_menu

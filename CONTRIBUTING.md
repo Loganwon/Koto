@@ -86,7 +86,7 @@ python -m pytest tests/unit/test_auth_coverage.py -v
 
 - Never commit secrets, API keys, or credentials
 - Use environment variables for sensitive configuration
-- Follow the sandbox patterns in `app/core/agent/plugins/` when adding
+- Follow the sandbox patterns in `app/core/agent/toolkits/builtin/` when adding
   new code execution features
 - Report security vulnerabilities privately (see [SECURITY.md](SECURITY.md))
 

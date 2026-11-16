@@ -1,7 +1,7 @@
 """
 Shared tool-call parsing utilities.
 
-Single canonical implementation used by agent_loop, task_agent, and
+Single canonical implementation used by the Kernel and file-task adapters, and
 socket_handler – replaces three near-identical local copies.
 """
 

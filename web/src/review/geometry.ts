@@ -90,6 +90,24 @@ function layoutScale(element: HTMLElement | null, rect: DOMRect | null): LayoutS
   };
 }
 
+function visibleViewportRight(viewportRect: DOMRect): number {
+  const aiPanel = document.querySelector('#wa-ai') as HTMLElement | null;
+  if (!aiPanel) return viewportRect.right;
+  const styles = window.getComputedStyle(aiPanel);
+  if (
+    styles.display === 'none'
+    || styles.visibility === 'hidden'
+    || styles.pointerEvents === 'none'
+    || Number.parseFloat(styles.opacity || '1') <= 0.05
+  ) return viewportRect.right;
+  const aiRect = aiPanel.getBoundingClientRect();
+  const overlapsVertically = aiRect.bottom > viewportRect.top && aiRect.top < viewportRect.bottom;
+  const overlaysRightSide = aiRect.left > viewportRect.left && aiRect.left < viewportRect.right;
+  return overlapsVertically && overlaysRightSide
+    ? Math.max(viewportRect.left + 1, aiRect.left)
+    : viewportRect.right;
+}
+
 export function computeReviewGeometry(host: HTMLElement, viewport: HTMLElement): ReviewGeometry | null {
   if (!host || !viewport) return null;
 
@@ -111,7 +129,14 @@ export function computeReviewGeometry(host: HTMLElement, viewport: HTMLElement):
     ? Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0)
     : 0;
   const hostStyles = window.getComputedStyle(host);
-  const viewportWidth = Math.max(1, Math.round(viewportRect.width / ls.x));
+  // Compact layouts render the AI panel as an overlay above the canvas. Its
+  // occupied area is not usable review space even though it remains part of
+  // the editor viewport's clientWidth.
+  const usableViewportRight = visibleViewportRight(viewportRect);
+  const viewportWidth = Math.max(
+    1,
+    Math.round((usableViewportRight - viewportRect.left) / ls.x),
+  );
 
   let textColRight: number;
   if (pageRect) {
@@ -232,9 +257,3 @@ export function buildConnectorPath({ startX, startY, endX, endY }: ConnectorOpts
   const elbowX = sx + Math.min(20, Math.round((ex - sx) * 0.35));
   return `M ${sx} ${sy} L ${elbowX} ${sy} L ${ex} ${ey}`;
 }
-
-(window as any).KotoDocxReviewGeometry = {
-  computeReviewGeometry,
-  getAnchorGeometry,
-  buildConnectorPath,
-};

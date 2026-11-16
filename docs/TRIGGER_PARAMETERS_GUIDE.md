@@ -387,7 +387,7 @@ python test_trigger_params.py
 
 | 文件 | 功能 |
 |------|------|
-| `web/proactive_trigger.py` | 触发器核心逻辑（参数管理） |
+| `app/core/services/proactive_trigger.py` | 触发器核心逻辑（参数管理） |
 | `web/app.py` | API 端点（参数更新接口） |
 | `web/src/app/ (已迁移至模块化主应用)` | 前端 JavaScript（参数编辑UI） |
 | `web/static/css/style.css` | 参数编辑区域样式 |

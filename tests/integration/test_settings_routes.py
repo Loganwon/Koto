@@ -7,7 +7,6 @@ Integration tests for settings-related endpoints in web/app.py:
 - GET  /api/info — app metadata
 - GET  /api/setup/status — setup status check
 - GET  /api/v1/models — model listing
-- GET  /api/token-stats — token usage statistics
 """
 
 from __future__ import annotations
@@ -60,8 +59,10 @@ class TestGetSettings:
         assert resp.status_code == 200
 
     def test_returns_json_dict(self, client):
-        data = _check(client.get("/api/settings"))
+        response = client.get("/api/settings")
+        data = _check(response)
         assert isinstance(data, dict)
+        assert "no-store" in response.headers.get("Cache-Control", "")
 
     def test_contains_expected_categories(self, client):
         data = _check(client.get("/api/settings"))
@@ -171,7 +172,8 @@ class TestUpdateSettings:
         from app.core.config.user_settings import SettingsManager
 
         original = SettingsManager().get_all()
-        original_mode = str(original.get("model_mode") or "cloud")
+        raw_original_mode = str(original.get("model_mode") or "cloud").lower()
+        original_mode = "local" if raw_original_mode in {"local", "ollama"} else "cloud"
         original_model = str(
             original.get("local_model")
             or (original.get("ai") or {}).get("local_model")
@@ -198,7 +200,7 @@ class TestUpdateSettings:
                 json={"mode": original_mode, "model_tag": original_model},
             )
 
-    def test_local_model_change_clears_router_response_cache(self, client):
+    def test_local_model_change_clears_ollama_response_cache(self, client):
         from unittest.mock import patch
 
         from app.core.config.user_settings import SettingsManager
@@ -213,7 +215,7 @@ class TestUpdateSettings:
 
         try:
             with patch(
-                "app.core.routing.local_model_router.LocalModelRouter.reset_response_model"
+                "app.core.llm.local_model_runtime.OllamaRuntime.reset_response_model"
             ) as reset_response_model:
                 response = _post(
                     client,
@@ -308,19 +310,3 @@ class TestModelsEndpoint:
         data = _check(client.get("/api/v1/models"))
         assert "ready" in data
         assert isinstance(data["ready"], bool)
-
-
-# ── GET /api/token-stats ─────────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestTokenStats:
-    def test_returns_200(self, client):
-        resp = client.get("/api/token-stats")
-        # May be 200 or 500 if token_tracker not available
-        assert resp.status_code in (200, 500)
-
-    def test_returns_json(self, client):
-        resp = client.get("/api/token-stats")
-        data = resp.get_json()
-        assert data is not None

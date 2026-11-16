@@ -12,9 +12,10 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -505,6 +506,30 @@ class KnowledgeBase:
         self._vector_cache = None
 
         return {"success": True, "message": f"已删除文档及其 {len(chunk_ids)} 个块"}
+
+
+_knowledge_base: Optional[KnowledgeBase] = None
+_knowledge_base_lock = threading.Lock()
+
+
+def get_knowledge_base() -> KnowledgeBase:
+    """Return the process-wide local knowledge base."""
+
+    global _knowledge_base
+    if _knowledge_base is not None:
+        return _knowledge_base
+    with _knowledge_base_lock:
+        if _knowledge_base is None:
+            _knowledge_base = KnowledgeBase()
+    return _knowledge_base
+
+
+def reset_knowledge_base_for_tests() -> None:
+    """Clear the cached instance without deleting its on-disk index."""
+
+    global _knowledge_base
+    with _knowledge_base_lock:
+        _knowledge_base = None
 
 
 # ==================== 测试示例 ====================

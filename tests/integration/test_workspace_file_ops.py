@@ -60,14 +60,15 @@ def _app_bundle(tmp_path_factory):
 
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
 
     _orig_tmp_root = _wa._TMP_ROOT
-    _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    _orig_ws = get_workspace_root()
     _orig_settings_path = os.environ.get("KOTO_USER_SETTINGS_PATH")
     os.environ["KOTO_USER_SETTINGS_PATH"] = str(settings_path)
     _wa._TMP_ROOT = tmp_dir
     _shared.clear_user_settings_cache()
-    _shared.WORKSPACE_DIR = str(workspace_dir)
+    set_workspace_root(str(workspace_dir))
 
     from flask import Flask
 
@@ -83,8 +84,7 @@ def _app_bundle(tmp_path_factory):
 
     _wa._TMP_ROOT = _orig_tmp_root
     _shared.clear_user_settings_cache()
-    if _orig_ws is not None:
-        _shared.WORKSPACE_DIR = _orig_ws
+    set_workspace_root(_orig_ws)
     if _orig_settings_path is None:
         os.environ.pop("KOTO_USER_SETTINGS_PATH", None)
     else:
@@ -830,12 +830,17 @@ class TestSetWorkspaceDir:
 
         target_dir = tmp_path / "new_workspace_root"
 
+        import app.core.config.workspace_runtime as workspace_runtime
         import web.shared as _shared
+        from app.core.config.workspace_runtime import get_workspace_root
 
         cleared = {"called": False}
-        original_workspace_dir = _shared.WORKSPACE_DIR
+        monkeypatch.setattr(
+            workspace_runtime,
+            "_runtime_override",
+            workspace_runtime._runtime_override,
+        )
         monkeypatch.setenv("KOTO_USER_SETTINGS_PATH", str(settings_path))
-        monkeypatch.setattr(_shared, "WORKSPACE_DIR", original_workspace_dir)
         monkeypatch.setattr(
             _shared,
             "clear_user_settings_cache",
@@ -851,7 +856,7 @@ class TestSetWorkspaceDir:
         assert body.get("ok") is True
         assert target_dir.is_dir()
         assert cleared["called"] is True
-        assert _shared.WORKSPACE_DIR == str(target_dir)
+        assert get_workspace_root() == str(target_dir.resolve())
 
         persisted = json.loads(settings_path.read_text(encoding="utf-8"))
         assert persisted["storage"]["workspace_dir"] == str(target_dir.resolve())

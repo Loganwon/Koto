@@ -246,7 +246,7 @@ def make_image_jpg(path: str) -> str:
 
 def test_file_processor():
     section("FileProcessor 测试（上传解析通路）")
-    from web.file_processor import FileProcessor
+    from web.files.file_processor import FileProcessor
 
     test_cases = [
         ("TXT", make_txt(TMP_DIR), "text_content", 10),
@@ -309,7 +309,7 @@ def test_file_processor():
 
 def test_file_parser():
     section("FileParser 测试（PPT 素材解析通路）")
-    from web.file_parser import FileParser
+    from app.core.file.file_parser import parse_file
 
     test_cases = [
         ("PDF", make_pdf(TMP_DIR)),
@@ -322,7 +322,7 @@ def test_file_parser():
     failed_names = []
 
     for label, fpath in test_cases:
-        result = FileParser.parse_file(fpath)
+        result = parse_file(fpath)
         if result and result.get("success"):
             chars = result.get("char_count", 0)
             ok(f"{label:<12} OK   — {chars} 字符")
@@ -336,7 +336,7 @@ def test_file_parser():
     unsupported_path = os.path.join(TMP_DIR, "sample.xyz")
     with open(unsupported_path, "w") as f:
         f.write("test")
-    res = FileParser.parse_file(unsupported_path)
+    res = parse_file(unsupported_path)
     if res and not res.get("success") and "不支持" in res.get("error", ""):
         ok(f"{'不支持格式':<12} OK   — 正确拒绝 .xyz")
     else:
@@ -354,7 +354,7 @@ def test_file_parser():
 
 def test_format_result_for_chat():
     section("FileProcessor.format_result_for_chat 格式化通路测试")
-    from web.file_processor import FileProcessor
+    from web.files.file_processor import FileProcessor
 
     # 文本文件
     txt_path = make_txt(TMP_DIR)
@@ -382,16 +382,18 @@ def test_format_result_for_chat():
 
 
 def test_batch_parse():
-    section("FileParser.batch_parse 批量解析通路测试")
-    from web.file_parser import FileParser
+    section("统一文件解析器批量调用测试")
+    from app.core.file.file_parser import parse_file
 
     paths = [make_txt(TMP_DIR), make_md(TMP_DIR), make_pdf(TMP_DIR)]
-    results = FileParser.batch_parse(paths)
+    results = [parse_file(path) for path in paths]
 
     ok_count = sum(1 for r in results if r and r.get("success"))
     ok(f"批量解析 {len(paths)} 个文件 → {ok_count} 成功")
 
-    merged = FileParser.merge_contents([r for r in results if r and r.get("success")])
+    merged = "\n\n".join(
+        str(r.get("content") or "") for r in results if r and r.get("success")
+    )
     if merged and len(merged) > 20:
         ok(f"merge_contents   OK — 合并后 {len(merged)} 字符")
     else:

@@ -4,7 +4,11 @@
 
 import { fileTaskStatusLabel } from './file-task-status';
 import { _escHtml } from './infrastructure';
-import { publishWorkspaceApi } from '../shared/workspace-api';
+import { getFeatureRegistry, registerFeatures } from '../shared/feature-registry';
+import type { EditorInstance } from './state';
+import { captureDocumentReviewContext, sameReviewContext, type ReviewContext } from './document-review-context';
+import { loadDocumentReviewRuntime } from './document-review-loader';
+import { appendDocumentReceipt, documentReceiptRecord } from './task-document-receipt';
 
 interface Proposal {
   id?: string;
@@ -16,8 +20,13 @@ interface Proposal {
   proposed_text?: string;
   rationale?: string;
   tool_call?: ToolCall;
+  status?: string;
+  applied?: boolean;
+  receipt?: any;
+  execution_receipt?: any;
+  expected_revision?: string;
+  [key: string]: any;
 }
-
 interface ToolCall {
   type: string;
   original?: string;
@@ -75,11 +84,7 @@ interface ResultsState {
   _activeProposals?: Proposal[];
   _aiTargetFileIdx?: number;
   _aiFileContext?: Array<{ name: string }>;
-  activeEditor?: {
-    applyToolCall: (tc: ToolCall) => void;
-    appendToolCall?: (tc: ToolCall) => void;
-    replaceSelectionWith?: (mode: string, selection: any, rawText: string) => void;
-  };
+  activeEditor?: EditorInstance | null;
   pinnedSelection?: any;
   lastPinnedSel?: any;
   pendingToolCall?: ToolCall | null;
@@ -91,8 +96,11 @@ interface ResultsDeps {
   getMessagesElement?: () => HTMLElement | null;
   selectionContextText?: (ctx: any) => string;
   createPinnedSelectionContext?: (text: string) => any;
-  showToast?: (message: string, type?: string) => void;
-  scheduleAutoSave?: () => void;
+  showToast?: (
+    message: string,
+    type?: 'success' | 'error' | 'info' | 'warning',
+  ) => void;
+  scheduleAutoSave?: (_options?: { skipDiskWrite?: boolean }) => void;
   getUserInputElement?: () => HTMLInputElement | HTMLTextAreaElement | null;
   sendMessage?: () => void;
   computeInlineDiff?: (original: string, proposed: string) => string;
@@ -107,17 +115,16 @@ interface ResultsApi {
   makeProposalBatchBar: (proposals: Proposal[]) => HTMLElement;
   updateProposalCounter: () => void;
   handleProposals: (data: { proposals?: Proposal[] }) => void;
-  acceptProposal: (proposalId: string, btn: HTMLElement | null) => void;
+  acceptProposal: (proposalId: string, btn: HTMLElement | null) => Promise<void>;
   rejectProposal: (proposalId: string, btn: HTMLElement | null) => void;
   modifyProposal: (proposalId: string, btn: HTMLElement | null) => void;
   submitModify: (proposalId: string, btn: HTMLElement | null) => void;
-  batchAcceptAll: () => void;
+  batchAcceptAll: () => Promise<void>;
   batchRejectAll: () => void;
   makeAIActionBar: (snapshot: AiActionSnapshot) => HTMLElement;
-  execWriteToDoc: (mode: string, snapshot: AiActionSnapshot, bar: HTMLElement | null) => void;
-  applyAIResponse: (mode: string, btn: HTMLElement | null) => void;
+  execWriteToDoc: (mode: string, snapshot: AiActionSnapshot, bar: HTMLElement | null) => Promise<void>;
+  applyAIResponse: (mode: string, btn: HTMLElement | null) => Promise<void>;
   renderArtifactResult: (raw: any, renderOptions?: { activeTab?: string }) => HTMLElement | null;
-  loadBackgroundArtifactResult: (taskId: string) => Promise<HTMLElement | null>;
 }
 
 declare global {
@@ -140,6 +147,17 @@ function normalizeProposalText(text: unknown): string {
 function basename(path: unknown): string {
   const parts = String(path || '').replace(/\\/g, '/').split('/');
   return parts[parts.length - 1] || '';
+}
+
+function receiptApplied(raw: any): boolean {
+  const value = raw?.value || raw;
+  return value?.applied === true || value?.persisted === true;
+}
+
+function safeWebUrl(raw: unknown): string {
+  const value = String(raw || '').trim(); if (!value) return '';
+  try { const url = new URL(value, window.location.href); return ['http:', 'https:'].includes(url.protocol) ? url.href : ''; }
+  catch (_) { return ''; }
 }
 
 export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): ResultsApi {
@@ -172,10 +190,33 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     ? options.sendMessage
     : () => {};
   const lightbulbIcon = options.lightbulbIcon || '';
-  const pencilIcon = options.pencilIcon || '';
+  type ProposalState = 'candidate' | 'applying' | 'applied' | 'saved' | 'failed' | 'unconfirmed' | 'rejected';
+  type ProposalEntry = { proposal: Proposal; card: HTMLElement; baseline: ReviewContext | null; phase: ProposalState; batch: number; receipt?: any; inFlight?: Promise<void> };
+  const proposalEntries = new Map<string, ProposalEntry>();
+  const actionBaselines = new WeakMap<HTMLElement, ReviewContext | null>();
+  let proposalSequence = 0;
+  const reviewInstance = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let proposalBatch = 0;
+  let batchInFlight: Promise<void> | null = null;
+
+  function setProposalState(entry: ProposalEntry, phase: ProposalState, reason = ''): void {
+    entry.phase = phase; entry.proposal.status = phase; entry.card.dataset.status = phase;
+    entry.card.classList.toggle('accepted', phase === 'applied' || phase === 'saved');
+    entry.card.classList.toggle('rejected', phase === 'rejected');
+    const status = entry.card.querySelector<HTMLElement>('.wa-proposal-state');
+    if (status) status.textContent = reason || ({ candidate: '候选修改 · 尚未应用', applying: '正在应用并核对文档…', applied: '已应用到编辑器 · 尚未保存', saved: '已保存并核验', failed: '应用失败 · 建议已保留', unconfirmed: '结果未知 · 请先核对文档', rejected: '已拒绝此建议' }[phase]);
+    entry.card.querySelectorAll<HTMLButtonElement>('.wa-proposal-actions button').forEach((button) => {
+      if (button.classList.contains('accept') || button.classList.contains('reject')) button.disabled = !['candidate', 'failed'].includes(phase);
+    });
+  }
+
+  function proposalEntry(proposalId: string, btn: HTMLElement | null): ProposalEntry | undefined {
+    const card = findProposalCard(proposalId, btn);
+    return card ? proposalEntries.get(card.dataset.reviewKey || '') : undefined;
+  }
 
   function getProposalRationaleText(proposal: Proposal): string {
-    const raw = (proposal && proposal.rationale ? proposal.rationale : '').replace(/<[^>]+>/g, '').trim();
+    const raw = String(proposal?.rationale || '').replace(/<[^>]+>/g, '').trim();
     if (!raw) return '';
     const rationaleKey = normalizeProposalText(raw);
     const originalKey = normalizeProposalText(proposal && proposal.original_text ? proposal.original_text : '');
@@ -187,18 +228,20 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
   function proposalCanApply(proposal: Proposal): boolean {
     if (!proposal) return false;
     if (proposal.read_only || proposal.apply_disabled) return false;
-    const rationale = (proposal.rationale || '').replace(/<[^>]+>/g, '').trim();
+    if (proposal.applied === true || proposal.persisted === true || ['accepted', 'applied', 'saved', 'unconfirmed', 'applying', 'rejected'].includes(String(proposal.status || ''))) return false;
+    if (receiptApplied(proposal.receipt) || receiptApplied(proposal.execution_receipt)) return false;
+    const rationale = String(proposal.rationale || '').replace(/<[^>]+>/g, '').trim();
     const actionType = String(proposal.action || proposal.action_type || '').trim();
     if (/翻译/.test(rationale) || /translate/i.test(actionType)) return false;
-    return !!(proposal.tool_call || (proposal.original_text && proposal.proposed_text));
+    return !!(proposal.tool_call || (proposal.original_text && proposal.proposed_text !== undefined));
   }
 
   function updateProposalCounter(): void {
-    const counter = document.getElementById('wa-proposal-counter');
-    if (!counter) return;
-    const all = document.querySelectorAll('.wa-proposal-card[data-can-apply="1"]');
-    const done = document.querySelectorAll('.wa-proposal-card[data-can-apply="1"].accepted, .wa-proposal-card[data-can-apply="1"].rejected');
-    counter.textContent = `${done.length}/${all.length} 已处理`;
+    document.querySelectorAll<HTMLElement>('.wa-proposal-batch-counter').forEach((counter) => {
+      const batch = counter.closest<HTMLElement>('.wa-proposal-batch-bar')?.dataset.reviewBatch;
+      const all = Array.from(document.querySelectorAll<HTMLElement>('.wa-proposal-card[data-can-apply="1"]')).filter((card) => !batch || card.dataset.reviewBatch === batch);
+      counter.textContent = `${all.filter((card) => card.classList.contains('accepted') || card.classList.contains('rejected')).length}/${all.length} 已处理`;
+    });
   }
 
   function makeProposalButton(text: string, className: string, onClick: () => void): HTMLButtonElement {
@@ -210,10 +253,15 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
   }
 
   function makeProposalCard(proposal: Proposal, index: number, total: number): HTMLElement {
+    if (!proposal.id) proposal = { ...proposal, id: `proposal-${proposalBatch}-${++proposalSequence}` };
     const card = document.createElement('div');
     card.className = 'wa-proposal-card';
     card.dataset.proposalId = proposal.id;
     card.dataset.index = String(index);
+    card.dataset.reviewKey = `review-${reviewInstance}-${proposalBatch}-${++proposalSequence}`;
+    card.dataset.reviewBatch = String(proposalBatch);
+    const entry: ProposalEntry = { proposal, card, baseline: captureDocumentReviewContext(state), phase: 'candidate', batch: proposalBatch };
+    proposalEntries.set(card.dataset.reviewKey, entry);
     const canApply = proposalCanApply(proposal);
     card.dataset.canApply = canApply ? '1' : '0';
 
@@ -223,9 +271,8 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
 
     const diffView = document.createElement('div');
     diffView.className = 'wa-proposal-diff';
-    diffView.innerHTML = options.computeInlineDiff
-      ? options.computeInlineDiff(proposal.original_text || '', proposal.proposed_text || '')
-      : '';
+    diffView.textContent = `${proposal.original_text || ''}\n→\n${proposal.proposed_text || ''}`;
+    void loadDocumentReviewRuntime().then((review) => diffView.replaceChildren(review.renderDocumentDiff(proposal.original_text || '', proposal.proposed_text || ''))).catch(() => {});
 
     const rationaleText = getProposalRationaleText(proposal);
     const rationale = document.createElement('div');
@@ -236,6 +283,19 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
 
     const actions = document.createElement('div');
     actions.className = 'wa-proposal-actions';
+    if (proposal.original_text) {
+      const locate = makeProposalButton('定位原文', 'locate', async () => {
+        locate.disabled = true;
+        try {
+          const review = await loadDocumentReviewRuntime();
+          const found = await review.locateReviewReceipt({ document_path: entry.baseline?.path, file_id: entry.baseline?.fileId,
+            revision_before: entry.baseline?.revision, before_text: proposal.original_text, scope: proposal.scope });
+          if (!found) showToast('当前版本无法可靠定位原文，请重新核对。', 'warning');
+        } catch (error) { showToast(error instanceof Error ? error.message : String(error), 'error'); }
+        finally { locate.disabled = false; }
+      });
+      actions.appendChild(locate);
+    }
 
     if (canApply) {
       const acceptBtn = makeProposalButton('接受', 'accept', () => acceptProposal(proposal.id || '', acceptBtn));
@@ -249,14 +309,27 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
 
     card.appendChild(header);
     card.appendChild(diffView);
+    const status = document.createElement('p'); status.className = 'wa-proposal-state'; status.setAttribute('role', 'status'); card.appendChild(status);
     if (rationaleText && rationaleText.length > 5) card.appendChild(rationale);
     card.appendChild(actions);
+    const appliedHint = proposal.applied === true || ['accepted', 'applied', 'saved'].includes(String(proposal.status || '')) || receiptApplied(proposal.execution_receipt || proposal.receipt);
+    const rawReceipt = proposal.execution_receipt || proposal.receipt || proposal;
+    const receipt = documentReceiptRecord((rawReceipt?.value || rawReceipt)?.persisted === true ? 'ui_save' : 'ui_apply_edit', rawReceipt);
+    if (appliedHint) {
+      entry.receipt = proposal.execution_receipt || proposal.receipt || proposal;
+      setProposalState(entry, receipt?.status === 'applied' || receipt?.status === 'saved' ? receipt.status : 'unconfirmed');
+      if (receipt) appendDocumentReceipt(card, receipt);
+    } else if (['unconfirmed', 'applying'].includes(String(proposal.status || ''))) setProposalState(entry, 'unconfirmed');
+    else if (proposal.status === 'rejected') setProposalState(entry, 'rejected');
+    else setProposalState(entry, proposal.status === 'failed' ? 'failed' : 'candidate');
     return card;
   }
 
   function makeProposalBatchBar(proposals: Proposal[]): HTMLElement {
     const bar = document.createElement('div');
     bar.className = 'wa-proposal-batch-bar';
+    bar.dataset.reviewBatch = String(proposalBatch);
+    const barBatch = proposalBatch;
     const actionableCount = proposals.filter(proposalCanApply).length;
     const targetIndex = state._aiTargetFileIdx;
     const targetFile = (targetIndex !== undefined && targetIndex >= 0 && targetIndex < (state._aiFileContext || []).length)
@@ -271,23 +344,28 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
 
     const counter = document.createElement('span');
     counter.className = 'wa-proposal-batch-counter';
-    counter.id = 'wa-proposal-counter';
+    counter.id = document.getElementById('wa-proposal-counter') ? `wa-proposal-counter-${proposalBatch}` : 'wa-proposal-counter';
     counter.textContent = `0/${actionableCount} 已处理`;
     bar.appendChild(counter);
 
     if (actionableCount > 0) {
-      const acceptAllBtn = makeProposalButton('全部接受', 'accept small', () => batchAcceptAll());
+      const acceptAllBtn = makeProposalButton('全部接受', 'accept small', () => batchAcceptAll(barBatch));
       bar.appendChild(acceptAllBtn);
     }
 
-    const rejectAllBtn = makeProposalButton('全部拒绝', 'reject small', () => batchRejectAll());
+    const rejectAllBtn = makeProposalButton('全部拒绝', 'reject small', () => batchRejectAll(barBatch));
     bar.appendChild(rejectAllBtn);
 
     if (canDownload) {
-      const downloadBtn = makeProposalButton(`应用并下载 ${targetFile!.name}`, 'download small', () => {
-        if (window.WA && typeof window.WA.downloadPatchedFile === 'function') {
-          window.WA.downloadPatchedFile();
+      const downloadBtn = makeProposalButton(`应用并下载 ${targetFile!.name}`, 'download small', async () => {
+        const entries = Array.from(proposalEntries.values()).filter((entry) => entry.batch === barBatch);
+        if (entries.some((entry) => ['applying', 'applied', 'saved', 'unconfirmed'].includes(entry.phase))) {
+          showToast('部分修改已经应用或状态未确认，请通过文档保存与下载，避免重复应用。', 'warning'); return;
         }
+        const pending = entries.filter((entry) => ['candidate', 'failed'].includes(entry.phase) && proposalCanApply(entry.proposal)).map((entry) => entry.proposal);
+        if (!pending.length) return;
+        try { await getFeatureRegistry().downloadPatchedFile?.(pending); }
+        catch (error) { showToast(error instanceof Error ? error.message : String(error), 'error'); }
       });
       downloadBtn.title = `将全部修改应用到目标文件并下载 ${targetFile!.name}`;
       bar.appendChild(downloadBtn);
@@ -299,9 +377,16 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
   function handleProposals(data: { proposals?: Proposal[] }): void {
     const msgs = getMessagesElement();
     if (!msgs) return;
-    const proposals = data && Array.isArray(data.proposals) ? data.proposals : [];
+    const seen = new Set<string>();
+    const proposals = (data && Array.isArray(data.proposals) ? data.proposals : []).filter((proposal) => {
+      const key = proposal.id || JSON.stringify([proposal.original_text, proposal.proposed_text, proposal.tool_call, proposal.scope]);
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    }).map((proposal) => ({ ...proposal, id: proposal.id || `proposal-${proposalBatch + 1}-${++proposalSequence}` }));
     if (!proposals.length) return;
     state._activeProposals = proposals;
+    proposalBatch += 1;
+    for (const [key, entry] of proposalEntries) if (!entry.card.isConnected && !entry.inFlight) proposalEntries.delete(key);
     if (proposals.length > 1) msgs.appendChild(makeProposalBatchBar(proposals));
     proposals.forEach((proposal, index) => msgs.appendChild(makeProposalCard(proposal, index, proposals.length)));
     requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
@@ -310,52 +395,57 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
   function findProposalCard(proposalId: string, btn: HTMLElement | null): HTMLElement | null {
     if (btn && typeof (btn as any).closest === 'function') {
       const nearest = (btn as any).closest('.wa-proposal-card');
-      if (nearest) return nearest;
+      if (nearest) return nearest.dataset.proposalId === proposalId ? nearest : null;
     }
-    return document.querySelector(`.wa-proposal-card[data-proposal-id="${proposalId}"]`);
+    return Array.from(document.querySelectorAll<HTMLElement>('.wa-proposal-card')).find((card) => card.dataset.proposalId === proposalId) || null;
   }
 
-  function acceptProposal(proposalId: string, btn: HTMLElement | null): void {
-    const card = findProposalCard(proposalId, btn);
-    if (!card || card.classList.contains('accepted') || card.classList.contains('rejected')) return;
-    const proposals = state._activeProposals || [];
-    const proposal = proposals.find((entry) => entry.id === proposalId);
-    if (!proposal) return;
-    if (!proposalCanApply(proposal)) {
+  async function acceptProposal(proposalId: string, btn: HTMLElement | null): Promise<void> {
+    const entry = proposalEntry(proposalId, btn);
+    if (!entry) return;
+    if (entry.inFlight) return entry.inFlight;
+    if (!['candidate', 'failed'].includes(entry.phase)) return;
+    if (!proposalCanApply(entry.proposal)) {
       showToast('该结果仅供查看，不支持直接写入文档', 'info');
       return;
     }
-
-    if (state.activeEditor) {
+    setProposalState(entry, 'applying');
+    entry.inFlight = (async () => {
       try {
-        if (proposal.tool_call) {
-          const handled = window.WA && typeof window.WA.applyStructuredDocToolCall === 'function'
-            ? window.WA.applyStructuredDocToolCall(proposal.tool_call, { notify: false })
-            : false;
-          if (!handled) state.activeEditor.applyToolCall(proposal.tool_call);
-        } else if (proposal.original_text && proposal.proposed_text) {
-          const proposedPlain = (proposal.proposed_text || '').replace(/<[^>]+>/g, '').trim();
-          state.activeEditor.applyToolCall({
-            type: 'replace_text',
-            original: proposal.original_text,
-            value: proposedPlain || proposal.proposed_text,
-          });
+        const review = await loadDocumentReviewRuntime();
+        const before = entry.baseline;
+        const result = await review.applyProposalSafely({ state, proposal: entry.proposal, baseline: before, operationId: entry.card.dataset.reviewKey });
+        const confirmed = result.status === 'applied' && result.receipt?.applied === true && result.receipt?.revision_before && result.receipt?.revision_after;
+        setProposalState(entry, result.status === 'applied' && !confirmed ? 'unconfirmed' : result.status, confirmed ? result.reason : result.reason || '尚未收到完整应用回执。');
+        if (confirmed) {
+          entry.receipt = result.receipt; entry.proposal.execution_receipt = result.receipt; entry.proposal.applied = true;
+          const receipt = documentReceiptRecord('ui_apply_edit', result.receipt); if (receipt) appendDocumentReceipt(entry.card, receipt);
+          scheduleAutoSave({ skipDiskWrite: true });
+          showToast('已应用修改，尚未保存', 'success');
+          const after = captureDocumentReviewContext(state);
+          if (sameReviewContext(after, result.context)) {
+            for (const pending of proposalEntries.values()) {
+              if (pending !== entry && pending.batch === entry.batch && ['candidate', 'failed'].includes(pending.phase) && sameReviewContext(pending.baseline, before)) {
+                pending.baseline = after;
+                if (pending.proposal.expected_revision && pending.proposal.expected_revision === before?.revision) pending.proposal.expected_revision = after?.revision;
+              }
+            }
+          }
+        } else {
+          showToast(result.reason || '修改尚未得到确认，建议已保留', result.status === 'failed' ? 'error' : 'warning');
         }
       } catch (error) {
-        console.warn('acceptProposal applyToolCall failed:', error);
-      }
-    }
-
-    card.classList.add('accepted');
-    showToast('已接受修改', 'success');
-    scheduleAutoSave();
-    updateProposalCounter();
+        const reason = error instanceof Error ? error.message : String(error);
+        setProposalState(entry, 'failed', reason); showToast(reason, 'error');
+      } finally { entry.inFlight = undefined; updateProposalCounter(); }
+    })();
+    return entry.inFlight;
   }
 
   function rejectProposal(proposalId: string, btn: HTMLElement | null): void {
-    const card = findProposalCard(proposalId, btn);
-    if (!card || card.classList.contains('accepted') || card.classList.contains('rejected')) return;
-    card.classList.add('rejected');
+    const entry = proposalEntry(proposalId, btn);
+    if (!entry || !['candidate', 'failed'].includes(entry.phase)) return;
+    setProposalState(entry, 'rejected');
     showToast('已拒绝修改', 'info');
     updateProposalCounter();
   }
@@ -401,41 +491,43 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     const feedback = textarea ? textarea.value.trim() : '';
     if (!feedback) return;
 
-    const proposals = state._activeProposals || [];
-    const proposal = proposals.find((entry) => entry.id === proposalId);
-    if (!proposal) return;
+    const entry = proposalEntry(proposalId, btn);
+    if (!entry || !['candidate', 'failed'].includes(entry.phase)) return;
+    const proposal = entry.proposal;
+    const input = getUserInputElement();
+    if (!input) return;
 
     const inputWrap = card.querySelector('.wa-proposal-modify-input');
     if (inputWrap) inputWrap.remove();
-    card.classList.add('rejected');
+    setProposalState(entry, 'rejected');
     updateProposalCounter();
 
-    const input = getUserInputElement();
-    if (!input) return;
-    const modifyPrompt = `请重新修改以下内容。\n原文：「${String(proposal.original_text || '').substring(0, 200)}」\n上次修改为：「${String((proposal.proposed_text || '').replace(/<[^>]+>/g, '')).substring(0, 200)}」\n用户反馈：${feedback}`;
+    const modifyPrompt = `请重新修改以下内容。\n原文：「${String(proposal.original_text || '')}」\n上次修改为：「${String(proposal.proposed_text || '')}」\n用户反馈：${feedback}`;
     input.value = modifyPrompt;
 
     state.pinnedSelection = createPinnedSelectionContext(proposal.original_text || '');
     sendMessage();
   }
 
-  function batchAcceptAll(): void {
-    document.querySelectorAll('.wa-proposal-card:not(.accepted):not(.rejected)').forEach((card) => {
-      const btn = card.querySelector('.wa-proposal-btn.accept') as HTMLElement | null;
-      if (btn) btn.click();
-    });
+  async function batchAcceptAll(batch = proposalBatch): Promise<void> {
+    if (batchInFlight) return batchInFlight;
+    batchInFlight = (async () => {
+      for (const entry of proposalEntries.values()) {
+        if (entry.batch === batch && ['candidate', 'failed'].includes(entry.phase) && entry.card.isConnected && proposalCanApply(entry.proposal)) await acceptProposal(entry.proposal.id || '', entry.card.querySelector('.wa-proposal-btn.accept'));
+      }
+    })();
+    try { await batchInFlight; } finally { batchInFlight = null; }
   }
 
-  function batchRejectAll(): void {
-    document.querySelectorAll('.wa-proposal-card:not(.accepted):not(.rejected)').forEach((card) => {
-      const btn = card.querySelector('.wa-proposal-btn.reject') as HTMLElement | null;
-      if (btn) btn.click();
-    });
+  function batchRejectAll(batch = proposalBatch): void {
+    for (const entry of proposalEntries.values()) if (entry.batch === batch) rejectProposal(entry.proposal.id || '', entry.card.querySelector('.wa-proposal-btn.reject'));
   }
 
   function makeAIActionBar(snapshot: AiActionSnapshot): HTMLElement {
     const bar = document.createElement('div');
     bar.className = 'wa-ai-action-bar';
+    bar.dataset.reviewOperation = `inline-${reviewInstance}-${++proposalSequence}`;
+    actionBaselines.set(bar, captureDocumentReviewContext(state));
 
     const label = document.createElement('span');
     label.className = 'wa-ai-action-label';
@@ -466,59 +558,51 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     return bar;
   }
 
-  function execWriteToDoc(mode: string, snapshot: AiActionSnapshot, bar: HTMLElement | null): void {
-    if (mode !== 'view') {
+  async function execWriteToDoc(mode: string, snapshot: AiActionSnapshot, bar: HTMLElement | null): Promise<void> {
+    if (mode === 'view') { bar?.remove(); return; }
+    if (bar && ['applying', 'applied', 'saved', 'unconfirmed'].includes(bar.dataset.status || '')) return;
+    if (bar) { bar.dataset.status = 'applying'; bar.querySelectorAll<HTMLButtonElement>('button').forEach((button) => { button.disabled = true; }); }
+    try {
       let msgEl: HTMLElement | null = bar ? (bar.previousElementSibling as HTMLElement | null) : null;
       while (msgEl && !msgEl.classList.contains('wa-msg')) {
         msgEl = msgEl.previousElementSibling as HTMLElement | null;
       }
       const rawText = (msgEl && msgEl.dataset.rawText) ? msgEl.dataset.rawText : (msgEl ? msgEl.textContent || '' : '');
-      const editor = state.activeEditor;
       const toolCall = snapshot.toolCall;
       const selection = selectionContextText(snapshot.pinnedSel);
-
-      if (toolCall && editor) {
-        const handled = window.WA && typeof window.WA.applyStructuredDocToolCall === 'function'
-          ? window.WA.applyStructuredDocToolCall(toolCall)
-          : false;
-        if (mode === 'replace') {
-          if (!handled) editor.applyToolCall(toolCall);
-        } else if (mode === 'append') {
-          if (!handled) {
-            if (editor.appendToolCall) editor.appendToolCall(toolCall);
-            else editor.applyToolCall(toolCall);
-          }
+      const original = selection || toolCall?.original || '';
+      const proposal: Proposal = toolCall ? { tool_call: { ...toolCall }, original_text: toolCall.original, proposed_text: toolCall.value }
+        : original ? { original_text: original, proposed_text: mode === 'append' ? original + rawText : rawText }
+          : { tool_call: { type: mode === 'append' ? 'insert_text' : 'replace_all', value: mode === 'append' ? '\n' + rawText : rawText } };
+      if (toolCall?.original && mode === 'append') { proposal.tool_call!.value = toolCall.original + (toolCall.value || ''); proposal.proposed_text = proposal.tool_call!.value; }
+      const review = await loadDocumentReviewRuntime();
+      const result = await review.applyProposalSafely({ state, proposal, baseline: bar ? actionBaselines.get(bar) || null : captureDocumentReviewContext(state), operationId: bar?.dataset.reviewOperation || `inline-${Date.now()}` });
+      if (bar) bar.dataset.status = result.status;
+      if (result.status === 'applied' && result.receipt?.applied === true) {
+        scheduleAutoSave({ skipDiskWrite: true }); showToast('已应用到编辑器，尚未保存', 'success');
+        if (bar) { bar.replaceChildren(); const record = documentReceiptRecord('ui_apply_edit', result.receipt); if (record) appendDocumentReceipt(bar, record); }
+      } else {
+        if (bar) {
+          const message = bar.querySelector('.wa-ai-action-error') || document.createElement('p'); message.className = 'wa-ai-action-error'; message.textContent = result.reason; bar.appendChild(message);
+          bar.querySelectorAll<HTMLButtonElement>('button').forEach((button) => { button.disabled = result.status === 'unconfirmed'; });
         }
-      } else if (selection && editor && typeof editor.replaceSelectionWith === 'function') {
-        editor.replaceSelectionWith(mode, selection, rawText);
-      } else if (selection) {
-        showToast('无法定位原始选区，已复制到剪贴板', 'info');
-        if (navigator.clipboard) navigator.clipboard.writeText(rawText).catch(() => {});
-      } else if (editor) {
-        if (mode === 'replace') {
-          const htmlVal = window.marked
-            ? window.marked.parse(rawText)
-            : ('<p>' + String(rawText || '').replace(/\n/g, '</p><p>') + '</p>');
-          editor.applyToolCall({ type: 'replace_all', value: htmlVal });
-        } else {
-          editor.applyToolCall({ type: 'insert_text', value: '\n' + rawText });
-        }
-        scheduleAutoSave();
+        showToast(result.reason || '尚未确认写入，结果已保留', 'error');
       }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error); showToast(reason, 'error');
+      if (bar) { bar.dataset.status = 'failed'; bar.querySelectorAll<HTMLButtonElement>('button').forEach((button) => { button.disabled = false; }); }
     }
-    if (bar) bar.remove();
   }
 
-  function applyAIResponse(mode: string, btn: HTMLElement | null): void {
+  async function applyAIResponse(mode: string, btn: HTMLElement | null): Promise<void> {
     const bar = btn && typeof (btn as any).closest === 'function' ? (btn as any).closest('.wa-ai-action-bar') : null;
     if (!bar) return;
-    execWriteToDoc(mode, {
+    await execWriteToDoc(mode, {
       pinnedSel: state.lastPinnedSel,
       toolCall: state.pendingToolCall || undefined,
       outputMode: 'inline',
     }, bar);
-    state.pendingToolCall = null;
-    state.lastPinnedSel = null;
+    if (mode === 'view' || ['applied', 'saved'].includes(bar.dataset.status || '')) { state.pendingToolCall = null; state.lastPinnedSel = null; }
   }
 
   function normalizeArtifactResult(raw: any): ArtifactResult | null {
@@ -601,18 +685,25 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
       openBtn.type = 'button';
       openBtn.title = '在工作区打开';
       openBtn.textContent = '打开';
-      openBtn.addEventListener('click', () => {
-        if (window.WA && typeof window.WA.openRecentFile === 'function') {
-          window.WA.openRecentFile(artifact.path);
-        } else if (window.WA && typeof window.WA.openWorkspaceFile === 'function') {
-          window.WA.openWorkspaceFile(artifact.path.replace(/^workspace[\\/]/i, ''));
-        }
+      openBtn.addEventListener('click', async () => {
+        openBtn.disabled = true;
+        try {
+          if (typeof getFeatureRegistry().openRecentFile === 'function') await getFeatureRegistry().openRecentFile(artifact.path);
+          else if (typeof getFeatureRegistry().openWorkspaceFile === 'function') await getFeatureRegistry().openWorkspaceFile(artifact.path.replace(/^workspace[\\/]/i, ''));
+          else throw new Error('当前无法打开任务产物');
+        } catch (error) { showToast(error instanceof Error ? error.message : String(error), 'error'); }
+        finally { openBtn.disabled = false; }
       });
       actions.appendChild(openBtn);
     }
-    if (artifact.preview_url) {
+    if (artifact.path) {
+      const download = document.createElement('a'); download.textContent = '下载'; download.download = basename(artifact.path);
+      download.href = `/api/file/raw?path=${encodeURIComponent(artifact.path)}`; actions.appendChild(download);
+    }
+    const previewUrl = artifact.preview_url ? safeWebUrl(artifact.preview_url) : '';
+    if (previewUrl) {
       const link = document.createElement('a');
-      link.href = artifact.preview_url;
+      link.href = previewUrl;
       link.target = '_blank';
       link.rel = 'noopener';
       link.textContent = '预览';
@@ -651,6 +742,26 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
         ${source.snippet ? '<div class="wa-artifact-preview">' + _escHtml(source.snippet) + '</div>' : ''}
       </div>
     `;
+    const actions = document.createElement('div'); actions.className = 'wa-artifact-row-actions';
+    if (source.file) {
+      const open = document.createElement('button'); open.type = 'button'; open.textContent = '打开来源文件';
+      open.addEventListener('click', async () => {
+        open.disabled = true;
+        try {
+          const api = getFeatureRegistry();
+          if (typeof api.openRecentFile === 'function') await api.openRecentFile(source.file);
+          else if (typeof api.openWorkspaceFile === 'function') await api.openWorkspaceFile(String(source.file).replace(/^workspace[\\/]/i, ''));
+          else throw new Error('当前无法打开来源文件');
+          if (source.locator && typeof api.locateDocumentSource === 'function') await api.locateDocumentSource({ path: source.file, locator: source.locator, text: source.snippet || '' });
+          else if (source.locator) showToast(`文件已打开；来源位置：${source.locator}`, 'info');
+        } catch (error) { showToast(error instanceof Error ? error.message : String(error), 'error'); }
+        finally { open.disabled = false; }
+      });
+      actions.appendChild(open);
+    }
+    const sourceUrl = source.url ? safeWebUrl(source.url) : '';
+    if (sourceUrl) { const link = document.createElement('a'); link.href = sourceUrl; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = '查看来源'; actions.appendChild(link); }
+    if (actions.childNodes.length) row.appendChild(actions);
     return row;
   }
 
@@ -741,18 +852,8 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     return panel;
   }
 
-  async function loadBackgroundArtifactResult(taskId: string): Promise<HTMLElement | null> {
-    const id = String(taskId || '').trim();
-    if (!id) return null;
-    const res = await fetch(`/api/bg-agent/${encodeURIComponent(id)}/artifact`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const result = data && data.data ? data.data : data;
-    return renderArtifactResult(result);
-  }
-
   // Cross-bundle compatibility boundary.
-  publishWorkspaceApi({ renderArtifactResult, loadBackgroundArtifactResult });
+  registerFeatures({ renderArtifactResult });
 
   return {
     getProposalRationaleText,
@@ -771,9 +872,5 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     execWriteToDoc,
     applyAIResponse,
     renderArtifactResult,
-    loadBackgroundArtifactResult,
   };
 }
-
-// Cross-bundle compatibility boundary.
-publishWorkspaceApi({ createWorkspaceAiResultsRuntime });

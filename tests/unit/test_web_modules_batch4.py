@@ -4,8 +4,6 @@ Unit tests for web modules batch 4:
   - KnowledgeBase
   - KnowledgeGraph
   - DocumentEditor
-  - QualityEvaluator (PPTEvaluator, DocumentEvaluator, evaluate_quality)
-  - FileIndexer
 
 Covers constructors, public methods, utility functions, and error paths.
 All external dependencies (filesystem, DB, APIs) are mocked.
@@ -26,33 +24,6 @@ from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch
 import pytest
 
 # ── Pre-import patching ──────────────────────────────────────────────────────
-# PersonalityMatrix is referenced in enhanced_memory_manager but not imported
-# at module level (likely loaded via exec/plugin at runtime). Inject a stub
-# into the module namespace so the class can be instantiated in tests.
-
-
-def _ensure_personality_matrix():
-    """Inject a stub PersonalityMatrix into the enhanced_memory_manager module."""
-    import web.enhanced_memory_manager as _emm
-
-    if not hasattr(_emm, "PersonalityMatrix"):
-
-        class _StubPersonalityMatrix:
-            def __init__(self, path=None):
-                self.data = {}
-
-            def to_context_string(self):
-                return ""
-
-            @staticmethod
-            def update_async(*args, **kwargs):
-                pass
-
-        _emm.PersonalityMatrix = _StubPersonalityMatrix
-
-
-_ensure_personality_matrix()
-
 # concept_extractor is imported at top-level in knowledge_graph.py but may
 # not be on sys.path. Provide a stub module so the import succeeds.
 if "concept_extractor" not in sys.modules:
@@ -68,12 +39,12 @@ if "concept_extractor" not in sys.modules:
 
 @pytest.mark.unit
 class TestUserProfile:
-    """Tests for web.enhanced_memory_manager.UserProfile."""
+    """Tests for app.core.services.memory_manager.UserProfile."""
 
     @pytest.fixture()
     def tmp_profile(self, tmp_path):
         profile_file = tmp_path / "profile.json"
-        from web.enhanced_memory_manager import UserProfile
+        from app.core.services.memory_manager import UserProfile
 
         return UserProfile(str(profile_file))
 
@@ -85,7 +56,7 @@ class TestUserProfile:
 
     def test_save_and_reload(self, tmp_path):
         profile_file = tmp_path / "profile.json"
-        from web.enhanced_memory_manager import UserProfile
+        from app.core.services.memory_manager import UserProfile
 
         up = UserProfile(str(profile_file))
         up.profile["communication_style"]["formality"] = "formal"
@@ -147,7 +118,7 @@ class TestUserProfile:
     def test_load_corrupt_file_falls_back_default(self, tmp_path):
         profile_file = tmp_path / "bad.json"
         profile_file.write_text("NOT JSON", encoding="utf-8")
-        from web.enhanced_memory_manager import UserProfile
+        from app.core.services.memory_manager import UserProfile
 
         up = UserProfile(str(profile_file))
         assert "communication_style" in up.profile
@@ -155,7 +126,7 @@ class TestUserProfile:
 
 @pytest.mark.unit
 class TestEnhancedMemoryManager:
-    """Tests for web.enhanced_memory_manager.EnhancedMemoryManager."""
+    """Tests for app.core.services.memory_manager.EnhancedMemoryManager."""
 
     @pytest.fixture()
     def mgr(self, tmp_path):
@@ -163,7 +134,7 @@ class TestEnhancedMemoryManager:
         prof_path = str(tmp_path / "profile.json")
         sum_path = str(tmp_path / "summaries.json")
         vec_path = str(tmp_path / "vectors.json")
-        from web.enhanced_memory_manager import EnhancedMemoryManager
+        from app.core.services.memory_manager import EnhancedMemoryManager
 
         m = EnhancedMemoryManager(
             memory_path=mem_path,
@@ -250,10 +221,56 @@ class TestEnhancedMemoryManager:
         contents = [m["content"] for m in mgr.memories]
         assert "user added" in contents
 
-    def test_keyword_extract_detects_python(self, mgr):
-        extracted = {"memories": [], "profile_updates": {}}
-        mgr._keyword_extract("I am learning python web dev", extracted)
+    def test_keyword_fallback_detects_python(self, mgr):
+        mgr._generate_fn = None
+        extracted = mgr.auto_extract_from_conversation(
+            "I am learning python web dev", "Thanks for sharing."
+        )
+        assert extracted["used_fallback"] is True
         assert "python" in extracted["profile_updates"].get("programming_languages", [])
+
+    @pytest.mark.parametrize(
+        ("message", "expected"),
+        [
+            ("hi", False),
+            ("你好", False),
+            ("我非常喜欢简洁的代码风格", True),
+            ("帮我写一个Python爬虫", True),
+            ("我正在学习AI模型调优", True),
+            (
+                "这是一段比较长的消息，包含了一些有价值的信息，"
+                "足够触发记忆提取的阈值，需要超过四十个字符。",
+                True,
+            ),
+        ],
+    )
+    def test_should_auto_extract(self, mgr, message, expected):
+        assert mgr.should_auto_extract(message) is expected
+
+    def test_auto_extract_updates_profile_and_memory(self, mgr):
+        mgr._generate_fn = lambda *args, **kwargs: json.dumps(
+            {
+                "programming_languages": ["Python"],
+                "tools": [],
+                "domains": ["AI"],
+                "likes": ["简洁输出"],
+                "dislikes": [],
+                "communication_style": {"preferred_detail_level": "brief"},
+                "memories_to_save": [
+                    {
+                        "content": "用户偏好简洁的技术回答",
+                        "category": "user_preference",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+        result = mgr.auto_extract_from_conversation("我喜欢简洁的 Python 回答", "好的")
+
+        assert result["memories"] == ["用户偏好简洁的技术回答"]
+        assert result["profile_updates"]["programming_languages"] == ["Python"]
+        assert any(item["content"] == "用户偏好简洁的技术回答" for item in mgr.memories)
 
     def test_get_profile_returns_dict(self, mgr):
         p = mgr.get_profile()
@@ -360,12 +377,12 @@ class TestKnowledgeBase:
 
 @pytest.mark.unit
 class TestKnowledgeGraph:
-    """Tests for web.knowledge_graph.KnowledgeGraph."""
+    """Tests for web.knowledge.knowledge_graph.KnowledgeGraph."""
 
     @pytest.fixture()
     def kg(self, tmp_path):
         db_file = str(tmp_path / "kg.db")
-        from web.knowledge_graph import KnowledgeGraph
+        from web.knowledge.knowledge_graph import KnowledgeGraph
 
         return KnowledgeGraph(db_path=db_file)
 
@@ -471,11 +488,11 @@ class TestKnowledgeGraph:
 
 @pytest.mark.unit
 class TestDocumentEditor:
-    """Tests for web.document_editor.DocumentEditor."""
+    """Tests for app.core.services.document_editor.DocumentEditor."""
 
     @pytest.fixture()
     def editor(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         return DocumentEditor()
 
@@ -483,14 +500,14 @@ class TestDocumentEditor:
         assert editor is not None
 
     def test_edit_ppt_import_error(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         with patch.dict("sys.modules", {"pptx": None, "pptx.util": None}):
             result = DocumentEditor.edit_ppt("nonexistent.pptx", [])
             assert result["success"] is False
 
     def test_edit_ppt_file_not_found(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         mock_pptx = MagicMock()
         mock_pptx.Presentation.side_effect = FileNotFoundError("no file")
@@ -499,14 +516,14 @@ class TestDocumentEditor:
             assert result["success"] is False
 
     def test_edit_excel_import_error(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         with patch.dict("sys.modules", {"openpyxl": None}):
             result = DocumentEditor.edit_excel("fake.xlsx", [])
             assert result["success"] is False
 
     def test_parse_ai_suggestions_valid_json_block(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         ai_text = '```json\n{"modifications": [{"action": "update_title"}]}\n```'
         mods = DocumentEditor.parse_ai_suggestions(ai_text)
@@ -514,34 +531,34 @@ class TestDocumentEditor:
         assert mods[0]["action"] == "update_title"
 
     def test_parse_ai_suggestions_bare_json(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         ai_text = '{"modifications": [{"action": "add_content"}]}'
         mods = DocumentEditor.parse_ai_suggestions(ai_text)
         assert len(mods) == 1
 
     def test_parse_ai_suggestions_list_response(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         ai_text = '[{"action": "delete"}]'
         mods = DocumentEditor.parse_ai_suggestions(ai_text)
         assert len(mods) == 1
 
     def test_parse_ai_suggestions_invalid_input(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         mods = DocumentEditor.parse_ai_suggestions("not json at all")
         assert mods == []
 
     def test_parse_ai_suggestions_empty_modifications(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         ai_text = '{"modifications": []}'
         mods = DocumentEditor.parse_ai_suggestions(ai_text)
         assert mods == []
 
     def test_edit_word_import_error(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         with patch.dict(
             "sys.modules", {"docx": None, "docx.oxml": None, "docx.oxml.ns": None}
@@ -550,7 +567,7 @@ class TestDocumentEditor:
             assert result["success"] is False
 
     def test_edit_ppt_with_mock_presentation(self):
-        from web.document_editor import DocumentEditor
+        from app.core.services.document_editor import DocumentEditor
 
         mock_prs = MagicMock()
         mock_slide = MagicMock()
@@ -573,261 +590,3 @@ class TestDocumentEditor:
             result = DocumentEditor.edit_ppt("test.pptx", mods)
         assert result["success"] is True
         assert result["applied_count"] >= 1
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# QualityEvaluator (PPTEvaluator + DocumentEvaluator + evaluate_quality)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestQualityEvaluator:
-    """Tests for app.core.services.quality_evaluator module."""
-
-    def test_ppt_evaluator_init(self):
-        from app.core.services.quality_evaluator import PPTEvaluator
-
-        ev = PPTEvaluator()
-        assert ev.issues == []
-        assert ev.suggestions == []
-
-    def test_ppt_evaluator_missing_pptx_module(self):
-        from app.core.services.quality_evaluator import PPTEvaluator
-
-        ev = PPTEvaluator()
-        with patch.dict("sys.modules", {"pptx": None}):
-            result = ev.evaluate_pptx_file("fake.pptx")
-        assert result.overall_score == 0
-        assert any("不可用" in i for i in result.issues)
-
-    def test_score_slide_count_optimal(self):
-        from app.core.services.quality_evaluator import PPTEvaluator
-
-        ev = PPTEvaluator()
-        assert ev._score_slide_count(10) == 100.0
-
-    def test_score_slide_count_too_few(self):
-        from app.core.services.quality_evaluator import PPTEvaluator
-
-        ev = PPTEvaluator()
-        assert ev._score_slide_count(2) == 20.0
-
-    def test_score_slide_count_too_many(self):
-        from app.core.services.quality_evaluator import PPTEvaluator
-
-        ev = PPTEvaluator()
-        score = ev._score_slide_count(35)
-        assert score == 60.0
-
-    def test_prioritize_improvements(self):
-        from app.core.services.quality_evaluator import PPTEvaluator
-
-        ev = PPTEvaluator()
-        scores = {
-            "content_distribution": 50,
-            "image_distribution": 60,
-            "layout_consistency": 90,
-        }
-        priorities = ev._prioritize_improvements(scores)
-        assert len(priorities) <= 3
-        assert any("内容" in p for p in priorities)
-
-    def test_document_evaluator_init(self):
-        from app.core.services.quality_evaluator import DocumentEvaluator
-
-        ev = DocumentEvaluator()
-        assert ev.issues == []
-
-    def test_document_evaluator_good_document(self):
-        from app.core.services.quality_evaluator import DocumentEvaluator
-
-        ev = DocumentEvaluator()
-        doc = (
-            "# 标题\n\n"
-            "## 第一部分\n\n" + "这是一个很好的文档内容。" * 50 + "\n\n"
-            "## 第二部分\n\n" + "更多详细的内容。" * 50 + "\n\n"
-            "## 结论\n\n总结内容。"
-        )
-        result = ev.evaluate_document(doc)
-        assert result.overall_score > 60
-        assert isinstance(result.category_scores, dict)
-
-    def test_document_evaluator_short_document(self):
-        from app.core.services.quality_evaluator import DocumentEvaluator
-
-        ev = DocumentEvaluator()
-        result = ev.evaluate_document("short")
-        assert result.needs_improvement is True
-        assert any("过短" in i for i in result.issues)
-
-    def test_evaluate_structure_no_headings(self):
-        from app.core.services.quality_evaluator import DocumentEvaluator
-
-        ev = DocumentEvaluator()
-        score = ev._evaluate_structure("no headings here at all")
-        assert score == 40.0
-
-    def test_evaluate_length_ranges(self):
-        from app.core.services.quality_evaluator import DocumentEvaluator
-
-        ev = DocumentEvaluator()
-        assert ev._evaluate_length("A" * 2000) == 100.0
-        assert ev._evaluate_length("A" * 800) == 75.0
-        assert ev._evaluate_length("A" * 100) == 50.0
-
-    def test_evaluate_quality_function_docx(self):
-        from app.core.services.quality_evaluator import evaluate_quality
-
-        result = evaluate_quality(
-            "docx", "# Title\n\n## Section\n\n" + "Content " * 200
-        )
-        assert "overall_score" in result
-        assert isinstance(result["overall_score"], float)
-
-    def test_evaluate_quality_function_ppt(self):
-        from app.core.services.quality_evaluator import evaluate_quality
-
-        with patch.dict("sys.modules", {"pptx": None}):
-            result = evaluate_quality("pptx", "fake_path.pptx")
-        assert result["overall_score"] == 0
-
-    def test_evaluate_format_consistent(self):
-        from app.core.services.quality_evaluator import DocumentEvaluator
-
-        ev = DocumentEvaluator()
-        content = "# Title\n\n- item1\n- item2\n\n```python\nprint('hi')\n```"
-        score = ev._evaluate_format(content)
-        assert score >= 80
-
-    def test_evaluate_completeness(self):
-        from app.core.services.quality_evaluator import DocumentEvaluator
-
-        ev = DocumentEvaluator()
-        content = "# Intro\n\n## Section\n\n详细内容\n\n## 结论\n\n总结"
-        score = ev._evaluate_completeness(content)
-        assert score > 60
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# FileIndexer
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestFileIndexer:
-    """Tests for web.file_indexer.FileIndexer."""
-
-    @pytest.fixture()
-    def indexer(self, tmp_path):
-        db_path = tmp_path / "_index" / "file_index.db"
-        from web.file_indexer import FileIndexer
-
-        return FileIndexer(workspace_dir=str(tmp_path), db_path=str(db_path))
-
-    def test_init_creates_db(self, indexer):
-        assert Path(indexer.db_path).exists()
-
-    def test_init_creates_tables(self, indexer):
-        conn = sqlite3.connect(indexer.db_path)
-        tables = {
-            r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        conn.close()
-        assert "file_index" in tables
-
-    def test_compute_hash(self, indexer):
-        h = indexer._compute_hash("hello")
-        assert isinstance(h, str) and len(h) == 32
-
-    def test_index_file_nonexistent(self, indexer):
-        result = indexer.index_file("/nonexistent/file.txt")
-        assert result["success"] is False
-
-    def test_index_file_unsupported_extension(self, indexer, tmp_path):
-        img = tmp_path / "photo.png"
-        img.write_bytes(b"\x89PNG")
-        result = indexer.index_file(str(img))
-        assert result["success"] is False
-        assert "不支持" in result["error"]
-
-    def test_index_file_success(self, indexer, tmp_path):
-        txt = tmp_path / "hello.txt"
-        txt.write_text("Hello World", encoding="utf-8")
-        result = indexer.index_file(str(txt))
-        assert result["success"] is True
-        assert result["indexed"] is True
-
-    def test_index_file_unchanged_skips(self, indexer, tmp_path):
-        txt = tmp_path / "same.txt"
-        txt.write_text("constant", encoding="utf-8")
-        indexer.index_file(str(txt))
-        result = indexer.index_file(str(txt))
-        assert result["success"] is True
-        assert result["indexed"] is False
-
-    def test_index_directory_empty(self, indexer, tmp_path):
-        sub = tmp_path / "empty_dir"
-        sub.mkdir()
-        result = indexer.index_directory(str(sub))
-        assert result["success"] is True
-        assert result["total"] == 0
-
-    def test_index_directory_with_files(self, indexer, tmp_path):
-        sub = tmp_path / "docs"
-        sub.mkdir()
-        (sub / "a.py").write_text("print('a')", encoding="utf-8")
-        (sub / "b.md").write_text("# B", encoding="utf-8")
-        result = indexer.index_directory(str(sub), recursive=False)
-        assert result["success"] is True
-        assert result["indexed"] == 2
-
-    def test_index_directory_nonexistent(self, indexer):
-        result = indexer.index_directory("/no/such/dir")
-        assert result["success"] is False
-
-    def test_list_indexed_files(self, indexer, tmp_path):
-        txt = tmp_path / "listed.txt"
-        txt.write_text("some content", encoding="utf-8")
-        indexer.index_file(str(txt))
-        files = indexer.list_indexed_files()
-        assert len(files) == 1
-        assert files[0]["file_name"] == "listed.txt"
-
-    def test_remove_file(self, indexer, tmp_path):
-        txt = tmp_path / "removeme.txt"
-        txt.write_text("bye", encoding="utf-8")
-        indexer.index_file(str(txt))
-        result = indexer.remove_file(str(txt.resolve()))
-        assert result["success"] is True
-
-    def test_get_file_info_found(self, indexer, tmp_path):
-        txt = tmp_path / "info.txt"
-        txt.write_text("data", encoding="utf-8")
-        indexer.index_file(str(txt))
-        info = indexer.get_file_info(str(txt.resolve()))
-        assert info is not None
-        assert info["file_name"] == "info.txt"
-
-    def test_get_file_info_not_found(self, indexer):
-        assert indexer.get_file_info("/nonexistent") is None
-
-    def test_generate_snippet_found(self, indexer):
-        snippet = indexer._generate_snippet("the quick brown fox", "brown")
-        assert "**brown**" in snippet
-
-    def test_generate_snippet_not_found(self, indexer):
-        snippet = indexer._generate_snippet("hello world", "xyz")
-        assert snippet.startswith("hello")
-
-    def test_generate_snippet_empty(self, indexer):
-        assert indexer._generate_snippet("", "xyz") == ""
-
-    def test_rebuild_index(self, indexer, tmp_path):
-        txt = tmp_path / "rebuild.txt"
-        txt.write_text("rebuild me", encoding="utf-8")
-        indexer.index_file(str(txt))
-        result = indexer.rebuild_index()
-        assert result["success"] is True

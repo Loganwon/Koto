@@ -35,8 +35,6 @@ def tool_plan_title(tool_name: str) -> str:
         "replace_file_selection": "替换文本选区",
         "compare_files": "对比文件",
         "compare_docx_and_annotate": "对比并标注 Word 差异",
-        "extract_to_file": "提取到文件",
-        "annotate_file": "添加批注",
         "run_python_code": "运行代码处理",
     }
     return labels.get(tool_name, f"调用工具 {tool_name}")
@@ -140,17 +138,6 @@ def tool_plan_description(
         )
         sheet = str(tool_args.get("sheet_name") or "").strip()
         return f"把结构化更新写入 {display(target) or target}{f'，工作表：{sheet}' if sheet else ''}。"
-    if tool_name == "annotate_file":
-        target = (
-            display(tool_args.get("path"))
-            or request.target_path
-            or first({"docx", "pdf", "txt", "md"}, target=True)
-            or "目标文件"
-        )
-        requirement = str(tool_args.get("requirement") or "").strip()
-        if requirement:
-            return f"按要求为 {display(target) or target} 生成并写回批注：{_compact_line(requirement, 90)}。"
-        return f"把结构化批注写入 {display(target) or target}。"
     if tool_name in {
         "design_pptx_theme_layout",
         "write_pptx_slides",

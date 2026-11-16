@@ -200,3 +200,83 @@ def export_xlsx(sheets_json: Any, images: list[dict] | None = None) -> bytes:
     from app.core.file.exporters.xlsx_exporter import export_xlsx as _export_xlsx
 
     return _export_xlsx(sheets_json, images)
+
+
+def parse_file(file_path: str):
+    """Unified file parser dispatcher.
+
+    Returns dict with keys: success, filename, format, content, char_count, error
+    """
+    import os
+    from pathlib import Path
+
+    if not os.path.exists(file_path):
+        return {"success": False, "error": "File not found: " + str(file_path)}
+
+    file_size = os.path.getsize(file_path)
+    if file_size > 50 * 1024 * 1024:
+        mb = file_size / 1024 / 1024
+        return {
+            "success": False,
+            "error": "File too large (" + str(round(mb, 1)) + "MB > 50MB)",
+        }
+
+    ext = Path(file_path).suffix.lower()
+    filename = os.path.basename(file_path)
+
+    try:
+        if ext == ".docx":
+            result = parse_docx(file_path)
+            return {
+                "success": True,
+                "filename": filename,
+                "format": "docx",
+                "content": result.get("html", ""),
+                "char_count": len(result.get("html", "")),
+            }
+        elif ext in (".xlsx", ".xls"):
+            result = parse_xlsx(file_path)
+            return {
+                "success": True,
+                "filename": filename,
+                "format": "xlsx",
+                "content": str(result),
+                "char_count": 0,
+            }
+        elif ext == ".pptx":
+            result = parse_pptx(file_path)
+            return {
+                "success": True,
+                "filename": filename,
+                "format": "pptx",
+                "content": str(result),
+                "char_count": 0,
+            }
+        elif ext == ".pdf":
+            result = parse_pdf(file_path)
+            return {
+                "success": True,
+                "filename": filename,
+                "format": "pdf",
+                "content": str(result),
+                "char_count": 0,
+            }
+        elif ext in (".txt", ".md", ".csv", ".json", ".log"):
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+            return {
+                "success": True,
+                "filename": filename,
+                "format": ext.lstrip("."),
+                "content": text,
+                "char_count": len(text),
+            }
+        else:
+            return {"success": False, "error": "Unsupported format: " + ext}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "filename": filename,
+            "format": ext.lstrip("."),
+        }

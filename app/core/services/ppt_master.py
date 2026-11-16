@@ -260,7 +260,7 @@ class PPTContentPlanner:
                         def _invoke_model():
                             try:
                                 call_state["response"] = (
-                                    self.ai_client.models.generate_content(
+                                    self.ai_client.generate_content(
                                         model=model,
                                         contents=contents,
                                         config=config if config else None,
@@ -401,13 +401,13 @@ class PPTContentPlanner:
 
             # Fallback to current model if specialized one fails
             try:
-                response = self.ai_client.models.generate_content(
+                response = self.ai_client.generate_content(
                     model=model,
                     contents=prompt,
                     config={"response_mime_type": "application/json"},
                 )
             except Exception:
-                response = self.ai_client.models.generate_content(
+                response = self.ai_client.generate_content(
                     model="deepseek-chat",
                     contents=prompt,
                     config={"response_mime_type": "application/json"},
@@ -454,7 +454,7 @@ class PPTContentPlanner:
 
             def _invoke():
                 try:
-                    call_state["response"] = self.ai_client.models.generate_content(
+                    call_state["response"] = self.ai_client.generate_content(
                         model=model,
                         contents=prompt,
                         config={"response_mime_type": "application/json"},

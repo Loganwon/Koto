@@ -3,13 +3,6 @@ from __future__ import annotations
 from flask import Flask
 
 
-def test_file_generation_intent_requires_format_and_creation_verb():
-    from web.services.intent.file_gen_classifier import is_explicit_file_gen_request
-
-    assert is_explicit_file_gen_request("请生成一份 Excel 销售报表") is True
-    assert is_explicit_file_gen_request("这个 PDF 怎么编辑？") is False
-
-
 def test_response_api_exposes_existing_rating_store(monkeypatch):
     import app.api.response_routes as routes
     from app.core.learning import rating_store
@@ -38,26 +31,10 @@ def test_response_api_exposes_existing_rating_store(monkeypatch):
     assert detail["user_rating"]["stars"] == 5
 
 
-def test_editor_skill_list_uses_public_skill_manager_surface(monkeypatch):
-    from app.core.skills.skill_manager import SkillManager
-    from web.blueprints.editor_ai import editor_skill_list
+def test_editor_ai_has_no_legacy_skill_runtime_endpoint():
+    from pathlib import Path
 
-    monkeypatch.setattr(
-        SkillManager,
-        "list_runtime_entries",
-        classmethod(
-            lambda cls: {
-                "xlsx": {"id": "xlsx", "enabled": True, "file_types": ["xlsx"]},
-                "disabled": {
-                    "id": "disabled",
-                    "enabled": False,
-                    "file_types": ["xlsx"],
-                },
-            }
-        ),
-    )
-    app = Flask(__name__)
-    with app.test_request_context("/api/editor/ai/skill-list?file_type=xlsx"):
-        data = editor_skill_list().get_json()
-
-    assert data == {"skills": [{"id": "xlsx", "enabled": True, "file_types": ["xlsx"]}]}
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "web/blueprints/editor_ai.py").read_text(encoding="utf-8")
+    assert "/api/editor/ai/skill-list" not in source
+    assert "skill_runtime_retired" not in source

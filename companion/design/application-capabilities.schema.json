@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:koto:design:application-capabilities:1",
+  "title": "Koto application capability profile — design draft",
+  "description": "Host-owned application semantics over an admitted transport; not a new wire protocol or an implemented runtime API.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["profile_version", "application_id", "display_name", "transport", "deep_editing", "capabilities"],
+  "properties": {
+    "profile_version": {"const": "0.1-design"},
+    "application_id": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{1,99}$"},
+    "display_name": {"type": "string", "minLength": 1, "maxLength": 100},
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "connection_ref"],
+      "properties": {
+        "kind": {"enum": ["mcp", "host_bridge", "official_api"]},
+        "connection_ref": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{1,99}$", "description": "Reference to an already admitted connection; never a remote-supplied command or secret."},
+        "supported_versions": {"type": "array", "minItems": 1, "maxItems": 10, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 40}}
+      },
+      "allOf": [{"if": {"properties": {"kind": {"const": "mcp"}}}, "then": {"required": ["supported_versions"]}}]
+    },
+    "deep_editing": {"type": "boolean", "description": "Requested profile behavior; runtime must additionally verify grants and live host support."},
+    "embedding": {"enum": ["runtime_detected", "unavailable"]},
+    "capabilities": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/capability"}}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"deep_editing": {"const": true}}},
+      "then": {
+        "properties": {
+          "capabilities": {
+            "allOf": [
+              {"contains": {"properties": {"id": {"const": "resource.read"}}, "required": ["id"]}},
+              {"contains": {"properties": {"id": {"const": "resource.patch"}, "effect": {"const": "patch"}, "target_binding": {"const": "required"}, "version_precondition": {"const": "required"}, "checkpoint": {"const": "per_unit"}}, "required": ["id", "effect", "target_binding", "version_precondition", "checkpoint"]}},
+              {"contains": {"properties": {"id": {"const": "resource.verify"}, "effect": {"const": "read"}, "verification": {"const": "independent_readback"}}, "required": ["id", "effect", "verification"]}}
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "operation", "effect", "object_kinds"],
+      "properties": {
+        "id": {"enum": ["context.observe", "resource.read", "resource.patch", "resource.verify", "resource.revert", "artifact.handoff", "ui.embed", "generic.tool"]},
+        "operation": {"type": "string", "minLength": 1, "maxLength": 128},
+        "effect": {"enum": ["read", "patch", "create", "transfer", "send", "other_write"]},
+        "object_kinds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["text", "grid", "slide", "record", "canvas", "file", "generic"]}},
+        "target_binding": {"enum": ["required", "unavailable"]},
+        "version_precondition": {"enum": ["required", "unavailable"]},
+        "checkpoint": {"enum": ["per_unit", "final", "unavailable"]},
+        "verification": {"enum": ["independent_readback", "result_only", "unavailable"]},
+        "max_units_per_call": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "limits": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 250}}
+      }
+    }
+  }
+}

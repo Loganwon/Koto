@@ -1,4 +1,5 @@
 import { _escHtml } from './infrastructure';
+import { renderWorkspaceMarkdown } from './markdown-rendering';
 
 
 export function previewText(value: string, limit: number): string {
@@ -69,18 +70,7 @@ export function terminalAnswerText(payload: any, fallback = ''): string {
 export function renderTaskFinalReport(value: string): string {
   const text = normalizeTaskFinalReportMarkdown(value);
   if (!text) return '';
-  const renderer = (window as any)._waRenderMarkdown;
-  if (typeof renderer === 'function' && (window as any).marked) {
-    try { return renderer(text); } catch { /* noop */ }
-  }
-  if ((window as any).marked) {
-    try {
-      const sanitizer = (window as any)._sanitizeRenderedHtml;
-      const html = (window as any).marked.parse(text);
-      return typeof sanitizer === 'function' ? sanitizer(html) : html;
-    } catch { /* noop */ }
-  }
-  return renderReadableMarkdownFallback(text);
+  return renderWorkspaceMarkdown(text) || renderReadableMarkdownFallback(text);
 }
 
 export function normalizeTaskFinalReportMarkdown(value: string): string {

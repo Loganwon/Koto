@@ -41,7 +41,7 @@ class TestServiceRegistry:
         service_registry.on_shutdown(lambda: results.append("hook1"))
         service_registry.on_shutdown(lambda: results.append("hook2"))
         service_registry.shutdown()
-        assert results == ["hook1", "hook2"]
+        assert results == ["hook2", "hook1"]
         service_registry._shutdown_hooks.clear()
 
     def test_shutdown_handles_errors(self):

@@ -4,31 +4,39 @@
  * Workspace AI runtime initialization.
  */
 
-import { $, _LIGHTBULB_SVG, _PENCIL_SVG, _SLIDES_SVG, showToast, _csrfFetch } from './infrastructure';
+import { $, _LIGHTBULB_SVG, _PENCIL_SVG, showToast, _csrfFetch } from './infrastructure';
 import { state, _WA_RUNTIME_SESSION_ID } from './state';
 import {
   _computeInlineDiff,
   _createPinnedSelectionContext,
-  _getProposalRationaleText,
   _hideWelcome,
-  _makeAIActionBar,
-  _proposalCanApply,
   _selectionContextText,
   _setStreamBtn,
+  sendMessage,
 } from './ai-review';
 import { _applyRouteEvent, _selectedCloudModelId } from './model-settings';
 import { fileTaskTerminalUiStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
-import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import { syncTaskInteractionSummary } from './task-interaction-summary';
+import { streamTaskFlow } from './task-runner';
+import { createWorkspaceAiConversation } from './conversation';
+import { createTaskDispatcher } from './task-dispatcher';
+import { createWorkspaceAiResultsRuntime } from './results';
+import { createQuickActionDispatcher } from './quick-actions';
+import { getFeatureRegistry, registerFeatures } from '../shared/feature-registry';
+import { renderWorkspaceMarkdown } from './markdown-rendering';
+import { scheduleAutoSave } from './save';
 
-const workspaceApi = getWorkspaceApi();
+const workspaceApi = getFeatureRegistry();
 
-let _waAiResultsRuntime: any = (window as any)._waAiResultsRuntime || null;
-let _waQuickActionRuntime: any = (window as any)._waQuickActionRuntime || null;
-let _waConversationRuntime: any = (window as any)._waConversationRuntime || null;
-let _waTaskDispatcher: any = (window as any)._waTaskDispatcher || null;
-let _waQuickActionDispatcherAttached: boolean = Boolean((window as any)._waQuickActionDispatcherAttached);
-let _hostSessionId: string = String((window as any)._hostSessionId || '').trim();
+let _waAiResultsRuntime: any = null;
+let _waQuickActionRuntime: any = null;
+let _waConversationRuntime: any = null;
+let _waTaskDispatcher: any = null;
+let _waQuickActionDispatcherAttached = false;
+let _hostSessionId: string = String(getFeatureRegistry()._hostSessionId || '').trim();
+let _workspaceSessionReady = !!_hostSessionId && !/^workspace_runtime_/i.test(_hostSessionId);
 let _workspaceTurnPersistQueue: Promise<any> = Promise.resolve();
+let _workspaceSessionPromise: Promise<string> | null = null;
 let _workspaceTurnRetryTimer: number | null = null;
 let _workspaceTurnRetrying = false;
 
@@ -36,71 +44,40 @@ const WORKSPACE_TURN_RETRY_KEY = 'wa_workspace_turn_retry_queue_v1';
 const WORKSPACE_TURN_RETRY_LIMIT = 20;
 const WORKSPACE_TURN_RETRY_SNAPSHOT_LIMIT = 120000;
 
-function _syncRuntimeGlobals(): void {
-  (window as any)._waAiResultsRuntime = _waAiResultsRuntime;
-  (window as any)._waQuickActionRuntime = _waQuickActionRuntime;
-  (window as any)._waConversationRuntime = _waConversationRuntime;
-  (window as any)._waTaskDispatcher = _waTaskDispatcher;
-  (window as any)._waQuickActionDispatcherAttached = _waQuickActionDispatcherAttached;
-  (window as any)._hostSessionId = _hostSessionId;
-  (window as any)._WA_RUNTIME_SESSION_ID = _WA_RUNTIME_SESSION_ID;
-}
-
-function _sanitizeRenderedHtml(html: string): string {
-  const sanitizer = (window as any)._sanitizeRenderedHtml;
-  if (typeof sanitizer === 'function') return sanitizer(html);
-  return String(html || '')
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-    .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
-}
-
-export function _waRenderMarkdown(text: string): string {
-  if ((window as any).marked) {
-    try { return _sanitizeRenderedHtml((window as any).marked.parse(text || '')); } catch (_) { /* noop */ }
-  }
-  const source = String(text || '').trim().replace(/^(?:---|\*\*\*)\s*\n+(?=#{1,6}\s+)/, '').trim();
-  return source
-    .split(/\r?\n/)
-    .map((line) => {
-      const trimmed = line.trim();
-      const heading = /^(#{1,4})\s+(.+)$/.exec(trimmed);
-      const escaped = trimmed
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-      if (heading) {
-        const level = Math.min(4, heading[1].length + 1);
-        const body = heading[2]
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/`([^`]+)`/g, '<code>$1</code>')
-          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        return '<h' + level + '>' + body + '</h' + level + '>';
-      }
-      return escaped;
-    })
-    .filter(Boolean)
-    .join('<br>');
+function _syncHostSessionGlobal(): void {
+  getFeatureRegistry()._hostSessionId = _hostSessionId;
 }
 
 function _hostChatSession(): string {
-  const bridge = (window as any).KotoSessionBridge;
+  const ownedSession = String(_hostSessionId || '').trim();
+  if (ownedSession && !/^workspace_runtime_/i.test(ownedSession)) {
+    return ownedSession;
+  }
+  const bridge = getFeatureRegistry().KotoSessionBridge;
   if (bridge && typeof bridge.getSession === 'function') {
     const bridged = String(bridge.getSession() || '').trim();
     if (bridged) {
       _hostSessionId = bridged;
-      _syncRuntimeGlobals();
+      _workspaceSessionReady = !/^workspace_runtime_/i.test(bridged);
+      _syncHostSessionGlobal();
       return bridged;
     }
   }
-  return String(_hostSessionId || '').trim();
+  return ownedSession;
 }
 
 export function _waSession(): string {
-  return _hostChatSession() || _WA_RUNTIME_SESSION_ID;
+  const current = _hostChatSession();
+  if (current && !/^workspace_runtime_/i.test(current)) return current;
+
+  // The task harness and persistence layer must never observe the disposable
+  // runtime id.  Reserve the eventual server session id synchronously; the
+  // async creation path below will create this exact session before writing.
+  const stamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 17);
+  _hostSessionId = `对话_${stamp}`;
+  _workspaceSessionReady = false;
+  _syncHostSessionGlobal();
+  return _hostSessionId;
 }
 
 function _safeJsonClone(value: any): any {
@@ -200,7 +177,7 @@ export function _waSampleTaskContext(text: string, limit: number = 12000): strin
 }
 
 function _handleProposals(data: any): void {
-  const runtime = (window as any)._waAiResultsRuntime;
+  const runtime = _waAiResultsRuntime;
   if (runtime && typeof runtime.handleProposals === 'function') {
     runtime.handleProposals(data);
   }
@@ -228,7 +205,7 @@ async function _sendWorkspaceConversationTurn(sessionId: string, payload: Record
   if (!response.ok) return null;
   const data = await response.json().catch((): any => null);
   _applyPersistedTaskMetadata(data, payload);
-  const bridge = (window as any).KotoSessionBridge;
+  const bridge = getFeatureRegistry().KotoSessionBridge;
   if (bridge && typeof bridge.refreshSessions === 'function') {
     Promise.resolve(bridge.refreshSessions()).catch(() => {});
   }
@@ -281,27 +258,39 @@ function _applyPersistedTaskMetadata(data: any, payload: Record<string, any>): v
     if (titleEl) titleEl.textContent = taskTitle;
   }
   if (memorySummary) card.dataset.taskMemorySummary = memorySummary;
-  if (typeof workspaceApi.syncTaskInteractionSummary === 'function') {
-    try { workspaceApi.syncTaskInteractionSummary(card); } catch (_) { /* noop */ }
-  }
+  try { syncTaskInteractionSummary(card); } catch (_) { /* noop */ }
 }
 
 async function _ensureWorkspacePersistenceSession(): Promise<string> {
+  if (_workspaceSessionPromise) return _workspaceSessionPromise;
   const existing = _hostChatSession();
-  if (existing && !/^workspace_runtime_/i.test(existing)) return existing;
-  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
-  const response = await _csrfFetch('/api/sessions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: `对话_${stamp}` }),
-  });
-  if (!response.ok) return '';
-  const data = await response.json().catch((): any => null);
-  const sessionId = String(data && data.session || '').trim();
-  if (!sessionId) return '';
-  _hostSessionId = sessionId;
-  _syncRuntimeGlobals();
-  return sessionId;
+  if (existing && !/^workspace_runtime_/i.test(existing) && _workspaceSessionReady) return existing;
+  _workspaceSessionPromise = (async () => {
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
+    const proposedSessionId = existing && !/^workspace_runtime_/i.test(existing)
+      ? existing
+      : `对话_${stamp}`;
+    _hostSessionId = proposedSessionId;
+    _syncHostSessionGlobal();
+    const response = await _csrfFetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: proposedSessionId }),
+    });
+    if (!response.ok) return '';
+    const data = await response.json().catch((): any => null);
+    const sessionId = String(data && data.session || '').trim();
+    if (!sessionId) return '';
+    _hostSessionId = sessionId;
+    _workspaceSessionReady = true;
+    _syncHostSessionGlobal();
+    return sessionId;
+  })();
+  try {
+    return await _workspaceSessionPromise;
+  } finally {
+    _workspaceSessionPromise = null;
+  }
 }
 
 export async function _persistWorkspaceConversationTurn(record: any): Promise<any> {
@@ -374,7 +363,7 @@ export function _persistTerminalTaskRunCard(card: HTMLElement | null): Promise<a
   const completedTask = hasCompletedAttr
     ? String(dataset.taskCompleted || '').trim().toLowerCase() === 'true'
     : ['completed', 'done', 'verified'].includes(normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || ''));
-  const terminalStatus = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || (completedTask ? 'completed' : 'needs_attention'));
+  const terminalStatus = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || (completedTask ? 'completed' : 'failed'));
   const uiStatus = fileTaskTerminalUiStatus(terminalStatus, completedTask);
   const metadata: Record<string, any> = {
     turn_id: String(dataset.turnId || '').trim(),
@@ -393,14 +382,11 @@ export function _persistTerminalTaskRunCard(card: HTMLElement | null): Promise<a
       metadata.task_context = taskPayload.task_context;
     }
   }
-  if (typeof workspaceApi.taskCardTestStructure === 'function') {
-    try {
-      const structure = workspaceApi.taskCardTestStructure(card);
-      if (structure) metadata.test_structure = structure;
-    } catch (_) { /* noop */ }
-  }
-  const includeSnapshot = !metadata.test_structure;
-  const snapshot = includeSnapshot && card.classList && card.classList.contains('wa-task-run')
+  try {
+    const structure = _waTaskDispatcher.taskCardPersistenceStructure(card);
+    if (structure) metadata.test_structure = structure;
+  } catch (_) { /* noop */ }
+  const snapshot = card.classList && card.classList.contains('wa-task-run')
     ? {
         html: card.outerHTML,
         fatal_error_text: String((card as any)._fatalErrorText || ''),
@@ -485,7 +471,6 @@ export interface RuntimeConfig {
   syncAssistantTaskTurn?: (turnId: string, metadata: any) => any;
   appendAssistantTurn?: (text: string, metadata?: any) => any;
   persistTaskTurn?: (record: any) => Promise<any>;
-  streamTaskFlow?: (options: any) => any;
   setStreamButton?: (streaming: boolean) => void;
 }
 
@@ -504,38 +489,29 @@ export interface TaskQuickAction {
 
 // ── Lazy initialization of all AI runtimes ───────────────────────
 export function _initWorkspaceAiRuntimes(): void {
-  if (!_waAiResultsRuntime && typeof workspaceApi.createWorkspaceAiResultsRuntime === 'function') {
-    _waAiResultsRuntime = workspaceApi.createWorkspaceAiResultsRuntime({
+  if (!_waAiResultsRuntime) {
+    _waAiResultsRuntime = createWorkspaceAiResultsRuntime({
       state,
       getMessagesElement: () => $('wa-ai-messages'),
       selectionContextText: _selectionContextText,
       createPinnedSelectionContext: _createPinnedSelectionContext,
       showToast,
-      scheduleAutoSave: () => workspaceApi.scheduleAutoSave && workspaceApi.scheduleAutoSave(),
-      getUserInputElement: () => $('wa-user-input'),
-      sendMessage: () => workspaceApi.sendMessage && workspaceApi.sendMessage(),
+      scheduleAutoSave,
+      getUserInputElement: () => $('wa-user-input') as HTMLTextAreaElement | null,
+      sendMessage: () => { void sendMessage(); },
       lightbulbIcon: _LIGHTBULB_SVG,
       pencilIcon: _PENCIL_SVG,
-      getProposalRationaleText: _getProposalRationaleText,
-      proposalCanApply: _proposalCanApply,
-      getActiveProposalBatch: () => state._activeProposalBatch,
-      acceptProposal: (...args: any[]) => workspaceApi.acceptProposal(...args),
-      rejectProposal: (...args: any[]) => workspaceApi.rejectProposal(...args),
-      modifyProposal: (...args: any[]) => workspaceApi.modifyProposal(...args),
-      submitModify: (...args: any[]) => workspaceApi._submitModify(...args),
-      batchAcceptAll: () => workspaceApi.batchAcceptAll(),
-      batchRejectAll: () => workspaceApi.batchRejectAll(),
       computeInlineDiff: _computeInlineDiff,
     });
   }
 
-  if (!_waConversationRuntime && typeof workspaceApi.createWorkspaceAiConversation === 'function') {
-    _waConversationRuntime = workspaceApi.createWorkspaceAiConversation({
+  if (!_waConversationRuntime) {
+    _waConversationRuntime = createWorkspaceAiConversation({
       state,
       getMessagesElement: () => $('wa-ai-messages'),
       getSessionId: _waSession,
       hideWelcome: _hideWelcome,
-      renderMarkdown: _waRenderMarkdown,
+      renderMarkdown: renderWorkspaceMarkdown,
       loadSessionHistory: async (sessionId: string) => {
         const normalized = String(sessionId || '').trim();
         if (!normalized || /^workspace_runtime_/i.test(normalized)) return [];
@@ -547,11 +523,11 @@ export function _initWorkspaceAiRuntimes(): void {
     });
   }
 
-  if (!_waTaskDispatcher && typeof workspaceApi.createTaskDispatcher === 'function') {
-    _waTaskDispatcher = workspaceApi.createTaskDispatcher({
+  if (!_waTaskDispatcher) {
+    _waTaskDispatcher = createTaskDispatcher({
       state,
       getActiveEditorContent: () => (state.activeEditor && typeof state.activeEditor.getContent === 'function')
-        ? (state.activeEditor.getContent() || '')
+        ? String(state.activeEditor.getContent() || '')
         : '',
       sampleTaskContext: _waSampleTaskContext,
       getSessionId: _waSession,
@@ -571,29 +547,19 @@ export function _initWorkspaceAiRuntimes(): void {
         ? _waConversationRuntime.appendAssistantTurn(text, Object.assign({ render: false }, metadata || {}))
         : null,
       persistTaskTurn: _persistWorkspaceConversationTurn,
-      streamTaskFlow: (options: any) => workspaceApi.streamTaskFlow(options),
+      streamTaskFlow,
       setStreamButton: _setStreamBtn,
+      openWorkspaceFile: (path: string) => workspaceApi.openWorkspaceFile(path),
     });
   }
 
-  if (!_waQuickActionRuntime && typeof workspaceApi.createWorkspaceQuickActionRuntime === 'function') {
-    _waQuickActionRuntime = workspaceApi.createWorkspaceQuickActionRuntime({
-      state,
+  if (!_waQuickActionRuntime) {
+    _waQuickActionRuntime = createQuickActionDispatcher({
       getMessagesElement: () => $('wa-ai-messages'),
       getModelMode: _waQuickActionModelMode,
       getSelectedCloudModelId: _selectedCloudModelId,
       handleProposals: _handleProposals,
-      makeAIActionBar: _makeAIActionBar,
       applyRouteEvent: _applyRouteEvent,
-      setPendingToolCall: (parsed: any) => { (state as any).pendingToolCall = parsed; },
-      appendAssistantTurn: (text: string, metadata: any) => _waConversationRuntime && typeof _waConversationRuntime.appendAssistantTurn === 'function'
-        ? _waConversationRuntime.appendAssistantTurn(text, Object.assign({ render: false }, metadata || {}))
-        : null,
-      getSessionId: _waSession,
-      getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'
-        ? _waConversationRuntime.getHistoryForModel(12)
-        : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []),
-      slidesIcon: _SLIDES_SVG,
     });
     _waQuickActionDispatcherAttached = false;
   }
@@ -602,11 +568,13 @@ export function _initWorkspaceAiRuntimes(): void {
     _waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);
     _waQuickActionDispatcherAttached = true;
   }
-  _syncRuntimeGlobals();
+  _syncHostSessionGlobal();
 }
 
 _initWorkspaceAiRuntimes();
-_hydrateAiConversation(true).catch((error: any) => console.warn('[WA] AI history hydrate failed:', error));
+_ensureWorkspacePersistenceSession()
+  .then(() => _hydrateAiConversation(true))
+  .catch((error: any) => console.warn('[WA] AI history hydrate failed:', error));
 
 // ── Public API ─────────────────────────────────────────────────────
 
@@ -616,7 +584,8 @@ export function hydrateAiHistory(force: boolean = true): Promise<any[]> {
 
 export function useHostSession(sessionId: string, options?: { force?: boolean }): Promise<any[]> {
   _hostSessionId = String(sessionId || '').trim();
-  _syncRuntimeGlobals();
+  _workspaceSessionReady = !!_hostSessionId && !/^workspace_runtime_/i.test(_hostSessionId);
+  _syncHostSessionGlobal();
   _initWorkspaceAiRuntimes();
   const syncSelection = workspaceApi._syncAiSessionSelection;
   if (_hostSessionId && typeof syncSelection === 'function') {
@@ -643,32 +612,48 @@ export function registerTaskActionHandler(action: string, handler: (options: any
   return _waTaskDispatcher.registerQuickActionHandler(action, handler);
 }
 
+export function getWorkspaceConversationRuntime(): any {
+  _initWorkspaceAiRuntimes();
+  return _waConversationRuntime;
+}
+
+export function getWorkspaceAiResultsRuntime(): any {
+  _initWorkspaceAiRuntimes();
+  return _waAiResultsRuntime;
+}
+
+export function getWorkspaceQuickActionRuntime(): any {
+  _initWorkspaceAiRuntimes();
+  return _waQuickActionRuntime;
+}
+
+export function getWorkspaceTaskDispatcher(): any {
+  _initWorkspaceAiRuntimes();
+  return _waTaskDispatcher;
+}
+
 // ── Compatibility exports ──────────────────────────────────────────
-publishWorkspaceApi({
+registerFeatures({
   hydrateAiHistory,
   useHostSession,
+  getWorkspaceSessionId: _waSession,
   registerTaskQuickAction,
   registerTaskEntryRoute,
   registerTaskActionHandler,
+  getWorkspaceConversationRuntime,
+  getWorkspaceAiResultsRuntime,
+  getWorkspaceQuickActionRuntime,
+  getWorkspaceTaskDispatcher,
   _initWorkspaceAiRuntimes,
   retryWorkspaceConversationPersistence,
   persistTerminalTaskRunCard: _persistTerminalTaskRunCard,
 });
 
 if (typeof window !== 'undefined') {
-  (window as any)._initWorkspaceAiRuntimes = _initWorkspaceAiRuntimes;
-  (window as any)._hydrateAiConversation = _hydrateAiConversation;
-  (window as any)._waSession = _waSession;
-  (window as any)._waRenderMarkdown = _waRenderMarkdown;
-  (window as any)._waQuickActionModelMode = _waQuickActionModelMode;
-  (window as any)._waSampleTaskContext = _waSampleTaskContext;
-  (window as any)._persistWorkspaceConversationTurn = _persistWorkspaceConversationTurn;
-  (window as any)._persistTerminalTaskRunCard = _persistTerminalTaskRunCard;
-  (window as any)._retryWorkspaceConversationPersistence = retryWorkspaceConversationPersistence;
   window.addEventListener('online', () => _scheduleWorkspaceTurnRetry(1000));
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) _scheduleWorkspaceTurnRetry(1000);
   });
   if (_loadWorkspaceTurnRetryQueue().length) _scheduleWorkspaceTurnRetry(1500);
-  _syncRuntimeGlobals();
+  _syncHostSessionGlobal();
 }

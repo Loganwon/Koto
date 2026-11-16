@@ -1,6 +1,8 @@
 import { _escHtml } from './infrastructure';
 
 import { previewText } from './task-final-report';
+import { ensureTaskReportAfterProcess } from './task-stage-presentation';
+import { isTaskUiStateCard } from './task-ui-state';
 
 
 function basename(path: string): string {
@@ -71,7 +73,65 @@ export function renderTaskUnderstandingCard(card: { dataset?: Record<string, any
 export function renderTaskMemoryCard(card: { dataset?: Record<string, any> } | null): string {
   const memory = String(card && card.dataset && card.dataset.taskMemorySummary || '').trim();
   if (!memory) return '';
+  const visibleMemory = memory
+    .replace(/\s+(?:最终)?结果\s*[:：][\s\S]*$/u, '')
+    .trim();
   return '<div class="wa-task-interaction-card wa-task-memory-card" data-role="task-memory-summary"><div class="wa-task-interaction-title">已写入任务记忆</div>'
-    + renderTaskInteractionLine('记忆摘要', previewText(memory.replace(/\s+/g, ' '), 260))
+    + renderTaskInteractionLine(
+      '记忆摘要',
+      previewText(
+        (visibleMemory || '任务目标、使用上下文与文件变更已保存，可用于后续追问。')
+          .replace(/\s+/g, ' '),
+        260,
+      ),
+    )
     + '</div>';
+}
+
+export function renderTaskContextDetails(
+  card: { dataset?: Record<string, any> } | null,
+): string {
+  const content = [
+    renderTaskUnderstandingCard(card),
+    renderTaskMemoryCard(card),
+  ].filter(Boolean).join('');
+  if (!content) return '';
+  return '<details class="wa-task-result-context" data-role="task-context">'
+    + '<summary>任务上下文</summary>'
+    + '<div class="wa-task-result-context-body">'
+    + content
+    + '</div></details>';
+}
+
+export function syncTaskInteractionSummary<TCard extends HTMLElement>(
+  card: TCard,
+): void {
+  if (!isTaskUiStateCard(card)) return;
+  ensureTaskReportAfterProcess(card);
+  const summary = card.querySelector(
+    '[data-role="summary"]',
+  ) as HTMLElement | null;
+  if (!summary) return;
+  summary.querySelectorAll(
+    ':scope > [data-role="task-understanding"],'
+      + ':scope > [data-role="task-memory-summary"]',
+  ).forEach((node) => node.remove());
+  const html = renderTaskContextDetails(card);
+  const existing = summary.querySelector(
+    ':scope > [data-role="task-context"]',
+  ) as HTMLElement | null;
+  if (!html) {
+    if (existing) existing.remove();
+    return;
+  }
+  if (existing) {
+    existing.outerHTML = html;
+  } else {
+    const actions = summary.querySelector(
+      ':scope > .wa-task-actions',
+    ) as HTMLElement | null;
+    if (actions) actions.insertAdjacentHTML('beforebegin', html);
+    else summary.insertAdjacentHTML('beforeend', html);
+  }
+  if (String(summary.textContent || '').trim()) summary.hidden = false;
 }

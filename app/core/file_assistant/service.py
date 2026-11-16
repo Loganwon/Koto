@@ -98,7 +98,10 @@ class FileAssistantService:
         docx_open_parser: DocxOpenParser | None = None,
         docx_copy_to_tmp: CopyDocxToTmp | None = None,
         pptx_parser: PptxParser | None = None,
+        cancel_check: Callable[[], None] | None = None,
     ) -> ParsedEditorFile:
+        check_cancelled = cancel_check or (lambda: None)
+        check_cancelled()
         path = Path(file_path)
         name = display_name or path.name
         ext = path.suffix.lower()
@@ -122,15 +125,18 @@ class FileAssistantService:
 
                 data = parse_docx(str(path))
                 data["raw_url"] = f"/api/v1/workspace/raw/{file_id}"
+            check_cancelled()
             return ParsedEditorFile(file_type="docx", data=data)
 
         if ext == ".xlsx":
             from app.core.file.parsers.xlsx_parser import parse_xlsx
 
-            return ParsedEditorFile(
+            parsed = ParsedEditorFile(
                 file_type="xlsx",
                 data=parse_xlsx(str(path), original_name=name),
             )
+            check_cancelled()
+            return parsed
 
         if ext == ".pptx":
             size = path.stat().st_size
@@ -140,14 +146,20 @@ class FileAssistantService:
                     "Koto 当前不支持超过 100 MB 的 PPTX 文件，建议先在 PowerPoint 中删除视频后再打开。"
                 )
             parser = pptx_parser or self._default_pptx_parser
-            return ParsedEditorFile(file_type="pptx", data=parser(path.read_bytes()))
+            parsed = ParsedEditorFile(file_type="pptx", data=parser(path.read_bytes()))
+            check_cancelled()
+            return parsed
 
         if ext == ".pdf":
             from app.core.file.parsers.pdf_parser import parse_pdf
 
-            return ParsedEditorFile(file_type="pdf", data=parse_pdf(str(path), file_id))
+            return ParsedEditorFile(
+                file_type="pdf",
+                data=parse_pdf(str(path), file_id, cancel_check=check_cancelled),
+            )
 
         if ext in IMAGE_EXTENSIONS:
+            check_cancelled()
             return ParsedEditorFile(
                 file_type="image",
                 data={"raw_url": f"/api/v1/workspace/raw/{file_id}"},
@@ -156,6 +168,7 @@ class FileAssistantService:
         if ext in TEXT_EXTENSIONS:
             source = Path(text_source_path) if text_source_path is not None else path
             content = source.read_text(encoding="utf-8", errors="replace")
+            check_cancelled()
             file_type = (
                 "text" if ext in {".txt", ".md", ".markdown", ".csv"} else "code"
             )
@@ -273,9 +286,9 @@ class FileAssistantService:
 
     @staticmethod
     def _default_pptx_parser(raw_bytes: bytes) -> dict[str, Any]:
-        from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
+        from app.core.file.pptx_editor import parse_slides
 
-        return _pptx_rich_parse(raw_bytes)
+        return parse_slides(raw_bytes)
 
     @staticmethod
     def _ensure_suffix(file_name: str, suffix: str) -> str:

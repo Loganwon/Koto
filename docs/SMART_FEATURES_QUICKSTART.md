@@ -295,8 +295,8 @@ curl -X POST http://localhost:5000/api/insights/export-markdown \
 ### 场景1：新项目启动
 
 ```python
-from web.concept_extractor import ConceptExtractor
-from web.knowledge_graph import KnowledgeGraph
+from web.knowledge.concept_extractor import ConceptExtractor
+from web.knowledge.knowledge_graph import KnowledgeGraph
 
 # 1. 索引项目文件
 extractor = ConceptExtractor()
@@ -338,7 +338,7 @@ for item in related:
 ### 场景3：周报生成
 
 ```python
-from web.insight_reporter import InsightReporter
+from web.knowledge.insight_reporter import InsightReporter
 
 reporter = InsightReporter()
 
@@ -358,7 +358,7 @@ print(f"生产力评分: {report['sections']['productivity']['productivity_score
 ### 场景4：实时建议
 
 ```python
-from web.suggestion_engine import SuggestionEngine
+from web.proactive.suggestion_engine import SuggestionEngine
 
 engine = SuggestionEngine()
 
@@ -383,7 +383,7 @@ for suggestion in high_priority:
 ### 添加自定义建议规则
 
 ```python
-from web.suggestion_engine import SuggestionEngine
+from web.proactive.suggestion_engine import SuggestionEngine
 
 # 继承并扩展
 class CustomSuggestionEngine(SuggestionEngine):
@@ -429,8 +429,8 @@ suggestions = engine.generate_suggestions()
 ### 修改数据库路径
 
 ```python
-from web.concept_extractor import ConceptExtractor
-from web.knowledge_graph import KnowledgeGraph
+from web.knowledge.concept_extractor import ConceptExtractor
+from web.knowledge.knowledge_graph import KnowledgeGraph
 
 # 自定义数据库位置
 extractor = ConceptExtractor(db_path="data/my_concepts.db")
@@ -457,10 +457,10 @@ neighbors = kg.get_file_neighbors(file_path, depth=2)  # 默认1
 ### 查看系统统计
 
 ```python
-from web.concept_extractor import ConceptExtractor
-from web.knowledge_graph import KnowledgeGraph
+from web.knowledge.concept_extractor import ConceptExtractor
+from web.knowledge.knowledge_graph import KnowledgeGraph
 from web.behavior_monitor import BehaviorMonitor
-from web.suggestion_engine import SuggestionEngine
+from web.proactive.suggestion_engine import SuggestionEngine
 
 # 概念提取统计
 extractor = ConceptExtractor()

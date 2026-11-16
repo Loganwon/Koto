@@ -145,7 +145,12 @@ class SearchEngine:
                 with open(file_path, "r", encoding="utf-8") as f:
                     chat_data = json.load(f)
 
-                    messages = chat_data.get("messages", [])
+                    if isinstance(chat_data, dict):
+                        messages = chat_data.get("messages", [])
+                    elif isinstance(chat_data, list):
+                        messages = chat_data
+                    else:
+                        messages = []
 
                     for msg in messages:
                         if len(results) >= max_results:

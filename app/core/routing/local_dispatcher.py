@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 
-from app.core.routing.smart_dispatcher import SmartDispatcher
-
 LOCAL_ROUTER_MODEL = "qwen3.5:9b"
 OLLAMA_API_URL = "http://127.0.0.1:11434/api/generate"
 
@@ -28,7 +26,3 @@ class LocalDispatcher:
             return True
         except Exception:
             return False
-
-    @staticmethod
-    def analyze(user_input, history=None):
-        return SmartDispatcher.analyze(user_input, history)

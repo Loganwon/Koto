@@ -18,20 +18,50 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-_chat_dir_provider: Callable[[], str] | None = None
+_chat_dir_value: str | None = None
+_chat_dir_lock = threading.RLock()
 _default_session_manager: "SessionManager | None" = None
+_default_session_manager_lock = threading.Lock()
 
 
-def configure_session_storage(chat_dir_provider: Callable[[], str]) -> None:
-    """Bind session storage to the application-owned chat directory."""
-    global _chat_dir_provider
-    _chat_dir_provider = chat_dir_provider
+def configure_session_storage(chat_dir: str | Callable[[], str]) -> None:
+    """Set the session directory explicitly.
+
+    Callable input remains accepted for source compatibility, but is resolved
+    immediately so this module no longer retains a callback into ``web.app``.
+    """
+
+    value = chat_dir() if callable(chat_dir) else chat_dir
+    set_chat_dir(str(value or ""))
+
+
+def set_chat_dir(path: str) -> str:
+    """Update the process-wide session storage root."""
+
+    raw_path = str(path or "").strip()
+    if not raw_path:
+        raise ValueError("chat directory is required")
+    normalized = os.path.abspath(os.path.expanduser(raw_path))
+    os.makedirs(normalized, exist_ok=True)
+    global _chat_dir_value
+    with _chat_dir_lock:
+        _chat_dir_value = normalized
+    return normalized
+
+
+def get_chat_dir() -> str:
+    """Return the configured session root, loading settings when necessary."""
+
+    with _chat_dir_lock:
+        if _chat_dir_value:
+            return _chat_dir_value
+    from app.core.config.user_settings import SettingsManager
+
+    return set_chat_dir(SettingsManager().chats_dir)
 
 
 def _chat_dir() -> str:
-    if _chat_dir_provider is None:
-        raise RuntimeError("Session storage is not configured")
-    return str(_chat_dir_provider() or "")
+    return get_chat_dir()
 
 
 # Per-session file lock to prevent concurrent read-modify-write cycles
@@ -265,6 +295,21 @@ class SessionManager:
 def get_session_manager() -> SessionManager:
     """Return the single application session manager."""
     global _default_session_manager
-    if _default_session_manager is None:
-        _default_session_manager = SessionManager()
+    if _default_session_manager is not None:
+        return _default_session_manager
+    with _default_session_manager_lock:
+        if _default_session_manager is None:
+            _default_session_manager = SessionManager()
     return _default_session_manager
+
+
+def reset_session_runtime_for_tests() -> None:
+    """Clear process caches without deleting any session files."""
+
+    global _chat_dir_value, _default_session_manager
+    with _chat_dir_lock:
+        _chat_dir_value = None
+    with _default_session_manager_lock:
+        _default_session_manager = None
+    with _session_locks_lock:
+        _session_locks.clear()

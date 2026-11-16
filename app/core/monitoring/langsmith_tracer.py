@@ -13,7 +13,7 @@ Koto LangSmith Tracer
   - 在 LangSmith Dashboard 中可视化完整 DAG 执行路径
   - 支持 A/B 评估（feedback API）
 
-激活方式（在 config/gemini_config.env 中添加）：
+激活方式（在 config/deepseek_config.env 中添加）：
     LANGCHAIN_TRACING_V2=true
     LANGCHAIN_API_KEY=lsv2_...        # 从 https://smith.langchain.com 获取
     LANGCHAIN_PROJECT=Koto            # 项目名称（可选，默认 "Koto"）
@@ -61,7 +61,7 @@ def init_langsmith() -> str:
     if not api_key or tracing != "true":
         logger.info(
             "[LangSmith] ℹ️ Tracing 未启用（未检测到 LANGCHAIN_API_KEY + LANGCHAIN_TRACING_V2=true）\n"
-            "  如需启用：在 config/gemini_config.env 中添加：\n"
+            "  如需启用：在 config/deepseek_config.env 中添加：\n"
             "    LANGCHAIN_TRACING_V2=true\n"
             "    LANGCHAIN_API_KEY=lsv2_..."
         )

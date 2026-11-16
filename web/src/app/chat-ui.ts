@@ -3,6 +3,14 @@
  */
 
 import { csrfFetch } from '../shared/csrf';
+import {
+  getActiveKotoComposer,
+  setActiveKotoComposerText,
+  submitActiveKotoComposerText,
+} from '../shared/active-composer';
+import { viewportPointToElement } from '../shared/ui-scale';
+import { getFeatureRegistry } from '../shared/feature-registry';
+import { scrollToBottomForce } from './router';
 
 // ── State ──
 let selectedFiles: File[] = [];
@@ -18,166 +26,11 @@ const TASK_MODELS: Record<string, string> = {
   FILE_GEN: 'deepseek-chat'
 };
 
-(window as any).selectedFiles = selectedFiles;
-(window as any).lockedTaskType = lockedTaskType;
-if (typeof (window as any).enableMiniGame !== 'boolean') (window as any).enableMiniGame = true;
-(window as any).TASK_MODELS = TASK_MODELS;
-(window as any).MAX_UPLOAD_FILES = MAX_UPLOAD_FILES;
+getFeatureRegistry().selectedFiles = selectedFiles;
+getFeatureRegistry().lockedTaskType = lockedTaskType;
+getFeatureRegistry().TASK_MODELS = TASK_MODELS;
+getFeatureRegistry().MAX_UPLOAD_FILES = MAX_UPLOAD_FILES;
 
-// ── Mini Game ──
-interface MiniGameState {
-  initialized: boolean;
-  running: boolean;
-  visible: boolean;
-  canvas: HTMLCanvasElement | null;
-  ctx: CanvasRenderingContext2D | null;
-  rafId: number | null;
-  lastFrame: number;
-  groundY: number;
-  speed: number;
-  spawnTimer: number;
-  score: number;
-  dino: { x: number; y: number; w: number; h: number; vy: number; onGround: boolean };
-  obstacles: Array<{ x: number; y: number; w: number; h: number }>;
-}
-
-const miniGame: MiniGameState = {
-  initialized: false, running: false, visible: false,
-  canvas: null, ctx: null, rafId: null, lastFrame: 0,
-  groundY: 90, speed: 160, spawnTimer: 0, score: 0,
-  dino: { x: 20, y: 70, w: 18, h: 18, vy: 0, onGround: true },
-  obstacles: []
-};
-
-function initMiniGame(): void {
-  if (miniGame.initialized) return;
-  miniGame.canvas = document.getElementById('miniGameCanvas') as HTMLCanvasElement | null;
-  if (!miniGame.canvas) return;
-  miniGame.ctx = miniGame.canvas.getContext('2d');
-  if (!miniGame.ctx) return;
-  miniGame.dino.y = miniGame.groundY - miniGame.dino.h;
-  miniGame.initialized = true;
-  window.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (!miniGame.visible) return;
-    if (e.code === 'Space') {
-      e.preventDefault();
-      if (!miniGame.running) {
-        startMiniGame();
-      } else {
-        miniGameJump();
-      }
-    }
-  });
-  if (miniGame.canvas) {
-    miniGame.canvas.addEventListener('click', () => {
-      if (!miniGame.visible) return;
-      if (!miniGame.running) { startMiniGame(); } else { miniGameJump(); }
-    });
-  }
-}
-
-function showMiniGame(): void {
-  if ((window as any).enableMiniGame === false) return;
-  const panel = document.getElementById('miniGamePanel');
-  if (!panel) return;
-  panel.classList.remove('hidden');
-  miniGame.visible = true;
-  initMiniGame();
-  startMiniGame();
-}
-
-function hideMiniGame(): void {
-  const panel = document.getElementById('miniGamePanel');
-  if (!panel) return;
-  panel.classList.add('hidden');
-  miniGame.visible = false;
-  stopMiniGame();
-}
-
-function startMiniGame(): void {
-  if (!miniGame.initialized || miniGame.running) return;
-  resetMiniGame();
-  miniGame.running = true;
-  miniGame.lastFrame = performance.now();
-  miniGame.rafId = requestAnimationFrame(miniGameLoop);
-}
-
-function stopMiniGame(): void {
-  miniGame.running = false;
-  if (miniGame.rafId) { cancelAnimationFrame(miniGame.rafId); miniGame.rafId = null; }
-}
-
-function resetMiniGame(): void {
-  miniGame.dino.y = miniGame.groundY - miniGame.dino.h;
-  miniGame.dino.vy = 0;
-  miniGame.dino.onGround = true;
-  miniGame.obstacles = [];
-  miniGame.spawnTimer = 0;
-  miniGame.score = 0;
-}
-
-function miniGameJump(): void {
-  if (!miniGame.running) return;
-  if (miniGame.dino.onGround) { miniGame.dino.vy = -320; miniGame.dino.onGround = false; }
-}
-
-function miniGameLoop(ts: number): void {
-  if (!miniGame.running) return;
-  const dt = Math.min((ts - miniGame.lastFrame) / 1000, 0.05);
-  miniGame.lastFrame = ts;
-  miniGame.dino.vy += 900 * dt;
-  miniGame.dino.y += miniGame.dino.vy * dt;
-  if (miniGame.dino.y >= miniGame.groundY - miniGame.dino.h) {
-    miniGame.dino.y = miniGame.groundY - miniGame.dino.h;
-    miniGame.dino.vy = 0;
-    miniGame.dino.onGround = true;
-  }
-  miniGame.spawnTimer -= dt;
-  if (miniGame.spawnTimer <= 0) {
-    miniGame.spawnTimer = 0.8 + Math.random() * 0.9;
-    miniGame.obstacles.push({ x: 260, y: miniGame.groundY - 12, w: 10 + Math.random() * 6, h: 12 });
-  }
-  const speed = miniGame.speed + Math.min(miniGame.score, 200) * 0.2;
-  miniGame.obstacles.forEach(o => { o.x -= speed * dt; });
-  miniGame.obstacles = miniGame.obstacles.filter(o => o.x + o.w > -10);
-  for (const o of miniGame.obstacles) {
-    if (rectHit(miniGame.dino, o)) { miniGame.running = false; break; }
-  }
-  if (miniGame.running) {
-    miniGame.score += dt * 10;
-    drawMiniGame();
-    miniGame.rafId = requestAnimationFrame(miniGameLoop);
-  } else {
-    drawMiniGame(true);
-  }
-}
-
-function rectHit(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
-function drawMiniGame(gameOver: boolean = false): void {
-  const ctx = miniGame.ctx;
-  const canvas = miniGame.canvas;
-  if (!ctx || !canvas) return;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = '#6c7a91';
-  ctx.beginPath();
-  ctx.moveTo(0, miniGame.groundY + 4);
-  ctx.lineTo(canvas.width, miniGame.groundY + 4);
-  ctx.stroke();
-  ctx.fillStyle = '#10b981';
-  ctx.fillRect(miniGame.dino.x, miniGame.dino.y, miniGame.dino.w, miniGame.dino.h);
-  ctx.fillStyle = '#ef6b6b';
-  miniGame.obstacles.forEach(o => ctx.fillRect(o.x, o.y, o.w, o.h));
-  ctx.fillStyle = '#9fb3d1';
-  ctx.font = '11px Segoe UI, sans-serif';
-  ctx.fillText(`Score: ${Math.floor(miniGame.score)}`, 170, 16);
-  if (gameOver) {
-    ctx.fillStyle = '#f3b45c';
-    ctx.fillText('Game Over - press Space', 50, 60);
-  }
-}
 
 // ── Chat History Rendering ──
 export function renderChatHistory(history: any[]): void {
@@ -188,7 +41,7 @@ export function renderChatHistory(history: any[]): void {
   if (history.length === 0) {
     container.querySelectorAll('.message, .chat-date-sep').forEach(el => el.remove());
     if (ws) ws.style.display = 'block';
-    if (typeof (window as any).renderWelcomeScreen === 'function') (window as any).renderWelcomeScreen();
+    if (typeof getFeatureRegistry().renderWelcomeScreen === 'function') getFeatureRegistry().renderWelcomeScreen();
     return;
   }
 
@@ -252,12 +105,6 @@ export function renderChatHistory(history: any[]): void {
   setTimeout(() => renderMermaidBlocks(), 100);
 }
 
-function scrollToBottomForce(): void {
-  (window as any).isScrollLocked = false;
-  const container = document.getElementById('chatMessages');
-  if (container) { container.scrollTop = container.scrollHeight; }
-}
-
 function renderImagesInContainer(containerId: string): void {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -291,14 +138,10 @@ function renderImagesInContainer(containerId: string): void {
 function renderMessage(role: string, content: string, meta: Record<string, any> = {}): string {
   const avatar = role === 'user' ? 'U' : `<img src="/static/assets/koto_chat_icon.png" alt="Koto" class="avatar-img">`;
   const sender = role === 'user' ? 'You' : 'Koto';
-  const modelDisplayName: Record<string, string> = {
-    'deepseek-chat': 'DeepSeek Chat',
-    'local-executor': 'Local Executor 🖥️',
-  };
   const timestampText = formatMessageTimestamp(meta.timestamp);
   let metaHtml = '';
   if (meta.task) {
-    const showTaskBadge = ((window as any).currentSettings?.ai?.show_task_type) === true;
+    const showTaskBadge = (getFeatureRegistry().currentSettings?.ai?.show_task_type) === true;
     metaHtml = `${showTaskBadge ? `<span class="task-badge ${meta.task.toLowerCase()}">${meta.task}</span>` : ''}<span class="time-info">⏱️ ${meta.time || ''}</span>`;
   }
   if (timestampText) {
@@ -312,8 +155,8 @@ function renderMessage(role: string, content: string, meta: Record<string, any> 
   let filesHtml = '';
   if (meta.saved_files && meta.saved_files.length > 0) {
     filesHtml = `<div class="saved-files"><div class="saved-files-title">✓ Files saved to workspace:</div>${meta.saved_files.map((file: string) => `
-      <a href="${(window as any)._workspaceFileUrl?.(file) || '#'}" target="_blank" rel="noopener" class="saved-file-link" title="在 Koto 中打开 ${file}" onclick="openSavedWorkspaceFile('${file.replace(/'/g, "\\'")}');return false;">
-        <div class="saved-file"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${file}</span></div>
+      <a href="#" class="saved-file-link" data-koto-action="open-saved-file" data-path="${encodeURIComponent(file)}" title="在 Koto 中打开 ${escapeHtml(file)}">
+        <div class="saved-file"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span>${escapeHtml(file)}</span></div>
       </a>`).join('')}</div>`;
   }
   const parsedContent = role === 'assistant' ? parseMarkdown(content) : escapeHtml(content);
@@ -325,7 +168,7 @@ function renderMessage(role: string, content: string, meta: Record<string, any> 
     }).join('');
     attachmentHtml = `<div class="message-attachment-list">${items}</div>`;
   }
-  const actionBar = `<div class="message-actions">${role === 'assistant' ? `<button class="msg-action-btn" onclick="copyMessageText(this)" title="复制回复"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>复制</button>` : ''}${role === 'assistant' ? `<button class="msg-action-btn" onclick="regenMessage(this)" title="重新生成"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 .49-3.35"></path></svg>重生成</button>` : ''}${role === 'user' ? `<button class="msg-action-btn" onclick="editUserMessage(this)" title="编辑后重发"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>编辑</button>` : ''}${role === 'user' ? `<button class="msg-action-btn" onclick="resendMessage(this)" title="重新发送"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 .49-3.35"></path></svg>重发</button>` : ''}</div>`;
+  const actionBar = `<div class="message-actions">${role === 'assistant' ? `<button class="msg-action-btn" data-koto-action="copy-message" title="复制回复"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>复制</button>` : ''}${role === 'assistant' ? `<button class="msg-action-btn" data-koto-action="regenerate-message" title="重新生成"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 .49-3.35"></path></svg>重生成</button>` : ''}${role === 'user' ? `<button class="msg-action-btn" data-koto-action="edit-message" title="编辑后重发"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>编辑</button>` : ''}${role === 'user' ? `<button class="msg-action-btn" data-koto-action="resend-message" title="重新发送"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 .49-3.35"></path></svg>重发</button>` : ''}</div>`;
   return `<div class="message ${role}"${meta.hidden ? ' style="display:none"' : ''}><div class="message-avatar">${avatar}</div><div class="message-content"><div class="message-header"><span class="message-sender">${sender}</span><div class="message-meta">${metaHtml}</div></div>${attachmentHtml}<div class="message-body">${parsedContent}</div>${imagesHtml}${filesHtml}${actionBar}</div></div>`;
 }
 
@@ -347,9 +190,9 @@ export function copyMessageText(btn: HTMLElement): void {
   const msgBody = btn.closest('.message')?.querySelector('.message-body') as HTMLElement | null;
   const text = msgBody ? msgBody.innerText : '';
   navigator.clipboard.writeText(text).then(() => {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification('已复制到剪贴板', 'success', 1500);
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification('已复制到剪贴板', 'success', 1500);
   }).catch(() => {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification('复制失败，请手动选择', 'error', 2000);
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification('复制失败，请手动选择', 'error', 2000);
   });
 }
 
@@ -358,35 +201,30 @@ export function resendMessage(btn: HTMLElement): void {
   if (!msgBody) return;
   const text = (msgBody as HTMLElement).innerText.trim();
   if (!text) return;
-  const input = document.getElementById('messageInput') as HTMLTextAreaElement | null;
-  if (input) { input.value = text; autoResize(input); input.focus(); }
+  setActiveKotoComposerText(text);
 }
 
 export function editUserMessage(btn: HTMLElement): void {
   const msgBody = btn.closest('.message')?.querySelector('.message-body');
   if (!msgBody) return;
   const text = (msgBody as HTMLElement).innerText.trim();
-  const input = document.getElementById('messageInput') as HTMLTextAreaElement | null;
-  if (input) { input.value = text; autoResize(input); input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+  setActiveKotoComposerText(text);
 }
 
 export function regenMessage(btn: HTMLElement): void {
-  const currentSession = (window as any).currentSession;
-  if (!currentSession) { if (typeof (window as any).showNotification === 'function') (window as any).showNotification('请先选择一个对话', 'warning'); return; }
-  if (typeof (window as any).isSessionGenerating === 'function' && (window as any).isSessionGenerating(currentSession)) {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification('Koto 正在生成中，请稍候...', 'warning'); return;
+  const currentSession = getFeatureRegistry().currentSession;
+  if (!currentSession) { if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification('请先选择一个对话', 'warning'); return; }
+  if (typeof getFeatureRegistry().isSessionGenerating === 'function' && getFeatureRegistry().isSessionGenerating(currentSession)) {
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification('Koto 正在生成中，请稍候...', 'warning'); return;
   }
   const msgEl = btn.closest('.message.assistant');
   if (!msgEl) return;
   let prev = msgEl.previousElementSibling as HTMLElement | null;
   while (prev && !prev.classList.contains('message')) prev = prev.previousElementSibling as HTMLElement | null;
-  if (!prev || !prev.classList.contains('user')) { if (typeof (window as any).showNotification === 'function') (window as any).showNotification('找不到对应的用户消息', 'warning'); return; }
+  if (!prev || !prev.classList.contains('user')) { if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification('找不到对应的用户消息', 'warning'); return; }
   const text = (prev.querySelector('.message-body') as HTMLElement | null)?.innerText?.trim();
   if (!text) return;
-  const input = document.getElementById('messageInput') as HTMLTextAreaElement | null;
-  if (input) { input.value = text; autoResize(input); }
-  const form = document.querySelector('.chat-input-form');
-  if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
+  submitActiveKotoComposerText(text);
 }
 
 // ── File Handling ──
@@ -397,7 +235,7 @@ export function updateFilePreview(): void {
   if (selectedFiles.length === 0) { preview.style.display = 'none'; listEl.innerHTML = ''; return; }
   preview.style.display = 'flex';
   const html = selectedFiles.map((file, index) => `
-    <div class="file-item"><span class="file-name">${file.name}</span><span class="file-size">(${formatFileSize(file.size)})</span><button class="remove-file-btn" onclick="removeSingleFile(${index})" title="移除">×</button></div>`).join('');
+    <div class="file-item"><span class="file-name">${file.name}</span><span class="file-size">(${formatFileSize(file.size)})</span><button class="remove-file-btn" data-koto-action="remove-upload" data-index="${index}" title="移除">×</button></div>`).join('');
   listEl.innerHTML = html;
 }
 
@@ -425,16 +263,16 @@ export function setSelectedFiles(files: File[], appendMode: boolean = false): vo
     return true;
   });
   if (newFiles.length > MAX_UPLOAD_FILES) {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification(`⚠️ 最多一次上传 ${MAX_UPLOAD_FILES} 个文件，已截取前 ${MAX_UPLOAD_FILES} 个`, 'warning');
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification(`⚠️ 最多一次上传 ${MAX_UPLOAD_FILES} 个文件，已截取前 ${MAX_UPLOAD_FILES} 个`, 'warning');
   }
   if (tooLargeCount > 0) {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification(`❌ ${tooLargeCount} 个文件超过 100MB 已跳过`, 'error');
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification(`❌ ${tooLargeCount} 个文件超过 100MB 已跳过`, 'error');
   }
   if (selectedFiles.length > 0) {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification(`✅ 已选择 ${selectedFiles.length} 个文件`, 'success');
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification(`✅ 已选择 ${selectedFiles.length} 个文件`, 'success');
   }
   updateFilePreview();
-  (window as any).selectedFiles = selectedFiles;
+  getFeatureRegistry().selectedFiles = selectedFiles;
 }
 
 export function handleFileSelect(event: Event): void {
@@ -451,7 +289,7 @@ export function removeFile(): void {
   updateFilePreview();
   const fileInput = document.getElementById('fileInput') as HTMLInputElement | null;
   if (fileInput) fileInput.value = '';
-  (window as any).selectedFiles = selectedFiles;
+  getFeatureRegistry().selectedFiles = selectedFiles;
 }
 
 // ── Drag & Drop ──
@@ -476,7 +314,7 @@ export function handleDrop(event: DragEvent): void {
   const files = Array.from(event.dataTransfer?.files || []);
   if (files.length > 0) {
     setSelectedFiles(files, true);
-    const inputEl = document.getElementById('messageInput') as HTMLTextAreaElement | null;
+    const inputEl = getActiveKotoComposer();
     if (inputEl) inputEl.focus();
   }
 }
@@ -523,22 +361,22 @@ export async function autoTitleSession(sessionName: string): Promise<void> {
     const res = await csrfFetch(`/api/sessions/${encodeURIComponent(sessionName)}/auto-title`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     const data = await res.json();
     if (!data.success || !data.title) return;
-    const renameRes = await csrfFetch(`/api/sessions/${encodeURIComponent(sessionName)}/rename`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ new_name: typeof (window as any).toProjectSessionName === 'function' ? (window as any).toProjectSessionName(data.title) : data.title }) });
+    const renameRes = await csrfFetch(`/api/sessions/${encodeURIComponent(sessionName)}/rename`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ new_name: typeof getFeatureRegistry().toProjectSessionName === 'function' ? getFeatureRegistry().toProjectSessionName(data.title) : data.title }) });
     const renameData = await renameRes.json();
     if (!renameData.success) return;
     const newSession = renameData.new_session;
     _newlyCreatedSessions.delete(sessionName);
-    const currentSession = (window as any).currentSession;
+    const currentSession = getFeatureRegistry().currentSession;
     if (currentSession === sessionName) {
-      (window as any).currentSession = newSession;
+      getFeatureRegistry().currentSession = newSession;
       const chatTitle = document.getElementById('chatTitle');
-      if (chatTitle) chatTitle.textContent = typeof (window as any).toSessionDisplayName === 'function' ? (window as any).toSessionDisplayName(newSession) : newSession;
+      if (chatTitle) chatTitle.textContent = typeof getFeatureRegistry().toSessionDisplayName === 'function' ? getFeatureRegistry().toSessionDisplayName(newSession) : newSession;
     }
     document.querySelectorAll('.session-item').forEach((item: Element) => {
       if ((item as HTMLElement).dataset.session === sessionName) {
         (item as HTMLElement).dataset.session = newSession;
         const nameEl = item.querySelector('.session-name');
-        if (nameEl) nameEl.textContent = typeof (window as any).toSessionDisplayName === 'function' ? (window as any).toSessionDisplayName(newSession) : newSession;
+        if (nameEl) nameEl.textContent = typeof getFeatureRegistry().toSessionDisplayName === 'function' ? getFeatureRegistry().toSessionDisplayName(newSession) : newSession;
       }
     });
   } catch (e) { /* ignore */ }
@@ -623,13 +461,13 @@ export function chatSearchPrev(): void {
 // Model selection now managed by workspace toggle (model-settings.ts)
 
 // ── @File mention ──
-(window as any)._kotoContextFiles = [];
+getFeatureRegistry()._kotoContextFiles = [];
 let _atSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let _atSuggestSelectedIdx = -1;
 
 export function handleAtMention(textarea: HTMLTextAreaElement): void {
   const val = textarea.value;
-  const cursor = textarea.selectionStart;
+  const cursor = textarea.selectionStart ?? val.length;
   const before = val.slice(0, cursor);
   const atIdx = before.lastIndexOf('@');
   if (atIdx === -1) { hideAtSuggest(); return; }
@@ -655,7 +493,7 @@ function showAtSuggest(files: any[], textarea: HTMLTextAreaElement, atIdx: numbe
     const item = document.createElement('div');
     item.style.cssText = 'padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;';
     (item as any).dataset.idx = i;
-    const icon = typeof (window as any)._fileIcon === 'function' ? (window as any)._fileIcon(f.ext || '') : '📄';
+    const icon = typeof getFeatureRegistry()._fileIcon === 'function' ? getFeatureRegistry()._fileIcon(f.ext || '') : '📄';
     item.innerHTML = `<span style="font-size:16px">${icon}</span><div><div style="font-weight:500;font-size:13px">${escapeHtml(f.name)}</div><div style="font-size:11px;opacity:.6">${escapeHtml(f.path)}</div></div>`;
     item.addEventListener('mouseenter', () => {
       el.querySelectorAll('[data-idx]').forEach(e => ((e as HTMLElement).style.background = ''));
@@ -667,9 +505,16 @@ function showAtSuggest(files: any[], textarea: HTMLTextAreaElement, atIdx: numbe
   });
   const rect = textarea.getBoundingClientRect();
   el.style.display = 'block';
-  el.style.left = rect.left + 'px';
-  el.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
-  el.style.top = '';
+  const suggestRect = el.getBoundingClientRect();
+  const coordinateHost = el.offsetParent || document.body;
+  const position = viewportPointToElement(
+    coordinateHost,
+    rect.left,
+    rect.top - suggestRect.height - 4,
+  );
+  el.style.left = position.x + 'px';
+  el.style.top = position.y + 'px';
+  el.style.bottom = '';
 }
 
 function hideAtSuggest(): void {
@@ -689,24 +534,24 @@ function selectAtFile(file: any, textarea: HTMLTextAreaElement, atIdx: number): 
 }
 
 export function pinContextFile(path: string, name: string): void {
-  if ((window as any)._kotoContextFiles.find((f: any) => f.path === path)) return;
-  (window as any)._kotoContextFiles.push({ path, name });
+  if (getFeatureRegistry()._kotoContextFiles.find((f: any) => f.path === path)) return;
+  getFeatureRegistry()._kotoContextFiles.push({ path, name });
   renderContextFileBar();
 }
 
 export function removeContextFile(path: string): void {
-  (window as any)._kotoContextFiles = (window as any)._kotoContextFiles.filter((f: any) => f.path !== path);
+  getFeatureRegistry()._kotoContextFiles = getFeatureRegistry()._kotoContextFiles.filter((f: any) => f.path !== path);
   renderContextFileBar();
 }
 
-function renderContextFileBar(): void {
+export function renderContextFileBar(): void {
   const bar = document.getElementById('contextFileBar');
   if (!bar) return;
-  if (!(window as any)._kotoContextFiles.length) { bar.style.display = 'none'; return; }
+  if (!getFeatureRegistry()._kotoContextFiles.length) { bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
   bar.innerHTML = '<span style="opacity:.5;margin-right:4px;align-self:center;">📎</span>' +
-    (window as any)._kotoContextFiles.map((f: any) => `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:var(--accent-light,#e8f0fe);border-radius:12px;font-size:12px;">${typeof (window as any)._fileIcon === 'function' ? (window as any)._fileIcon(f.name.split('.').pop().toLowerCase()) : '📄'} ${escapeHtml(f.name)}<button onclick="removeContextFile('${f.path.replace(/'/g, "\\'")}')" style="border:none;background:none;cursor:pointer;padding:0;font-size:14px;line-height:1;opacity:.6;" title="移除">×</button></span>`).join('') +
-    `<button onclick="(window as any)._kotoContextFiles=[];renderContextFileBar();" style="border:none;background:none;cursor:pointer;font-size:11px;opacity:.5;padding:0 4px;" title="清除所有">清除</button>`;
+    getFeatureRegistry()._kotoContextFiles.map((f: any) => `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:var(--accent-light,#e8f0fe);border-radius:12px;font-size:12px;">${typeof getFeatureRegistry()._fileIcon === 'function' ? getFeatureRegistry()._fileIcon(f.name.split('.').pop().toLowerCase()) : '📄'} ${escapeHtml(f.name)}<button data-koto-action="remove-context-file" data-path="${encodeURIComponent(f.path)}" style="border:none;background:none;cursor:pointer;padding:0;font-size:14px;line-height:1;opacity:.6;" title="移除">×</button></span>`).join('') +
+    `<button data-koto-action="clear-context-files" style="border:none;background:none;cursor:pointer;font-size:11px;opacity:.5;padding:0 4px;" title="清除所有">清除</button>`;
 }
 
 function _fileIcon(ext: string): string {
@@ -715,9 +560,11 @@ function _fileIcon(ext: string): string {
 }
 
 export function openSavedWorkspaceFile(file: string): void {
-  const cleanPath = file.replace(/\\/g, '/');
-  const url = file.startsWith('/') ? `/api/files${cleanPath}` : `/api/workspace/${cleanPath}`;
-  window.open(url, '_blank');
+  // 现存路径都由后端 auto_save_files 生成，均为 workspace 相对路径。
+  // 统一走 /api/workspace/<path> （该端点带目录穿越防护），
+  // 避免旧数据中的绝对路径误指向 /api/files（文件库记录接口）。
+  const cleanPath = file.replace(/\\/g, '/').replace(/^[A-Za-z]:\//, '').replace(/^\//, '');
+  window.open(`/api/workspace/${cleanPath}`, '_blank');
 }
 
 // ── Slash Commands ──
@@ -751,7 +598,7 @@ function showSlashPalette(cmds: typeof SLASH_COMMANDS): void {
   _slashSelectedIdx = -1;
   el.innerHTML = cmds.map((c, i) => `<div class="slash-item" data-idx="${i}"><span class="slash-icon">${c.icon}</span><span class="slash-cmd">/${c.cmd}</span><span class="slash-desc">${c.desc}</span></div>`).join('');
   el.style.display = 'block';
-  if (typeof (window as any).scrollToBottom === 'function') (window as any).scrollToBottom();
+  if (typeof getFeatureRegistry().scrollToBottom === 'function') getFeatureRegistry().scrollToBottom();
 }
 
 function hideSlashPalette(): void {
@@ -763,10 +610,10 @@ function hideSlashPalette(): void {
 export function selectSlashCommand(idx: number): void {
   if (idx < 0 || idx >= _slashMatchedCmds.length) return;
   const cmd = _slashMatchedCmds[idx];
-  const textarea = document.getElementById('messageInput') as HTMLTextAreaElement | null;
+  const textarea = getActiveKotoComposer();
   if (!textarea) return;
   const val = textarea.value;
-  const cursor = textarea.selectionStart;
+  const cursor = textarea.selectionStart ?? val.length;
   const before = val.slice(0, cursor);
   const slashIdx = before.lastIndexOf('/');
   if (slashIdx === -1) return;
@@ -800,7 +647,7 @@ export function initCapabilityButtons(): void {
         document.querySelectorAll('.capability').forEach(c => c.classList.remove('selected'));
         this.classList.add('selected');
       }
-      (window as any).lockedTaskType = lockedTaskType;
+      getFeatureRegistry().lockedTaskType = lockedTaskType;
       updateTaskIndicator(lockedTaskType);
     });
   });
@@ -875,7 +722,7 @@ export function copyTable(tableId: string): void {
     text += cells.join('\t') + '\n';
   });
   navigator.clipboard.writeText(text).then(() => {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification('表格已复制', 'success', 1000);
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification('表格已复制', 'success', 1000);
   }).catch(() => {});
 }
 
@@ -886,22 +733,10 @@ export function openInArtifact(btn: HTMLElement): void {
   if (!encoded) return;
   try {
     const code = decodeURIComponent(atob(encoded));
-    if ((window as any).WA && typeof (window as any).WA.openFileInArtifact === 'function') {
-      (window as any).WA.openFileInArtifact(code, lang);
+    if (getFeatureRegistry() && typeof getFeatureRegistry().openFileInArtifact === 'function') {
+      getFeatureRegistry().openFileInArtifact(code, lang);
     }
   } catch (e) { /* ignore */ }
-}
-
-// ── Rating bar ──
-function appendRatingBar(msgId: string, msgDbId: string, userMsg: string, assistantMsg: string, taskType: string | undefined): void {
-  const msgDiv = document.getElementById(msgId);
-  if (!msgDiv) return;
-  const existing = msgDiv.querySelector('.rating-bar');
-  if (existing) existing.remove();
-  const bar = document.createElement('div');
-  bar.className = 'rating-bar';
-  bar.innerHTML = `<span class="rating-label">有帮助吗？</span><button class="rating-btn" data-rating="up" onclick="(window as any).sendRating?.('${msgDbId}','${userMsg.replace(/'/g,"\\'")}','${assistantMsg.replace(/'/g,"\\'")}','${taskType||''}','up',this)">👍</button><button class="rating-btn" data-rating="down" onclick="(window as any).sendRating?.('${msgDbId}','${userMsg.replace(/'/g,"\\'")}','${assistantMsg.replace(/'/g,"\\'")}','${taskType||''}','down',this)">👎</button>`;
-  msgDiv.appendChild(bar);
 }
 
 // ── Download PPT ──
@@ -914,140 +749,34 @@ export function downloadPPT(sessionId: string): void {
       a.href = url; a.download = `presentation_${sessionId.substr(0, 8)}.pptx`;
       document.body.appendChild(a); a.click();
       window.URL.revokeObjectURL(url); document.body.removeChild(a);
-      if (typeof (window as any).showNotification === 'function') (window as any).showNotification('✅ PPT 下载成功', 'success');
+      if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification('✅ PPT 下载成功', 'success');
     })
     .catch(err => {
-      if (typeof (window as any).showNotification === 'function') (window as any).showNotification('❌ PPT 下载失败: ' + err.message, 'error');
+      if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification('❌ PPT 下载失败: ' + err.message, 'error');
     });
-}
+}import { appendSourcesToBody, escapeHtml, highlightCode, parseMarkdown, renderMermaidBlocks, renderSourcesPanel } from './chat-rich-rendering';
+export * from './chat-rich-rendering';
 
-// ── Source rendering ──
-export function renderSourcesPanel(sources: any[]): string {
-  if (!Array.isArray(sources) || sources.length === 0) return '';
-  const items = sources.slice(0, 8).map((source, idx) => {
-    const rawUrl = String(source.url || '').trim();
-    const safeUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : '#';
-    return `<a class="message-source-item" href="${safeUrl}" target="_blank"><span class="message-source-index">[${idx + 1}]</span><span class="message-source-title">${escapeHtml(String(source.title || `来源 ${idx + 1}`))}</span></a>`;
-  }).join('');
-  return `<div class="message-sources"><div class="message-sources-title">📚 参考来源</div><div class="message-sources-list">${items}</div></div>`;
-}
-
-export function appendSourcesToBody(bodyEl: HTMLElement, sources: any[]): void {
-  if (!bodyEl) return;
-  const oldPanel = bodyEl.querySelector('.message-sources');
-  if (oldPanel) oldPanel.remove();
-  if (!Array.isArray(sources) || sources.length === 0) return;
-  bodyEl.insertAdjacentHTML('beforeend', renderSourcesPanel(sources));
-}
-
-// ── Escape HTML ──
-export function escapeHtml(str: string): string {
-  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-// ── Markdown ──
-export function parseMarkdown(text: string): string {
-  if (!text) return '';
-  try {
-    if (typeof (window as any).marked === 'undefined') {
-      return `<div class="markdown-fallback" style="white-space: pre-wrap;">${escapeHtml(text)}</div>`;
-    }
-    const marked = (window as any).marked;
-    const renderer = new marked.Renderer();
-    renderer.table = function(header: string, body: string): string {
-      const tableId = 'table-' + Math.random().toString(36).slice(2, 10);
-      return `<div class="table-wrapper" id="${tableId}"><div class="table-header"><span class="table-label">📊 表格</span><button class="copy-table-btn" onclick="copyTable('${tableId}')" title="复制表格"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>复制</span></button></div><div class="table-scroll"><table><thead>${header}</thead><tbody>${body}</tbody></table></div></div>`;
-    };
-    renderer.code = function(code: string, language: string): string {
-      try {
-        if (language === 'mermaid') {
-          const mermaidId = 'mermaid-' + Math.random().toString(36).slice(2, 10);
-          return `<div class="mermaid-wrapper"><div class="mermaid" id="${mermaidId}">${escapeHtml(code)}</div></div>`;
-        }
-        if (typeof (window as any).hljs === 'undefined') return `<pre><code>${escapeHtml(code)}</code></pre>`;
-        const hljs = (window as any).hljs;
-        const validLang = language && hljs.getLanguage(language) ? language : '';
-        const highlighted = validLang ? hljs.highlight(code, { language: validLang }).value : hljs.highlightAuto(code).value;
-        const encodedCode = btoa(unescape(encodeURIComponent(code)));
-        const lineCount = (code.match(/\n/g) || []).length + 1;
-        const artifactBtn = lineCount > 5 ? `<button class="open-artifact-btn" data-code="${encodedCode}" data-lang="${validLang || 'plaintext'}" onclick="openInArtifact(this)" title="在侧面板中打开"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg><span>Artifact</span></button>` : '';
-        return `<div class="code-block-wrapper"><div class="code-header"><span class="code-lang">${validLang || 'code'}</span><div style="display:flex;align-items:center;gap:4px;">${artifactBtn}<button class="copy-btn" data-code="${encodedCode}" onclick="copyCode(this)" title="复制代码"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>复制</span></button></div></div><pre data-lang="${validLang}"><code class="hljs language-${validLang || 'plaintext'}">${highlighted}</code></pre></div>`;
-      } catch { return `<pre><code>${code}</code></pre>`; }
-    };
-    renderer.link = function(href: string, title: string | null, text: string): string {
-      if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
-        return `<a href="${href}" data-ext="1"${title ? ` title="${title}"` : ''} class="ext-link">${text}</a>`;
-      }
-      return `<a href="${href || '#'}">${text}</a>`;
-    };
-    marked.setOptions({ renderer, breaks: true, gfm: true });
-    let html = marked.parse(text);
-    html = renderKaTeX(html);
-    return html;
-  } catch (e) { return String(text); }
-}
-
-function renderKaTeX(html: string): string {
-  if (typeof (window as any).katex === 'undefined') return html;
-  const katex = (window as any).katex;
-  try {
-    html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_match: string, tex: string) => {
-      try { return katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false }); } catch { return _match; }
-    });
-    html = html.replace(/(?<!\$)\$(?!\$)([^\n$]+?)\$(?!\$)/g, (_match: string, tex: string) => {
-      try { return katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false }); } catch { return _match; }
-    });
-  } catch (e) { /* ignore */ }
-  return html;
-}
-
-let _mermaidLoaded = false;
-let _mermaidLoading: Promise<void> | null = null;
-
-function _ensureMermaid(): Promise<void> {
-  if (typeof (window as any).mermaid !== 'undefined') return Promise.resolve();
-  if (_mermaidLoading) return _mermaidLoading;
-  _mermaidLoading = new Promise<void>((resolve) => {
-    const script = document.createElement('script');
-    script.src = '/static/vendor/mermaid/10.9.0/mermaid.min.js';
-    script.onload = () => { _mermaidLoaded = true; resolve(); };
-    script.onerror = () => resolve();
-    document.head.appendChild(script);
-  });
-  return _mermaidLoading;
-}
-
-async function renderMermaidBlocks(): Promise<void> {
-  await _ensureMermaid();
-  if (typeof (window as any).mermaid === 'undefined') return;
-  const mermaid = (window as any).mermaid;
-  try {
-    const blocks = document.querySelectorAll('.mermaid');
-    for (const block of Array.from(blocks)) {
-      if ((block as HTMLElement).dataset.rendered === 'true') continue;
-      try {
-        const id = block.id;
-        const code = (block as HTMLElement).textContent || '';
-        const { svg } = await mermaid.render('mermaid-svg-' + id, code);
-        block.innerHTML = svg;
-        (block as HTMLElement).dataset.rendered = 'true';
-      } catch (e) { /* ignore individual failures */ }
-    }
-  } catch (e) { /* ignore */ }
-}
-
-function highlightCode(): void {
-  if (typeof (window as any).hljs === 'undefined') return;
-  document.querySelectorAll('pre code').forEach((block: Element) => {
-    if (!block.classList.contains('hljs')) {
-      try { (window as any).hljs.highlightElement(block as HTMLElement); } catch (e) { /* ignore */ }
-    }
-  });
-}
 
 // ── Hotkey Sheet ──
-export function toggleHotkeySheet(): void { const el = document.getElementById('hotkeySheet'); if (el) el.classList.toggle('active'); }
-export function closeHotkeySheet(): void { const el = document.getElementById('hotkeySheet'); if (el) el.classList.remove('active'); }
+export function toggleHotkeySheet(): void {
+  const overlay = document.getElementById('hotkeySheetModal');
+  if (!overlay) return;
+  const isOpen = overlay.classList.toggle('active');
+  overlay.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  if (isOpen) {
+    requestAnimationFrame(() => {
+      (overlay.querySelector('.ui-dialog-button') as HTMLElement | null)?.focus();
+    });
+  }
+}
+
+export function closeHotkeySheet(): void {
+  const overlay = document.getElementById('hotkeySheetModal');
+  if (!overlay) return;
+  overlay.classList.remove('active');
+  overlay.setAttribute('aria-hidden', 'true');
+}
 
 // ── Input meta ──
 export function updateInputMeta(textarea: HTMLTextAreaElement): void {
@@ -1075,9 +804,9 @@ export async function trainWritingStyle(): Promise<void> {
     if (welcome) welcome.style.display = 'none';
     if (chatMessages) chatMessages.insertAdjacentHTML('beforeend', renderMessage('assistant', summary, { task: 'STYLE_PROFILE' }));
     scrollToBottomForce();
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification('写作风格已更新', 'success', 1800);
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification('写作风格已更新', 'success', 1800);
   } catch (err: any) {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification(`风格学习失败: ${err.message || err}`, 'error', 2600);
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification(`风格学习失败: ${err.message || err}`, 'error', 2600);
   } finally {
     const btn = document.getElementById('writingStyleBtn') as HTMLButtonElement | null;
     if (btn) { btn.disabled = false; btn.textContent = '✍️ 风格学习'; }
@@ -1085,52 +814,51 @@ export async function trainWritingStyle(): Promise<void> {
 }
 
 // ── Backward compat ──
-(window as any).renderChatHistory = renderChatHistory;
-(window as any).renderMessage = renderMessage;
-(window as any).copyMessageText = copyMessageText;
-(window as any).resendMessage = resendMessage;
-(window as any).editUserMessage = editUserMessage;
-(window as any).regenMessage = regenMessage;
-(window as any).updateFilePreview = updateFilePreview;
-(window as any).removeSingleFile = removeSingleFile;
-(window as any).setSelectedFiles = setSelectedFiles;
-(window as any).handleFileSelect = handleFileSelect;
-(window as any).removeFile = removeFile;
-(window as any).handleDragOver = handleDragOver;
-(window as any).handleDragLeave = handleDragLeave;
-(window as any).handleDrop = handleDrop;
-(window as any).autoResize = autoResize;
-(window as any).generateSessionName = generateSessionName;
-(window as any).autoTitleSession = autoTitleSession;
-(window as any).openChatSearch = openChatSearch;
-(window as any).closeChatSearch = closeChatSearch;
-(window as any).runChatSearch = runChatSearch;
-(window as any).chatSearchNext = chatSearchNext;
-(window as any).chatSearchPrev = chatSearchPrev;
-(window as any).clearChatSearchHighlights = clearChatSearchHighlights;
-(window as any).handleAtMention = handleAtMention;
-(window as any).pinContextFile = pinContextFile;
-(window as any).removeContextFile = removeContextFile;
-(window as any).openSavedWorkspaceFile = openSavedWorkspaceFile;
-(window as any).handleSlashCommand = handleSlashCommand;
-(window as any).selectSlashCommand = selectSlashCommand;
-(window as any).updateInputMeta = updateInputMeta;
-(window as any).initCapabilityButtons = initCapabilityButtons;
-(window as any).updateTaskIndicator = updateTaskIndicator;
-(window as any).showLoading = showLoading;
-(window as any).hideLoading = hideLoading;
-(window as any).showMiniGame = showMiniGame;
-(window as any).hideMiniGame = hideMiniGame;
-(window as any).copyCode = copyCode;
-(window as any).copyTable = copyTable;
-(window as any).openInArtifact = openInArtifact;
-(window as any).downloadPPT = downloadPPT;
-(window as any).renderSourcesPanel = renderSourcesPanel;
-(window as any).appendSourcesToBody = appendSourcesToBody;
-(window as any).escapeHtml = escapeHtml;
-(window as any).parseMarkdown = parseMarkdown;
-(window as any).toggleHotkeySheet = toggleHotkeySheet;
-(window as any).closeHotkeySheet = closeHotkeySheet;
-(window as any).trainWritingStyle = trainWritingStyle;
-(window as any)._fileIcon = _fileIcon;
-(window as any)._newlyCreatedSessions = _newlyCreatedSessions;
+getFeatureRegistry().renderChatHistory = renderChatHistory;
+getFeatureRegistry().renderMessage = renderMessage;
+getFeatureRegistry().copyMessageText = copyMessageText;
+getFeatureRegistry().resendMessage = resendMessage;
+getFeatureRegistry().editUserMessage = editUserMessage;
+getFeatureRegistry().regenMessage = regenMessage;
+getFeatureRegistry().updateFilePreview = updateFilePreview;
+getFeatureRegistry().removeSingleFile = removeSingleFile;
+getFeatureRegistry().setSelectedFiles = setSelectedFiles;
+getFeatureRegistry().handleFileSelect = handleFileSelect;
+getFeatureRegistry().removeFile = removeFile;
+getFeatureRegistry().handleDragOver = handleDragOver;
+getFeatureRegistry().handleDragLeave = handleDragLeave;
+getFeatureRegistry().handleDrop = handleDrop;
+getFeatureRegistry().autoResize = autoResize;
+getFeatureRegistry().generateSessionName = generateSessionName;
+getFeatureRegistry().autoTitleSession = autoTitleSession;
+getFeatureRegistry().openChatSearch = openChatSearch;
+getFeatureRegistry().closeChatSearch = closeChatSearch;
+getFeatureRegistry().runChatSearch = runChatSearch;
+getFeatureRegistry().chatSearchNext = chatSearchNext;
+getFeatureRegistry().chatSearchPrev = chatSearchPrev;
+getFeatureRegistry().clearChatSearchHighlights = clearChatSearchHighlights;
+getFeatureRegistry().handleAtMention = handleAtMention;
+getFeatureRegistry().pinContextFile = pinContextFile;
+getFeatureRegistry().removeContextFile = removeContextFile;
+getFeatureRegistry().renderContextFileBar = renderContextFileBar;
+getFeatureRegistry().openSavedWorkspaceFile = openSavedWorkspaceFile;
+getFeatureRegistry().handleSlashCommand = handleSlashCommand;
+getFeatureRegistry().selectSlashCommand = selectSlashCommand;
+getFeatureRegistry().updateInputMeta = updateInputMeta;
+getFeatureRegistry().initCapabilityButtons = initCapabilityButtons;
+getFeatureRegistry().updateTaskIndicator = updateTaskIndicator;
+getFeatureRegistry().showLoading = showLoading;
+getFeatureRegistry().hideLoading = hideLoading;
+getFeatureRegistry().copyCode = copyCode;
+getFeatureRegistry().copyTable = copyTable;
+getFeatureRegistry().openInArtifact = openInArtifact;
+getFeatureRegistry().downloadPPT = downloadPPT;
+getFeatureRegistry().renderSourcesPanel = renderSourcesPanel;
+getFeatureRegistry().appendSourcesToBody = appendSourcesToBody;
+getFeatureRegistry().escapeHtml = escapeHtml;
+getFeatureRegistry().parseMarkdown = parseMarkdown;
+getFeatureRegistry().toggleHotkeySheet = toggleHotkeySheet;
+getFeatureRegistry().closeHotkeySheet = closeHotkeySheet;
+getFeatureRegistry().trainWritingStyle = trainWritingStyle;
+getFeatureRegistry()._fileIcon = _fileIcon;
+getFeatureRegistry()._newlyCreatedSessions = _newlyCreatedSessions;

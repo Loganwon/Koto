@@ -49,4 +49,20 @@ def sanitize_public_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
     ai["default_model"] = normalize_public_model(ai.get("default_model"))
     for legacy_key in ("gemini_model", "gemini_api_key", "google_api_key"):
         ai.pop(legacy_key, None)
+
+    # Sync ai.use_local_only with the canonical model_mode so the Settings
+    # checkbox and every other consumer see one consistent value.
+    is_local = payload["model_mode"] == "local"
+    ai["use_local_only"] = is_local
+
+    # Clean stale cloud model tag from ai.local_model when in local mode.
+    # The canonical local_model key lives at the top level; ai.local_model
+    # may carry a leftover cloud value that confuses readers.
+    if is_local:
+        top_local = str(payload.get("local_model") or "").strip()
+        if top_local:
+            ai["local_model"] = top_local
+    else:
+        ai["local_model"] = ""
+
     return payload

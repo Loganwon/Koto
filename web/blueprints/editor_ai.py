@@ -7,19 +7,27 @@ import time
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
-from web.runtime_context import (
-    get_configured_local_model_id,
-    get_client_proxy,
-    get_create_client,
-    get_local_executor,
-    get_model_id,
-    get_smart_dispatcher,
-    get_types,
-    normalize_model_mode,
+from app.core.llm.local_model_runtime import get_configured_local_model_tag
+from app.core.llm.model_mode import normalize_model_mode
+from app.core.llm.model_selection import (
+    get_configured_cloud_model,
     resolve_requested_model_id,
 )
-from web.editor_ai_text import clean_selection_text
-from web.file_task_stream import safe_editor_sse, stream_file_task_request
+from app.core.llm.provider_compat import types as provider_types
+from web.tasks.local_executor import LocalExecutor
+from app.core.services.editor_ai_text import clean_selection_text
+from app.core.services.file_task_stream import stream_file_task_request
+from web.sse.sanitizer import safe_sse as _safe_sse
+
+
+
+def _sse_response(stream):
+    """Wrap a generator into a Flask SSE (Server-Sent Events) Response."""
+    return Response(
+        stream_with_context(stream),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 editor_ai_bp = Blueprint("editor_ai", __name__)
@@ -68,142 +76,14 @@ _WORKSPACE_FILE_TASK_ROUTE_TYPES = {
     "VISION",
 }
 
-_WORKSPACE_ROUTE_JUDGE_INSTRUCTION = """你是 Koto 文件助手的统一路由判断器。
-
-你的任务是根据用户输入、当前文件上下文、选区和最近对话，判断应该进入哪条产品路径。
-
-第一层只允许两类 route_kind:
-- direct_response: 只需要直接回应或轻量产品动作，不需要结构化任务流程。包括 chat、web_search、能确定目标的 open_file、受控本地系统动作 system_action。
-- complex_task: 涉及文件内容读取、文件生成/修改/批注/转换/对比，或需要多步骤处理、监管、核验的任务。
-
-第二层 route 只表示 direct_response 或 complex_task 内的具体执行路径:
-- light_chat: direct_response，普通对话、概念解释、追问、无需文件执行过程的回答。
-- web_search: direct_response，需要外部实时信息、网页资料、来源核查或联网检索的回答。
-- open_file: direct_response，用户的主要意图是打开本地文件，且上下文中能确定目标文件。
-- system_action: direct_response，用户的主要意图是执行受控本地系统动作，例如查看时间/系统状态，或打开白名单桌面应用。
-- file_task: complex_task，需要读取、分析、生成、修改、批注、转换、对比或保存文件；或者需要展示结构化任务流程。
-
-重要原则:
-- 你必须基于语义和上下文判断，不能因为单个词直接决定 route。
-- 词汇信号只能作为提示，不是规则。例如时效词、价格、新闻、天气、打开、生成、修改、总结、分析、文件名等都只是线索。
-- 如果用户只是闲聊或问通用知识，即使旁边有打开的文档，也可以选择 light_chat。
-- 如果用户要求处理当前文档、附件、选区或产出文件，应选择 file_task。
-- 如果回答必须知道当前文件/附件/选区里的具体内容，即使用户只要求总结、解释、问答或只读分析，也应选择 file_task；不要用 light_chat 代替真实文件读取。
-- 如果用户需要实时/最新/网页来源，应选择 web_search。
-
-只输出 JSON:
-{
-  "route_kind": "direct_response | complex_task",
-  "route": "light_chat | web_search | file_task | open_file | system_action",
-  "task_type": "CHAT | WEB_SEARCH | FILE_TASK | SYSTEM",
-  "confidence": 0.0,
-  "reason": "一句话说明",
-  "target_path": null,
-  "hint": null
-}
-"""
-
-
-def _safe_sse(payload: dict) -> str:
-    return safe_editor_sse(payload)
-
-
-def _sse_response(stream):
-    return Response(
-        stream_with_context(stream),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-def _compact_route_text(value, limit: int = 1200) -> str:
-    text = str(value or "").strip()
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "..."
-
-
-def _compact_workspace_route_payload(data: dict) -> dict:
-    history = data.get("history") if isinstance(data.get("history"), list) else []
-    files = data.get("files") if isinstance(data.get("files"), list) else []
-    compact_files = []
-    for item in files[:8]:
-        if not isinstance(item, dict):
-            continue
-        compact_files.append(
-            {
-                "name": _compact_route_text(item.get("name"), 160),
-                "path": _compact_route_text(item.get("path"), 240),
-                "type": _compact_route_text(item.get("type") or item.get("file_type"), 40),
-                "target": bool(item.get("target")),
-                "content_preview": _compact_route_text(item.get("content") or item.get("content_preview"), 600),
-            }
-        )
-
-    compact_history = []
-    for turn in history[-8:]:
-        if not isinstance(turn, dict):
-            continue
-        compact_history.append(
-            {
-                "role": _compact_route_text(turn.get("role"), 24),
-                "content": _compact_route_text(turn.get("content") or turn.get("text"), 900),
-            }
-        )
-
-    current_file = data.get("current_file") if isinstance(data.get("current_file"), dict) else None
-    return {
-        "message": _compact_route_text(data.get("text") or data.get("message"), 2000),
-        "has_selection": bool(data.get("has_selection")),
-        "selection_preview": _compact_route_text(data.get("selection_preview"), 800),
-        "files": compact_files,
-        "current_file": {
-            "name": _compact_route_text(current_file.get("name"), 160),
-            "path": _compact_route_text(current_file.get("path"), 240),
-            "type": _compact_route_text(current_file.get("type") or current_file.get("file_type"), 40),
-        }
-        if current_file
-        else None,
-        "history": compact_history,
-    }
-
-
-def _extract_route_response_text(response) -> str:
-    if isinstance(response, dict):
-        for key in ("content", "text", "response", "message"):
-            text = response.get(key)
-            if isinstance(text, str) and text.strip():
-                return text.strip()
-    text = getattr(response, "text", None)
-    if isinstance(text, str) and text.strip():
-        return text.strip()
-    candidates = getattr(response, "candidates", None) or []
-    for candidate in candidates:
-        content = getattr(candidate, "content", None)
-        parts = getattr(content, "parts", None) or []
-        joined = "".join(str(getattr(part, "text", "") or "") for part in parts).strip()
-        if joined:
-            return joined
-    return ""
-
-
-def _parse_route_json(raw: str) -> dict | None:
-    source = str(raw or "").strip()
-    if not source:
-        return None
-    try:
-        parsed = json.loads(source)
-        return parsed if isinstance(parsed, dict) else None
-    except Exception:
-        pass
-    match = re.search(r"\{[\s\S]*\}", source)
-    if not match:
-        return None
-    try:
-        parsed = json.loads(match.group(0))
-        return parsed if isinstance(parsed, dict) else None
-    except Exception:
-        return None
+def _compact_route_text(text, max_chars: int) -> str:
+    """Normalize free-form route metadata so UI state stays compact."""
+    if text is None:
+        return ""
+    normalized = " ".join(str(text).split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 1] + "\u2026"
 
 
 def _normalize_workspace_route(data: dict | None, *, source: str, fallback_task_type: str = "") -> dict | None:
@@ -276,18 +156,6 @@ def _canonical_workspace_task_type(route: str, task_type: str = "") -> str:
     return "FILE_TASK"
 
 
-def _workspace_route_from_task_type(task_type: str) -> str:
-    normalized = str(task_type or "").strip().upper()
-    if normalized == "WEB_SEARCH":
-        return "web_search"
-    if normalized == "SYSTEM":
-        return "system_action"
-    if normalized == "CHAT":
-        return "light_chat"
-    if normalized in _WORKSPACE_FILE_TASK_ROUTE_TYPES:
-        return "file_task"
-    return "file_task"
-
 
 _FILE_CONTEXT_TASK_RE = re.compile(
     r"(?:当前(?:打开的?)?(?:文件|文档|表格|演示稿)?|这个(?:文件|文档|表格|演示稿)|"
@@ -325,9 +193,9 @@ def _deterministic_workspace_route(data: dict) -> dict | None:
     if not text:
         return None
     try:
-        local_executor = get_local_executor()
+        local_executor = LocalExecutor
     except Exception:
-        from web.local_executor import LocalExecutor as local_executor
+        from web.tasks.local_executor import LocalExecutor as local_executor
     if local_executor and local_executor.is_system_command(text):
         return _normalize_workspace_route(
             {
@@ -365,148 +233,6 @@ def _deterministic_workspace_route(data: dict) -> dict | None:
         )
     return None
 
-
-def _fallback_workspace_route(data: dict) -> dict:
-    text = str(data.get("text") or data.get("message") or "").strip()
-    history = data.get("history") if isinstance(data.get("history"), list) else []
-    files = data.get("files") if isinstance(data.get("files"), list) else []
-    current_file = data.get("current_file") if isinstance(data.get("current_file"), dict) else None
-    file_type = ""
-    for item in files:
-        if isinstance(item, dict) and (item.get("type") or item.get("file_type")):
-            file_type = str(item.get("type") or item.get("file_type") or "")
-            break
-    if not file_type and current_file:
-        file_type = str(current_file.get("type") or current_file.get("file_type") or "")
-    file_context = {
-        "has_file": bool(files or current_file or data.get("has_selection")),
-        "file_type": file_type,
-    }
-    try:
-        try:
-            dispatcher = get_smart_dispatcher()
-        except RuntimeError:
-            from app.core.routing.smart_dispatcher import SmartDispatcher as dispatcher
-
-        task_type, route_method, context_info = dispatcher.analyze(
-            text,
-            history,
-            file_context=file_context,
-        )
-        route = _workspace_route_from_task_type(task_type)
-        canonical_task_type = _canonical_workspace_task_type(route, task_type)
-        return {
-            "ok": True,
-            "route_kind": _canonical_workspace_route_kind(route),
-            "base_task_type": "DIRECT_RESPONSE"
-            if _canonical_workspace_route_kind(route) == "direct_response"
-            else "COMPLEX_TASK",
-            "route": route,
-            "task_type": canonical_task_type,
-            "source_task_type": str(task_type or "").strip().upper()
-            if str(task_type or "").strip().upper() != canonical_task_type
-            else "",
-            "confidence": 0.0,
-            "reason": "模型路由不可用，已使用后端 SmartDispatcher 兜底。",
-            "target_path": "",
-            "hint": (context_info or {}).get("skill_prompt") if isinstance(context_info, dict) else None,
-            "route_source": str(route_method or "smart_dispatcher_fallback"),
-            "keyword_policy": "hint_only",
-        }
-    except Exception as exc:
-        _logger.warning("[workspace-route] fallback dispatcher failed: %s", exc)
-        return {
-            "ok": True,
-            "route_kind": "complex_task",
-            "base_task_type": "COMPLEX_TASK",
-            "route": "file_task",
-            "task_type": "FILE_TASK",
-            "confidence": 0.0,
-            "reason": "路由服务暂不可用，保持文件任务路径。",
-            "target_path": "",
-            "hint": None,
-            "route_source": "fallback:file_task",
-            "keyword_policy": "hint_only",
-        }
-
-
-def _model_workspace_route(data: dict) -> dict | None:
-    requested_model = str(data.get("model_id") or "").strip()
-    requested_mode = normalize_model_mode(data.get("model_mode"), default="deepseek")
-    payload = _compact_workspace_route_payload(data)
-    prompt = "请判断以下 Koto 工作区消息应该进入哪条路径。\n\n上下文 JSON:\n" + json.dumps(
-        payload,
-        ensure_ascii=False,
-    )
-    try:
-        from app.core.llm.model_selection import get_provider_for_model_mode
-        route_provider = get_provider_for_model_mode(requested_mode)
-    except Exception:
-        route_provider = "deepseek" if requested_mode == "deepseek" else "gemini"
-
-    if route_provider == "deepseek" or requested_model.lower().startswith("deepseek"):
-        from app.core.llm.deepseek_config import DEEPSEEK_DEFAULT_MODEL
-        from app.core.llm.provider_factory import get_llm_provider
-
-        route_provider = "deepseek"
-        model_id = requested_model or DEEPSEEK_DEFAULT_MODEL
-        provider = get_llm_provider(provider=route_provider, model=model_id)
-        response = provider.generate_content(
-            prompt=prompt,
-            model=model_id,
-            system_instruction=_WORKSPACE_ROUTE_JUDGE_INSTRUCTION,
-            temperature=0.1,
-            max_tokens=600,
-            extra_body={"thinking": {"type": "disabled"}},
-            response_format={"type": "json_object"},
-        )
-        parsed = _parse_route_json(_extract_route_response_text(response))
-        return _normalize_workspace_route(parsed, source=f"model:{model_id}")
-
-    client = get_client_proxy()
-    types = get_types()
-    if client is None or types is None or not hasattr(client, "models"):
-        return None
-
-    model_id = resolve_requested_model_id(
-        requested_model,
-        fallback_model=get_model_id("CHAT", "gemini-2.5-flash"),
-        task_type="CHAT",
-    )
-    config = types.GenerateContentConfig(
-        system_instruction=_WORKSPACE_ROUTE_JUDGE_INSTRUCTION,
-        max_output_tokens=220,
-        temperature=0.1,
-        response_mime_type="application/json",
-    )
-    source_model_id = model_id
-    try:
-        response = client.models.generate_content(
-            model=model_id,
-            contents=prompt,
-            config=config,
-        )
-    except Exception as exc:
-        exc_text = str(exc)
-        if (
-            "model is required" not in exc_text
-            and "Ollama" not in exc_text
-            and "not found" not in exc_text
-            and "not supported for generateContent" not in exc_text
-        ):
-            raise
-        create_client = get_create_client()
-        if not callable(create_client):
-            raise
-        cloud_model_id = model_id if model_id.startswith("gemini-") else "gemini-2.5-flash"
-        source_model_id = cloud_model_id
-        response = create_client().models.generate_content(
-            model=cloud_model_id,
-            contents=prompt,
-            config=config,
-        )
-    parsed = _parse_route_json(_extract_route_response_text(response))
-    return _normalize_workspace_route(parsed, source=f"model:{source_model_id}")
 
 
 def _truncate_context(text: str, max_chars: int = 12000) -> str:
@@ -576,7 +302,7 @@ def _build_editor_prompt(
 
 
 def _editor_agent_request_from_payload(data: dict):
-    from app.core.agent.lifecycle import AgentRequest
+    from app.core.agent.kernel import AgentRequest
 
     action = str(data.get("action") or "").strip().lower()
     selection = str(data.get("selection") or "")
@@ -586,12 +312,12 @@ def _editor_agent_request_from_payload(data: dict):
     model_id = str(data.get("model_id") or "").strip()
     preferred_model = resolve_requested_model_id(
         model_id,
-        fallback_model=get_model_id("CHAT", ""),
+        fallback_model=get_configured_cloud_model(fallback_model="deepseek-chat"),
         task_type="CHAT",
     )
     local_model = ""
     try:
-        local_model = get_configured_local_model_id()
+        local_model = get_configured_local_model_tag()
     except Exception as exc:
         _logger.debug("[editor-ai] local model config unavailable: %s", exc)
 
@@ -663,7 +389,7 @@ def editor_ai_history():
 
 @editor_ai_bp.route("/api/workspace/ai/route-intent", methods=["POST"])
 def workspace_ai_route_intent():
-    """Model-first workspace assistant route decision."""
+    """Resolve explicit transport facts; let FileTaskRuntime judge ambiguity."""
     data = request.get_json(silent=True) or {}
     text = str(data.get("text") or data.get("message") or "").strip()
     if not text:
@@ -680,7 +406,9 @@ def workspace_ai_route_intent():
         performance.update(
             {
                 "route_path": route_path,
-                "route_decision_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "route_decision_ms": round(
+                    (time.perf_counter() - started_at) * 1000, 2
+                ),
             }
         )
         result["performance"] = performance
@@ -689,14 +417,22 @@ def workspace_ai_route_intent():
     deterministic_route = _deterministic_workspace_route(data)
     if deterministic_route:
         return _timed_route_response(deterministic_route, "deterministic")
-    try:
-        model_route = _model_workspace_route(data)
-        if model_route:
-            return _timed_route_response(model_route, "model")
-    except Exception as exc:
-        _logger.warning("[workspace-route] model route failed: %s", exc)
-    return _timed_route_response(_fallback_workspace_route(data), "fallback")
 
+    result = {
+        "ok": True,
+        "route_kind": "complex_task",
+        "base_task_type": "COMPLEX_TASK",
+        "route": "file_task",
+        "task_type": "FILE_TASK",
+        "source_task_type": "",
+        "confidence": 1.0,
+        "reason": "模糊工作区请求交由 FileTaskRuntime 的模型与工具循环判断。",
+        "target_path": "",
+        "hint": None,
+        "route_source": "kernel_default",
+        "keyword_policy": "hint_only",
+    }
+    return _timed_route_response(result, "kernel_default")
 
 def _stream_editor_quick_action(data: dict):
     """Stream a validated editor quick action without re-reading the request."""
@@ -745,21 +481,12 @@ def editor_ai_task_stream():
         return jsonify({"error": "Missing 'task' parameter"}), 400
     data["task"] = task
 
-    quick_action_mode = str(data.get("options", {}).get("quick_action_mode") or "").strip().lower()
-    if not quick_action_mode:
-        quick_action_mode = str(data.get("quick_action_mode") or "").strip().lower()
-    has_files = bool(data.get("files") or data.get("target_path"))
-    is_text_quick_action = quick_action_mode in {
-        "simple", "polish", "translate", "summary", "rewrite", "continue", "check",
-    }
-    if is_text_quick_action and not has_files:
-        action = quick_action_mode if quick_action_mode != "simple" else "polish"
-        data["action"] = action
-        raw_sel = str(data.get("selection") or "")
-        if raw_sel:
-            data["selection"] = clean_selection_text(raw_sel)
-        return _stream_editor_quick_action(data)
-
+    # This endpoint has one lifecycle contract: every request is persisted in
+    # TaskLedger and emits the canonical file-task SSE sequence.  Text quick
+    # actions used to fall back to the non-persisted editor stream here.  The
+    # workspace task runner would then try to resume the client-generated task
+    # id through /api/tasks/<id>/stream and receive a 404 because no ledger row
+    # existed.  /api/editor/ai/stream remains the explicit editor-only API.
     return _sse_response(stream_file_task_request(data))
 
 
@@ -839,23 +566,3 @@ def editor_ai_chart():
             yield _safe_sse({"type": "error", "text": f"图表生成失败：{exc}"})
 
     return _sse_response(generate())
-
-
-@editor_ai_bp.route("/api/editor/ai/skill-list", methods=["GET"])
-def editor_skill_list():
-    """Return editor toolbar skills backed by the native runtime."""
-    try:
-        from app.core.skills.skill_manager import SkillManager
-
-        file_type = request.args.get("file_type", "").strip().lower()
-        all_skills = SkillManager.list_runtime_entries().values()
-        enabled = [s for s in all_skills if s.get("enabled", True)]
-        if file_type:
-            enabled = [s for s in enabled if file_type in (s.get("file_types") or s.get("tags") or [])]
-        return jsonify({"skills": enabled})
-    except Exception as exc:
-        _logger.exception("[editor-ai] skill-list failed")
-        return jsonify({
-            "error": "skill_list_unavailable",
-            "message": f"技能列表加载失败：{type(exc).__name__}: {exc}",
-        }), 500

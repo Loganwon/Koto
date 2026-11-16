@@ -26,8 +26,7 @@ export type LogCategory =
   | 'pptx-editor'
   | 'xlsx-editor'
   | 'docx-review'
-  | 'skills'
-  | 'marketplace'
+  | 'addons'
   | 'router'
   | 'state'
   | 'auth'
@@ -82,6 +81,7 @@ class Logger {
     const prefix = `[Koto][${category}]`;
     const consoleFn = level === 'error' ? console.error
       : level === 'warn' ? console.warn
+      // eslint-disable-next-line no-console -- this module is the centralized logging boundary
       : level === 'info' ? console.info
       : console.debug;
 

@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Unit tests for the _load_history helper in app.api.agent_routes."""
+"""Unit tests for the canonical KernelAgent history helper."""
 
 import json
 import os
 import shutil
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from app.api.agent_routes import _load_history
+from app.core.agent.kernel_agent_service import load_kernel_history
 
 
 @pytest.fixture()
@@ -23,12 +24,15 @@ def temp_chat_dir():
 class TestLoadHistory:
     def test_empty_session_id_returns_empty(self):
         """_load_history('') returns [] without touching the filesystem."""
-        assert _load_history("") == []
+        assert load_kernel_history("") == []
 
     def test_nonexistent_session_returns_empty(self, temp_chat_dir):
         """No matching .json file → returns []."""
-        with patch("app.api.agent_routes._get_chats_dir", return_value=temp_chat_dir):
-            result = _load_history("nonexistent_abc123")
+        with patch(
+            "app.core.agent.kernel_agent_service._chats_dir",
+            Path(temp_chat_dir),
+        ):
+            result = load_kernel_history("nonexistent_abc123")
         assert result == []
 
     def test_loads_messages_from_file(self, temp_chat_dir):
@@ -41,8 +45,11 @@ class TestLoadHistory:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        with patch("app.api.agent_routes._get_chats_dir", return_value=temp_chat_dir):
-            result = _load_history("test_session")
+        with patch(
+            "app.core.agent.kernel_agent_service._chats_dir",
+            Path(temp_chat_dir),
+        ):
+            result = load_kernel_history("test_session")
 
         assert len(result) == 2
         assert result[0] == {"role": "user", "content": "hello"}
@@ -67,8 +74,11 @@ class TestLoadHistory:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        with patch("app.api.agent_routes._get_chats_dir", return_value=temp_chat_dir):
-            result = _load_history("budget_session", token_budget=60)
+        with patch(
+            "app.core.agent.kernel_agent_service._chats_dir",
+            Path(temp_chat_dir),
+        ):
+            result = load_kernel_history("budget_session", token_budget=60)
 
         assert len(result) == 2
         # Newest messages are prioritised
@@ -82,7 +92,10 @@ class TestLoadHistory:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        with patch("app.api.agent_routes._get_chats_dir", return_value=temp_chat_dir):
-            result = _load_history("long_session", max_turns=5)
+        with patch(
+            "app.core.agent.kernel_agent_service._chats_dir",
+            Path(temp_chat_dir),
+        ):
+            result = load_kernel_history("long_session", max_turns=5)
 
         assert len(result) <= 5

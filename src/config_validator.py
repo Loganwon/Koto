@@ -24,6 +24,34 @@ def validate_startup_config():
     errors = []
     warnings = []
 
+    deploy_mode = os.environ.get("KOTO_DEPLOY_MODE", "local").strip().lower()
+    auth_enabled = os.environ.get("KOTO_AUTH_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    bind_host = os.environ.get("KOTO_BIND_HOST", "").strip()
+    unsafe_bind = bind_host in {"0.0.0.0", "::", "*"}
+    allow_unsafe = os.environ.get("KOTO_ALLOW_UNSAFE_BIND", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if deploy_mode in {"cloud", "production", "prod"} and not auth_enabled:
+        errors.append("cloud/production mode requires KOTO_AUTH_ENABLED=true")
+    if unsafe_bind and not auth_enabled and not allow_unsafe:
+        errors.append(
+            "wildcard KOTO_BIND_HOST requires authentication; set "
+            "KOTO_ALLOW_UNSAFE_BIND=true only for an isolated test environment"
+        )
+    if deploy_mode in {"cloud", "production", "prod"}:
+        jwt_secret = os.environ.get("KOTO_JWT_SECRET", "")
+        if len(jwt_secret) < 32:
+            errors.append(
+                "cloud/production mode requires KOTO_JWT_SECRET with at least 32 characters"
+            )
+
     # 1. Validate PORT
     port_str = os.environ.get("KOTO_PORT", os.environ.get("PORT", "5000"))
     try:

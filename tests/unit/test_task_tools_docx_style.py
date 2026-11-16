@@ -5,7 +5,7 @@ import json
 
 
 def test_apply_docx_style_returns_user_visible_fallback_warning():
-    from app.core.agent.task_tools_docx_style import apply_docx_style
+    from app.core.agent.toolkits.foundation.docx_style import apply_docx_style
 
     class MissingStyleTarget:
         @property

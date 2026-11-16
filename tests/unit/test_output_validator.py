@@ -145,25 +145,6 @@ class TestOutputValidatorRepetition:
 
 
 @pytest.mark.unit
-class TestOutputValidatorSkillId:
-    def test_skill_id_does_not_crash_without_manager(self, monkeypatch):
-        """Even if SkillManager is unavailable, validate should not raise."""
-        import app.core.security.output_validator as mod
-
-        monkeypatch.setattr(
-            mod,
-            "_LEAK_RE",
-            [],
-            raising=False,
-        )
-        result = OutputValidator.validate(
-            "## 摘要\n\n内容如下：\n- 要点一\n- 要点二",
-            skill_id="nonexistent_skill_id",
-        )
-        assert result.action in ("PASS", "WARN", "REFORMAT", "RETRY")
-
-
-@pytest.mark.unit
 class TestOutputValidatorLogging:
     """Verify that OutputValidator emits the correct log records for each decision path."""
 

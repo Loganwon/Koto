@@ -2,7 +2,7 @@
  * Find/replace for DOCX and PPTX editors.
  */
 
-import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import { getFeatureRegistry, registerFeatures } from '../shared/feature-registry';
 
 interface DocxMatch {
   from: number;
@@ -405,7 +405,7 @@ function _findReplaceApiMethod(scope: string, action: string): string {
 
 function _invokeFindReplaceAction(scope: string, action: string, ...args: any[]): void {
   const method = _findReplaceApiMethod(scope, action);
-  const handler = method ? getWorkspaceApi()[method] : null;
+  const handler = method ? getFeatureRegistry()[method] : null;
   if (typeof handler === 'function') handler(...args);
 }
 
@@ -460,15 +460,15 @@ function _installFindReplaceActionDelegation(): void {
 }
 
 export function installWorkspaceFindReplace(deps: FindReplaceDeps): void {
-  const workspaceApi = getWorkspaceApi();
+  const workspaceApi = getFeatureRegistry();
   if (workspaceApi.__workspaceFindReplaceInstalled) return;
   workspaceApi.__workspaceFindReplaceInstalled = true;
 
-  publishWorkspaceApi({
+  registerFeatures({
     ...installDocxFindReplace(deps),
     ...installPptxFindReplace(deps),
   });
 }
 
-publishWorkspaceApi({ installWorkspaceFindReplace });
+registerFeatures({ installWorkspaceFindReplace });
 _installFindReplaceActionDelegation();

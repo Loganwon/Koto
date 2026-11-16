@@ -1,10 +1,10 @@
 """
 Unit tests for web modules batch 2:
-  - FileConverter  (web.file_converter)
-  - LocalExecutor  (web.local_executor)
-  - FileProcessor  (web.file_processor)
+  - FileConverter  (app.core.file.exporters.converter)
+  - LocalExecutor  (web.tasks.local_executor)
+  - FileProcessor  (web.files.file_processor)
   - Removed microphone STT module
-  - ImageGenerator (web.image_generator)
+  - ImageGenerator (app.core.services.image_generator)
 
 All external services (APIs, file I/O, audio libs, COM) are mocked.
 """
@@ -39,7 +39,7 @@ class TestFileConverterConstants:
     """Tests for module-level constants and mappings."""
 
     def test_conversion_matrix_has_expected_source_formats(self):
-        from web.file_converter import CONVERSION_MATRIX
+        from app.core.file.exporters.converter import CONVERSION_MATRIX
 
         expected_keys = {
             ".docx",
@@ -63,7 +63,7 @@ class TestFileConverterConstants:
         assert expected_keys.issubset(set(CONVERSION_MATRIX.keys()))
 
     def test_format_aliases_maps_common_names(self):
-        from web.file_converter import FORMAT_ALIASES
+        from app.core.file.exporters.converter import FORMAT_ALIASES
 
         assert FORMAT_ALIASES["word"] == ".docx"
         assert FORMAT_ALIASES["pdf"] == ".pdf"
@@ -71,26 +71,18 @@ class TestFileConverterConstants:
         assert FORMAT_ALIASES["csv"] == ".csv"
 
     def test_image_exts_contains_common_types(self):
-        from web.file_converter import IMAGE_EXTS
+        from app.core.file.exporters.converter import IMAGE_EXTS
 
         assert ".jpg" in IMAGE_EXTS
         assert ".png" in IMAGE_EXTS
         assert ".webp" in IMAGE_EXTS
-
-    def test_cn_format_patterns_compiled(self):
-        from web.file_converter import CN_FORMAT_PATTERNS
-
-        assert len(CN_FORMAT_PATTERNS) > 0
-        for pat, ext in CN_FORMAT_PATTERNS:
-            assert hasattr(pat, "search")
-            assert ext.startswith(".")
 
 
 @pytest.mark.unit
 class TestGetSupportedConversions:
 
     def test_returns_dict_of_lists(self):
-        from web.file_converter import get_supported_conversions
+        from app.core.file.exporters.converter import get_supported_conversions
 
         result = get_supported_conversions()
         assert isinstance(result, dict)
@@ -98,7 +90,10 @@ class TestGetSupportedConversions:
             assert isinstance(val, list)
 
     def test_returns_copy_not_reference(self):
-        from web.file_converter import CONVERSION_MATRIX, get_supported_conversions
+        from app.core.file.exporters.converter import (
+            CONVERSION_MATRIX,
+            get_supported_conversions,
+        )
 
         result = get_supported_conversions()
         result[".docx"].append(".fake")
@@ -109,14 +104,14 @@ class TestGetSupportedConversions:
 class TestConvertFunction:
 
     def test_file_not_exists_returns_error(self):
-        from web.file_converter import convert
+        from app.core.file.exporters.converter import convert
 
         result = convert("/nonexistent/file.docx", "pdf")
         assert result["success"] is False
         assert "不存在" in result["error"]
 
     def test_same_format_returns_error(self, tmp_path):
-        from web.file_converter import convert
+        from app.core.file.exporters.converter import convert
 
         f = tmp_path / "test.pdf"
         f.write_text("hello")
@@ -125,7 +120,7 @@ class TestConvertFunction:
         assert "相同" in result["error"]
 
     def test_unsupported_source_format(self, tmp_path):
-        from web.file_converter import convert
+        from app.core.file.exporters.converter import convert
 
         f = tmp_path / "test.xyz"
         f.write_text("hello")
@@ -134,7 +129,7 @@ class TestConvertFunction:
         assert "不支持" in result["error"]
 
     def test_unsupported_target_format(self, tmp_path):
-        from web.file_converter import convert
+        from app.core.file.exporters.converter import convert
 
         f = tmp_path / "test.docx"
         f.write_bytes(b"fake docx")
@@ -143,11 +138,11 @@ class TestConvertFunction:
         assert "不支持" in result["error"]
 
     def test_successful_dispatch(self, tmp_path):
-        from web.file_converter import convert
+        from app.core.file.exporters.converter import convert
 
         f = tmp_path / "test.txt"
         f.write_text("Hello World", encoding="utf-8")
-        with patch("web.file_converter._dispatch") as mock_dispatch:
+        with patch("app.core.file.exporters.converter._dispatch") as mock_dispatch:
             out_path = str(tmp_path / "test.md")
             mock_dispatch.return_value = (out_path, "")
             result = convert(str(f), "md", output_dir=str(tmp_path))
@@ -156,21 +151,24 @@ class TestConvertFunction:
         assert result["to_format"] == "md"
 
     def test_dispatch_exception_returns_error(self, tmp_path):
-        from web.file_converter import convert
+        from app.core.file.exporters.converter import convert
 
         f = tmp_path / "test.txt"
         f.write_text("x")
-        with patch("web.file_converter._dispatch", side_effect=RuntimeError("boom")):
+        with patch(
+            "app.core.file.exporters.converter._dispatch",
+            side_effect=RuntimeError("boom"),
+        ):
             result = convert(str(f), "pdf", output_dir=str(tmp_path))
         assert result["success"] is False
         assert "boom" in result["error"]
 
     def test_format_alias_resolution(self, tmp_path):
-        from web.file_converter import convert
+        from app.core.file.exporters.converter import convert
 
         f = tmp_path / "test.txt"
         f.write_text("x")
-        with patch("web.file_converter._dispatch") as mock_dispatch:
+        with patch("app.core.file.exporters.converter._dispatch") as mock_dispatch:
             out_path = str(tmp_path / "test.docx")
             mock_dispatch.return_value = (out_path, "")
             result = convert(str(f), "word", output_dir=str(tmp_path))
@@ -178,23 +176,23 @@ class TestConvertFunction:
         assert result["to_format"] == "docx"
 
     def test_convert_with_explicit_output_path(self, tmp_path):
-        from web.file_converter import convert
+        from app.core.file.exporters.converter import convert
 
         f = tmp_path / "test.txt"
         f.write_text("x")
         out = str(tmp_path / "custom_output.docx")
-        with patch("web.file_converter._dispatch") as mock_dispatch:
+        with patch("app.core.file.exporters.converter._dispatch") as mock_dispatch:
             mock_dispatch.return_value = (out, "")
             result = convert(str(f), "docx", output_path=out)
         assert result["success"] is True
         assert result["output_path"] == out
 
     def test_warning_passed_through(self, tmp_path):
-        from web.file_converter import convert
+        from app.core.file.exporters.converter import convert
 
         f = tmp_path / "test.txt"
         f.write_text("x")
-        with patch("web.file_converter._dispatch") as mock_dispatch:
+        with patch("app.core.file.exporters.converter._dispatch") as mock_dispatch:
             out = str(tmp_path / "test.pdf")
             mock_dispatch.return_value = (out, "⚠️ some warning")
             result = convert(str(f), "pdf", output_dir=str(tmp_path))
@@ -202,49 +200,20 @@ class TestConvertFunction:
 
 
 @pytest.mark.unit
-class TestSkillEntry:
-
-    def test_missing_file_path_returns_error(self):
-        from web.file_converter import skill_entry
-
-        result = skill_entry("转换成pdf", {})
-        assert result["success"] is False
-        assert "file_path" in result["message"]
-
-    def test_unrecognised_format_returns_error(self, tmp_path):
-        from web.file_converter import skill_entry
-
-        f = tmp_path / "test.txt"
-        f.write_text("x")
-        result = skill_entry("做点什么", {"file_path": str(f)})
-        assert result["success"] is False
-        assert "格式" in result["message"]
-
-    def test_valid_call_delegates_to_convert(self, tmp_path):
-        from web.file_converter import skill_entry
-
-        f = tmp_path / "test.txt"
-        f.write_text("x")
-        with patch("web.file_converter.convert") as mock_convert:
-            mock_convert.return_value = {"success": True, "output_path": "/x.pdf"}
-            skill_entry("转换成pdf", {"file_path": str(f)})
-            mock_convert.assert_called_once()
-
-
-@pytest.mark.unit
 class TestDispatch:
 
     def test_image_to_image_route(self):
-        from web.file_converter import _dispatch
+        from app.core.file.exporters.converter import _dispatch
 
         with patch(
-            "web.file_converter._img_to_img", return_value=("/out.png", "")
+            "app.core.file.exporters.converter._img_to_img",
+            return_value=("/out.png", ""),
         ) as m:
             _dispatch("/in.jpg", ".jpg", ".png", "/out.png")
             m.assert_called_once()
 
     def test_unknown_key_raises(self):
-        from web.file_converter import _dispatch
+        from app.core.file.exporters.converter import _dispatch
 
         with pytest.raises(NotImplementedError):
             _dispatch("/in.foo", ".foo", ".bar", "/out.bar")
@@ -268,7 +237,7 @@ class TestImgToImg:
         with patch.dict(
             "sys.modules", {"PIL": mock_pil_pkg, "PIL.Image": mock_image_mod}
         ):
-            from web.file_converter import _img_to_img
+            from app.core.file.exporters.converter import _img_to_img
 
             out, warning = _img_to_img("/in.png", "/out.jpg", ".jpg")
         assert out == "/out.jpg"
@@ -288,7 +257,7 @@ class TestImgToImg:
         with patch.dict(
             "sys.modules", {"PIL": mock_pil_pkg, "PIL.Image": mock_image_mod}
         ):
-            from web.file_converter import _img_to_img
+            from app.core.file.exporters.converter import _img_to_img
 
             out, _ = _img_to_img("/in.jpg", "/out.png", ".png")
         mock_img.convert.assert_not_called()
@@ -296,36 +265,10 @@ class TestImgToImg:
 
 
 @pytest.mark.unit
-class TestExtractTargetFormat:
-
-    def test_chinese_keyword_pdf(self):
-        from web.file_converter import _extract_target_format
-
-        assert _extract_target_format("请转换为PDF文件") is not None
-
-    def test_english_alias(self):
-        from web.file_converter import _extract_target_format
-
-        result = _extract_target_format("convert to pdf")
-        assert result is not None
-
-    def test_no_match_returns_none(self):
-        from web.file_converter import _extract_target_format
-
-        assert _extract_target_format("请帮我做晚饭") is None
-
-    def test_word_alias(self):
-        from web.file_converter import _extract_target_format
-
-        result = _extract_target_format("转换成word文档")
-        assert result is not None
-
-
-@pytest.mark.unit
 class TestErrHelper:
 
     def test_err_structure(self):
-        from web.file_converter import _err
+        from app.core.file.exporters.converter import _err
 
         result = _err("something wrong")
         assert result["success"] is False
@@ -341,7 +284,7 @@ class TestTextCopy:
         src = tmp_path / "a.txt"
         dst = tmp_path / "b.md"
         src.write_text("hello")
-        from web.file_converter import _text_copy
+        from app.core.file.exporters.converter import _text_copy
 
         out, warning = _text_copy(str(src), str(dst))
         assert Path(out).read_text() == "hello"
@@ -352,7 +295,7 @@ class TestTextCopy:
 class TestSafeRl:
 
     def test_escapes_html_chars(self):
-        from web.file_converter import _safe_rl
+        from app.core.file.exporters.converter import _safe_rl
 
         assert _safe_rl("<b>foo & bar</b>") == "&lt;b&gt;foo &amp; bar&lt;/b&gt;"
 
@@ -366,7 +309,7 @@ class TestSafeRl:
 class TestLocalExecutorIsSystemCommand:
 
     def _cls(self):
-        from web.local_executor import LocalExecutor
+        from web.tasks.local_executor import LocalExecutor
 
         return LocalExecutor
 
@@ -411,7 +354,7 @@ class TestLocalExecutorIsSystemCommand:
 class TestLocalExecutorRetiredSystemAppHelpers:
 
     def _cls(self):
-        from web.local_executor import LocalExecutor
+        from web.tasks.local_executor import LocalExecutor
 
         return LocalExecutor
 
@@ -428,7 +371,7 @@ class TestLocalExecutorRetiredSystemAppHelpers:
 class TestLocalExecutorExecute:
 
     def _cls(self):
-        from web.local_executor import LocalExecutor
+        from web.tasks.local_executor import LocalExecutor
 
         return LocalExecutor
 
@@ -522,7 +465,7 @@ class TestLocalExecutorExecute:
 class TestLocalExecutorClipboard:
 
     def _cls(self):
-        from web.local_executor import LocalExecutor
+        from web.tasks.local_executor import LocalExecutor
 
         return LocalExecutor
 
@@ -559,7 +502,7 @@ class TestLocalExecutorClipboard:
 class TestLocalExecutorSystemInfo:
 
     def _cls(self):
-        from web.local_executor import LocalExecutor
+        from web.tasks.local_executor import LocalExecutor
 
         return LocalExecutor
 
@@ -592,7 +535,7 @@ class TestLocalExecutorSystemInfo:
 class TestLocalExecutorListRunningApps:
 
     def _cls(self):
-        from web.local_executor import LocalExecutor
+        from web.tasks.local_executor import LocalExecutor
 
         return LocalExecutor
 
@@ -624,7 +567,7 @@ class TestLocalExecutorListRunningApps:
 class TestLocalExecutorOpenFileOrDirectory:
 
     def _cls(self):
-        from web.local_executor import LocalExecutor
+        from web.tasks.local_executor import LocalExecutor
 
         return LocalExecutor
 
@@ -636,7 +579,7 @@ class TestLocalExecutorOpenFileOrDirectory:
 class TestLocalExecutorSendKeystroke:
 
     def _cls(self):
-        from web.local_executor import LocalExecutor
+        from web.tasks.local_executor import LocalExecutor
 
         return LocalExecutor
 
@@ -653,7 +596,7 @@ class TestLocalExecutorSendKeystroke:
 class TestFileProcessorProcessFile:
 
     def test_text_file(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "hello.txt"
         f.write_text("Hello World", encoding="utf-8")
@@ -663,7 +606,7 @@ class TestFileProcessorProcessFile:
         assert result["metadata"]["encoding"] == "utf-8"
 
     def test_unknown_mime_type_fallback_to_text(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "data.xyz"
         f.write_text("some data", encoding="utf-8")
@@ -672,7 +615,7 @@ class TestFileProcessorProcessFile:
         assert "some data" in result["text_content"]
 
     def test_image_file(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "photo.png"
         f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
@@ -694,7 +637,7 @@ class TestFileProcessorProcessFile:
         assert result["binary_data"] is not None
 
     def test_image_without_pil(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "photo.jpg"
         f.write_bytes(b"\xff\xd8\xff" + b"\x00" * 50)
@@ -704,7 +647,7 @@ class TestFileProcessorProcessFile:
         assert result["binary_data"] is not None
 
     def test_pdf_file_binary(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF-1.4 fake content")
@@ -716,7 +659,7 @@ class TestFileProcessorProcessFile:
         assert result["mime_type"] == "application/pdf"
 
     def test_pdf_with_good_text(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF-1.4 fake content")
@@ -736,7 +679,7 @@ class TestFileProcessorProcessFile:
         # Text quality check depends on heuristic; at minimum it should succeed
 
     def test_pdf_with_garbled_text(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF-1.4 content")
@@ -756,7 +699,7 @@ class TestFileProcessorProcessFile:
         assert result["metadata"].get("text_quality") == "garbled"
 
     def test_word_file_with_docx(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "report.docx"
         f.write_bytes(b"fake docx")
@@ -775,7 +718,7 @@ class TestFileProcessorProcessFile:
         assert "Paragraph text" in result["text_content"]
 
     def test_word_file_without_docx_lib(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "report.docx"
         f.write_bytes(b"fake")
@@ -786,7 +729,7 @@ class TestFileProcessorProcessFile:
         assert "python-docx" in result["error"]
 
     def test_word_file_with_tables(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "data.docx"
         f.write_bytes(b"fake")
@@ -810,7 +753,7 @@ class TestFileProcessorProcessFile:
         assert "cell1" in result["text_content"]
 
     def test_powerpoint_file(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "slides.pptx"
         f.write_bytes(b"fake pptx")
@@ -830,7 +773,7 @@ class TestFileProcessorProcessFile:
         assert "Slide title" in result["text_content"]
 
     def test_powerpoint_empty_text(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "empty.pptx"
         f.write_bytes(b"fake")
@@ -849,7 +792,7 @@ class TestFileProcessorProcessFile:
         assert result["success"] is True
 
     def test_excel_file(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "data.xlsx"
         f.write_bytes(b"fake xlsx")
@@ -868,7 +811,7 @@ class TestFileProcessorProcessFile:
         assert "Sheet1" in result["text_content"]
 
     def test_excel_without_pandas(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "data.xlsx"
         f.write_bytes(b"fake")
@@ -879,7 +822,7 @@ class TestFileProcessorProcessFile:
         assert "pandas" in result["error"]
 
     def test_text_file_fallback_encoding(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "encoded.txt"
         content = "你好世界"
@@ -888,7 +831,7 @@ class TestFileProcessorProcessFile:
         assert result["success"] is True
 
     def test_process_file_general_exception(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "bad.txt"
         f.write_text("x")
@@ -900,7 +843,7 @@ class TestFileProcessorProcessFile:
         assert "处理文件失败" in result["error"]
 
     def test_image_read_failure(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "bad.png"
         f.write_bytes(b"\x89PNG")
@@ -920,7 +863,7 @@ class TestFileProcessorProcessFile:
         assert "读取图片失败" in result["error"]
 
     def test_pdf_read_failure(self, tmp_path):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         f = tmp_path / "bad.pdf"
         f.write_bytes(b"%PDF")
@@ -944,7 +887,7 @@ class TestFileProcessorProcessFile:
 class TestFileProcessorFormatResultForChat:
 
     def _fp(self):
-        from web.file_processor import FileProcessor
+        from web.files.file_processor import FileProcessor
 
         return FileProcessor
 
@@ -1024,7 +967,7 @@ class TestFileProcessorFormatResultForChat:
 class TestProcessUploadedFile:
 
     def test_delegates_to_processor(self, tmp_path):
-        from web.file_processor import process_uploaded_file
+        from web.files.file_processor import process_uploaded_file
 
         f = tmp_path / "test.txt"
         f.write_text("Hello", encoding="utf-8")
@@ -1053,7 +996,7 @@ class TestRemovedMicrophoneSttModule:
 class TestImageGeneratorInit:
 
     def test_init_with_api_key(self):
-        from web.image_generator import ImageGenerator
+        from app.core.services.image_generator import ImageGenerator
 
         gen = ImageGenerator(api_key="test-key")
         assert gen.client is None
@@ -1061,7 +1004,7 @@ class TestImageGeneratorInit:
 
     def test_init_without_key_uses_env(self):
         with patch.dict(os.environ, {"GEMINI_API_KEY": "env-key"}):
-            from web.image_generator import ImageGenerator
+            from app.core.services.image_generator import ImageGenerator
 
             gen = ImageGenerator()
         assert gen.client is None
@@ -1071,7 +1014,7 @@ class TestImageGeneratorInit:
         with patch.dict(os.environ, {}, clear=True):
             # Remove GEMINI_API_KEY if present
             os.environ.pop("GEMINI_API_KEY", None)
-            from web.image_generator import ImageGenerator
+            from app.core.services.image_generator import ImageGenerator
 
             gen = ImageGenerator()
         assert gen.client is None
@@ -1081,7 +1024,7 @@ class TestImageGeneratorInit:
 class TestImageGeneratorGenerate:
 
     def _make_gen(self):
-        from web.image_generator import ImageGenerator
+        from app.core.services.image_generator import ImageGenerator
 
         gen = ImageGenerator.__new__(ImageGenerator)
         gen.client = MagicMock()
@@ -1089,7 +1032,7 @@ class TestImageGeneratorGenerate:
         return gen
 
     def test_no_client_returns_false(self):
-        from web.image_generator import ImageGenerator
+        from app.core.services.image_generator import ImageGenerator
 
         gen = ImageGenerator.__new__(ImageGenerator)
         gen.client = None
@@ -1156,7 +1099,7 @@ class TestImageGeneratorGenerate:
 class TestImageGeneratorPlaceholder:
 
     def _make_gen(self):
-        from web.image_generator import ImageGenerator
+        from app.core.services.image_generator import ImageGenerator
 
         gen = ImageGenerator.__new__(ImageGenerator)
         gen.client = None

@@ -14,9 +14,42 @@ def _repo_root():
     return Path(__file__).resolve().parents[2]
 
 
+def _read_module_graph(path: Path, seen: set[Path] | None = None) -> str:
+    seen = seen or set()
+    path = path.resolve()
+    if path in seen:
+        return ""
+    seen.add(path)
+    source = path.read_text(encoding="utf-8")
+    linked = []
+    for ref in re.findall(
+        r"(?:from|export\s+\{[^}]*\}\s+from)\s+['\"](\./[^'\"]+)['\"]", source
+    ):
+        candidate = (path.parent / ref).resolve()
+        if not candidate.suffix:
+            candidate = candidate.with_suffix(path.suffix)
+        if candidate.exists() and (
+            candidate.name
+            in {
+                "docx-header-footer-runtime.js",
+                "docx-image-extension.js",
+                "docx-pagination-extension.js",
+            }
+            or candidate.name.startswith("koto-docx-editor-part-")
+        ):
+            linked.append(_read_module_graph(candidate, seen))
+    return source + "\n" + "\n".join(linked)
+
+
 def _read_ext_js():
-    return (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
-        encoding="utf-8"
+    return _read_module_graph(
+        _repo_root() / "web" / "tiptap-editor" / "docx-extensions.js"
+    )
+
+
+def _read_editor_js():
+    return _read_module_graph(
+        _repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js"
     )
 
 
@@ -56,19 +89,19 @@ def test_layout_signature_prevents_redundant_dispatch_only():
     assert "_lastLayoutSignature = layoutSignature;" in src
 
 
-def test_font_and_window_reflow_schedule_a_fresh_measurement():
+def test_font_and_render_surface_reflow_schedule_a_fresh_measurement():
     scheduler = _read_scheduler_js()
     assert "document.fonts?.ready?.then(() => schedule('fonts', 40))" in scheduler
-    assert "window.addEventListener('resize', onWindowResize" in scheduler
-    assert "window.removeEventListener('resize', onWindowResize);" in scheduler
-    assert "const watchLayoutWidth" in scheduler
-    assert "layoutResizeObserver.observe(pmDom);" in scheduler
+    assert "window.KotoRenderSurface.createController" in scheduler
+    assert "renderSurfaceController?.dispose()" in scheduler
+    assert "const watchLayoutSurface" in scheduler
+    assert "window.addEventListener('resize'" not in scheduler
 
 
 def test_layout_observer_ignores_pagination_height_writes():
     scheduler = _read_scheduler_js()
-    assert "entry?.contentRect?.width" in scheduler
-    assert "observedWidth === lastObservedLayoutWidth" in scheduler
+    assert "_readLogicalWidth(pmDom)" in scheduler
+    assert "if (!widthChanged && !uiScaleChanged) return;" in scheduler
     assert "lastObservedLayoutWidth = observedWidth;" in scheduler
 
 
@@ -197,9 +230,7 @@ def test_explicit_docx_page_break_uses_rendered_sheet_bounds():
 
 
 def test_page_edge_chrome_uses_the_same_left_page_origin_as_break_widgets():
-    editor_src = (
-        _repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js"
-    ).read_text(encoding="utf-8")
+    editor_src = _read_editor_js()
 
     assert "position:absolute; top:0; left:0; transform:none;" in editor_src
     assert "position:absolute; bottom:0; left:0; transform:none;" in editor_src
@@ -210,9 +241,7 @@ def test_page_edge_chrome_uses_the_same_left_page_origin_as_break_widgets():
 
 def test_all_page_break_types_share_one_surface_builder_and_storage():
     src = _read_ext_js()
-    editor_src = (
-        _repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js"
-    ).read_text(encoding="utf-8")
+    editor_src = _read_editor_js()
 
     assert "function _buildDocxPageBreakWidget" in src
     assert src.count("_buildDocxPageBreakWidget({") >= 4

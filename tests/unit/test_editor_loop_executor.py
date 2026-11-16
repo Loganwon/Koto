@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.agent.lifecycle import AgentRequest, evt_task_complete
+from app.core.agent.kernel import AgentRequest, evt_task_complete
 
 
 def test_editor_loop_executor_delegates_text_requests_to_editor_executor(monkeypatch):

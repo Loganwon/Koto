@@ -2,14 +2,21 @@ import json
 from pathlib import Path
 
 EXPECTED_BUNDLES = {
-    "auth-bundle": "src/shared/auth.ts",
     "app-bundle": "src/bundles/app.ts",
-    "skills-ui-bundle": "src/bundles/skills-ui.ts",
-    "skills-panel-bundle": "src/skills/skills-panel.ts",
+    "template-runtime-bundle": "src/bundles/template-runtime.ts",
+    "capability-panel-bundle": "src/addons/capability-panel.ts",
     "workspace-bundle": "src/bundles/workspace.ts",
-    "review-bundle": "src/bundles/review.ts",
-    "skill-marketplace-bundle": "src/skills/skill-marketplace.ts",
-    "skill-community-bundle": "src/skills/skill-community.ts",
+    "find-replace-bundle": "src/bundles/find-replace.ts",
+    "task-workbench-bundle": "src/bundles/task-workbench.ts",
+    "conversation-list-bundle": "src/bundles/conversation-list.ts",
+    "fs-context-menu-bundle": "src/bundles/fs-context-menu.ts",
+    "frontend-observer-bundle": "src/bundles/frontend-observer.ts",
+    "docx-review-engine-bundle": "src/bundles/docx-review-engine.ts",
+    "pptx-editor-bundle": "src/bundles/pptx-editor.ts",
+    "pdf-viewer-bundle": "src/bundles/pdf-viewer.ts",
+    "xlsx-editor-bundle": "src/bundles/xlsx-editor.ts",
+    "image-viewer-bundle": "src/bundles/image-viewer.ts",
+    "addon-center-bundle": "src/addons/addon-center.ts",
 }
 
 
@@ -36,6 +43,10 @@ def test_eslint_quality_gate_scopes_to_source_not_generated_assets():
     assert "'no-duplicate-imports': 'warn'" in eslint_config
     assert "'no-constant-binary-expression': 'error'" in eslint_config
     assert "'no-debugger': 'error'" in eslint_config
+    assert "import tsPlugin from '@typescript-eslint/eslint-plugin'" in eslint_config
+    assert "'no-unused-vars': 'off'" in eslint_config
+    assert "'@typescript-eslint/no-unused-vars': ['warn'" in eslint_config
+    assert "@typescript-eslint/eslint-plugin" in package_json["devDependencies"]
     assert package_json["scripts"]["lint"].startswith("eslint src/")
 
 
@@ -46,12 +57,7 @@ def test_frontend_bundle_build_entries_match_templates_and_outputs():
     workspace_assets = Path("web/templates/_workspace_asset_scripts.html").read_text(
         encoding="utf-8"
     )
-    marketplace_template = Path("web/templates/skill_marketplace.html").read_text(
-        encoding="utf-8"
-    )
-    community_template = Path("web/templates/skill_community.html").read_text(
-        encoding="utf-8"
-    )
+    addon_template = Path("web/templates/addon_center.html").read_text(encoding="utf-8")
 
     assert (
         package_json["scripts"]["build"]
@@ -59,7 +65,7 @@ def test_frontend_bundle_build_entries_match_templates_and_outputs():
     )
     assert "const OUT = resolve(ROOT, 'static/js/build');" in build_script
     assert "emptyOutDir: false" in build_script
-    assert "format: 'iife'" in build_script
+    assert "format: nativeModuleEntries.has(name) ? 'es' : 'iife'" in build_script
     assert "entryFileNames: `${name}.js`" in build_script
 
     for bundle_name, entry in EXPECTED_BUNDLES.items():
@@ -67,13 +73,19 @@ def test_frontend_bundle_build_entries_match_templates_and_outputs():
         assert Path(f"web/static/js/build/{bundle_name}.js").exists()
         assert Path(f"web/static/js/build/{bundle_name}.js.map").exists()
 
-    assert "js/build/auth-bundle.js" in index_template
+    assert "auth-bundle" not in build_script
+    assert "js/build/auth-bundle.js" not in index_template
     assert "js/build/app-bundle.js" in index_template
-    assert "js/build/skills-ui-bundle.js" in index_template
+    assert "js/build/template-runtime-bundle.js" in index_template
+    assert "data-capability-panel-bundle-url" in workspace_assets
     assert "js/build/workspace-bundle.js" in workspace_assets
-    assert "js/build/review-bundle.js" in workspace_assets
-    assert workspace_assets.index("workspace-bundle.js") < workspace_assets.index(
-        "review-bundle.js"
-    )
-    assert "js/build/skill-marketplace-bundle.js" in marketplace_template
-    assert "js/build/skill-community-bundle.js" in community_template
+    assert "js/build/find-replace-bundle.js" in workspace_assets
+    assert "js/build/task-workbench-bundle.js" in workspace_assets
+    assert "js/build/conversation-list-bundle.js" in workspace_assets
+    assert "js/build/fs-context-menu-bundle.js" in workspace_assets
+    assert "js/build/docx-review-engine-bundle.js" in workspace_assets
+    assert "js/build/review-bundle.js" not in workspace_assets
+    assert "'review-bundle':" not in build_script
+    assert not Path("web/static/js/build/review-bundle.js").exists()
+    assert not Path("web/static/js/build/review-bundle.js.map").exists()
+    assert "js/build/addon-center-bundle.js" in addon_template

@@ -50,7 +50,7 @@ class LLMJudge:
         '如果文本中没有合法的 JSON，输出 {{"pass": false, "score": 0.0, "reason": "不能解析", "issues": ["无法解析评判输出"]}}'
     )
 
-    def __init__(self, provider, model_id: str = "gemini-3-flash-preview"):
+    def __init__(self, provider, model_id: str = ""):
         self._provider = provider
         self._model = model_id
 

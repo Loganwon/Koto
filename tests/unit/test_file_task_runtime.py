@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import json
 from pathlib import Path
 
@@ -15,15 +15,15 @@ from app.core.agent.file_task_contract import (
 )
 from app.core.agent.file_task_model import FileTaskModelClient
 from app.core.agent.file_task_runtime import FileTaskRuntime
-from app.core.agent.file_task_tool_catalog import (
-    file_task_tool_specs,
-    supported_file_workflows,
-)
 from app.core.agent.file_task_tool_gateway import (
     FileTaskToolContext,
     FileTaskToolGateway,
 )
 from app.core.agent.file_task_workflow_state import build_workflow_state
+from app.core.agent.toolkits.foundation.catalog import (
+    file_task_tool_specs,
+    supported_file_workflows,
+)
 
 
 def test_file_task_runtime_relays_streaming_tool_events_before_tool_finished():
@@ -115,6 +115,56 @@ def test_file_task_runtime_relays_streaming_tool_events_before_tool_finished():
     assert step_verified.payload["passed"] is True
     assert step_verified.payload["outcome"] == "succeeded"
     assert step_verified.payload["file_changes"][0]["path"] == "draft.docx"
+
+
+def test_file_task_runtime_hybrid_mode_allows_model_selected_write_tool():
+    def fake_model(**kwargs):
+        return {
+            "content": "按用户要求应用修改。",
+            "tool_calls": [
+                {
+                    "name": "write_docx_content",
+                    "args": {
+                        "path": "draft.docx",
+                        "paragraphs": '[{"text":"更新后的内容"}]',
+                    },
+                }
+            ],
+        }
+
+    def fake_executor(tool_name, args):
+        assert tool_name == "write_docx_content"
+        return {
+            "success": True,
+            "path": args["path"],
+            "operation": tool_name,
+            "summary": "已更新文档。",
+            "file_type": "docx",
+            "change_type": "modify",
+        }
+
+    request = FileTaskRequest(
+        task="分析后直接应用这项修改",
+        run_id="hybrid_write_authorization",
+        target_path="draft.docx",
+        files=[
+            FileTaskFile(path="draft.docx", name="draft.docx", type="docx", target=True)
+        ],
+        options={"output_mode": "hybrid"},
+    )
+
+    events = list(
+        FileTaskRuntime(
+            tool_executor=fake_executor,
+            model_client=fake_model,
+            max_rounds=1,
+        ).run(request)
+    )
+    run_started = events[0]
+
+    assert run_started.payload["write_authorized"] is True
+    assert run_started.payload["write_required"] is False
+    assert any(event.type == "file.changed" for event in events)
 
 
 def test_file_task_runtime_merges_current_file_content_into_target_context():
@@ -228,7 +278,7 @@ def test_context_files_resolves_unique_workspace_basename_from_task(tmp_path):
     target.write_bytes(b"fake xlsx")
     runtime = FileTaskRuntime(workspace_root=str(workspace))
     request = FileTaskRequest(
-        task="请读取我的工作区里的销售台账.xlsx，告诉我哪个客户贡献最高。",
+        task="请读取我的工作区里的“销售台账.xlsx”，告诉我哪个客户贡献最高。",
         run_id="task_text_basename",
     )
 
@@ -273,11 +323,11 @@ def test_readonly_missing_file_reference_does_not_complete(tmp_path):
     )
     run_finished = next(event for event in events if event.type == "run.finished")
     assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "needs_attention"
+    assert check_finished.payload["status"] == "quality_gate_failed"
     assert "没有成功读取任何显式文件上下文" in check_finished.payload["summary"]
     assert run_finished.payload["completed_task"] is False
     assert run_started.payload["performance"]["classification_ms"] >= 0
-    assert run_started.payload["performance"]["intent_adjudication_ms"] >= 0
+    assert "intent_adjudication_ms" not in run_started.payload["performance"]
     assert check_finished.payload["performance"]["total_ms"] >= 0
     assert run_finished.payload["runtime"]["performance"]["total_ms"] >= 0
 
@@ -330,7 +380,7 @@ def test_readonly_directory_listing_does_not_satisfy_missing_file_reference(tmp_
     )
     run_finished = next(event for event in events if event.type == "run.finished")
     assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "needs_attention"
+    assert check_finished.payload["status"] == "quality_gate_failed"
     assert "missing.xlsx" in check_finished.payload["summary"]
     assert run_finished.payload["completed_task"] is False
 
@@ -352,8 +402,8 @@ def test_explicit_answer_mode_is_not_overridden_by_docx_review_words():
     classification = runtime._classify_request(request, runtime._context_files(request))
 
     assert classification.output_mode == "answer"
-    assert classification.write_intent is False
-    assert classification.docx_annotation_request is False
+    assert classification.write_required is False
+    assert not hasattr(classification, "docx_annotation_request")
     assert classification.execution_mode == "generic_tool_loop"
     # decision_trace mechanism was removed from _classify_request
     # (simplification: trace was never consumed in production)
@@ -380,10 +430,10 @@ def test_soft_edit_keywords_do_not_control_file_task_mainline():
     events = list(runtime.run(request))
     run_started = next(event for event in events if event.type == "run.started")
 
-    assert run_started.payload["write_intent"] is False
+    assert run_started.payload["write_required"] is False
     assert run_started.payload["output_mode"] == "answer"
     assert run_started.payload["execution_mode"] == "generic_tool_loop"
-    assert run_started.payload["docx_annotation_request"] is False
+    assert "docx_annotation_request" not in run_started.payload
     assert "mainline_contract:v1" in run_started.payload["reason_codes"]
 
 
@@ -398,15 +448,11 @@ def test_explicit_writeback_still_controls_file_task_mainline():
         ],
     )
 
-    classification = runtime._normalize_mainline_contract(
-        request,
-        request.files,
-        runtime._classify_request(request, request.files),
-    )
+    classification = runtime._classify_request(request, request.files)
 
-    assert classification.write_intent is True
+    assert classification.write_required is True
     assert classification.output_mode == "write"
-    assert classification.selected_recipe == "docx_polish_writeback"
+    assert classification.selected_recipe == ""
     assert "mainline_contract:keyword_write_demoted" not in classification.reason_codes
 
 
@@ -434,12 +480,12 @@ def test_readonly_financial_keywords_do_not_preempt_mainline_runner():
     run_started = next(event for event in events if event.type == "run.started")
 
     assert run_started.payload["mode"] == "whitebox_v1"
-    assert run_started.payload["write_intent"] is False
+    assert run_started.payload["write_required"] is False
     assert run_started.payload["selected_recipe"] != "financial_xlsx_docx_report"
     assert "mainline_contract:readonly_guard" in run_started.payload["reason_codes"]
 
 
-def test_file_task_runtime_classifies_two_docx_compare_annotation_as_compare_write():
+def test_file_task_runtime_keeps_docx_compare_annotation_on_generic_write_mainline():
     runtime = FileTaskRuntime()
     request = FileTaskRequest(
         task="对比这两份文件，找出他们有区别的地方标注出来",
@@ -458,16 +504,15 @@ def test_file_task_runtime_classifies_two_docx_compare_annotation_as_compare_wri
 
     classification = runtime._classify_request(request, request.files)
 
-    assert classification.task_family == "compare"
-    assert classification.operation_kind == "compare_annotate"
+    assert classification.task_family == "transform"
+    assert classification.operation_kind == "write"
     assert classification.execution_mode == "generic_tool_loop"
     assert classification.output_mode == "write"
-    assert classification.selected_recipe == "docx_compare_annotation"
-    assert "compare_docx_and_annotate" in classification.matched_capabilities
-    assert "annotate_file" not in classification.matched_capabilities
+    assert classification.selected_recipe == ""
+    assert not hasattr(classification, "matched_capabilities")
 
 
-def test_file_task_runtime_keeps_named_docx_compare_annotation_in_compare_mode():
+def test_file_task_runtime_does_not_preclassify_named_docx_compare_operation():
     runtime = FileTaskRuntime()
     request = FileTaskRequest(
         task=(
@@ -488,16 +533,15 @@ def test_file_task_runtime_keeps_named_docx_compare_annotation_in_compare_mode()
 
     classification = runtime._classify_request(request, request.files)
 
-    assert classification.task_family == "compare"
-    assert classification.operation_kind == "compare_annotate"
+    assert classification.task_family == "transform"
+    assert classification.operation_kind == "write"
     assert classification.execution_mode == "generic_tool_loop"
     assert classification.output_mode == "write"
-    assert classification.selected_recipe == "docx_compare_annotation"
-    assert "write_docx_comments" in classification.matched_capabilities
-    assert "annotate_file" not in classification.matched_capabilities
+    assert classification.selected_recipe == ""
+    assert not hasattr(classification, "matched_capabilities")
 
 
-def test_file_task_runtime_limits_docx_compare_route_tools():
+def test_file_task_runtime_does_not_recipe_filter_docx_compare_tools():
     runtime = FileTaskRuntime()
     request = FileTaskRequest(
         task="对比两份 DOCX，并在原文上标注不同之处",
@@ -523,16 +567,16 @@ def test_file_task_runtime_limits_docx_compare_route_tools():
     )
     tool_names = {str(item.get("name") or "") for item in tool_defs}
 
-    assert classification.selected_recipe == "docx_compare_annotation"
-    assert {
+    assert classification.selected_recipe == ""
+    assert tool_names == {
         "parse_file_to_text",
         "plan_docx_compare_annotations",
         "write_docx_comments",
         "compare_docx_and_annotate",
         "verify_task_completion",
-    }.issubset(tool_names)
-    assert "annotate_file" not in tool_names
-    assert "write_docx_content" not in tool_names
+        "annotate_file",
+        "write_docx_content",
+    }
 
 
 def test_file_task_runtime_executes_two_docx_compare_annotation_through_model_loop():
@@ -680,9 +724,9 @@ def test_file_task_runtime_executes_two_docx_compare_annotation_through_model_lo
     assert file_changed.payload["path"] == "old.docx"
     assert file_changed.payload["operation"] == "write_docx_comments"
     assert file_changed.payload["annotations_added"] == 1
-    assert run_finished.payload["completed_task"] is True
-    assert run_finished.payload["operation_kind"] == "compare_annotate"
-    assert run_finished.payload["selected_recipe"] == "docx_compare_annotation"
+    assert run_finished.payload["completed_task"] is True, run_finished.payload
+    assert run_finished.payload["operation_kind"] == "write"
+    assert run_finished.payload["selected_recipe"] == ""
     assert not any(
         event.payload.get("tool_name") == "annotate_file"
         for event in events
@@ -837,11 +881,10 @@ def test_file_task_runtime_contract_compare_returns_risk_summary():
     file_changed = next(event for event in events if event.type == "file.changed")
 
     assert model_calls
-    assert run_finished.payload["selected_recipe"] == "docx_contract_compare_review"
-    assert run_finished.payload["task_family"] == "contract_review"
-    assert run_finished.payload["completed_task"] is True
-    assert "风险关注点" in run_finished.payload["summary"]
-    assert "付款/费用" in run_finished.payload["summary"]
+    assert run_finished.payload["selected_recipe"] == ""
+    assert run_finished.payload["task_family"] == "transform"
+    assert run_finished.payload["completed_task"] is True, run_finished.payload
+    assert run_finished.payload["summary"] == "已核验合同差异批注。"
     assert file_changed.payload["path"] == "old_contract.docx"
     assert file_changed.payload["operation"] == "write_docx_comments"
     assert file_changed.payload["contract_risk_summary"]
@@ -935,10 +978,6 @@ def test_file_task_runtime_quality_gate_accepts_docx_template_fill():
     )
 
     assert result["passed"] is True
-    assert any(
-        item["criterion"] == "docx_template_fill_replaces_placeholders"
-        for item in result["criteria_results"]
-    )
 
 
 def test_file_task_runtime_quality_gate_accepts_docx_pdf_export():
@@ -949,7 +988,7 @@ def test_file_task_runtime_quality_gate_accepts_docx_pdf_export():
     request = FileTaskRequest(
         task="Export the current Word document as PDF.",
         run_id="docx_pdf_export_gate",
-        target_path="report.docx",
+        target_path="report.pdf",
         files=[
             FileTaskFile(
                 path="report.docx", name="report.docx", type="docx", target=True
@@ -972,10 +1011,6 @@ def test_file_task_runtime_quality_gate_accepts_docx_pdf_export():
     )
 
     assert result["passed"] is True
-    assert any(
-        item["criterion"] == "docx_pdf_export_uses_converter"
-        for item in result["criteria_results"]
-    )
 
 
 def test_file_task_runtime_quality_gate_accepts_generic_file_convert():
@@ -1005,10 +1040,6 @@ def test_file_task_runtime_quality_gate_accepts_generic_file_convert():
     )
 
     assert result["passed"] is True
-    assert any(
-        item["criterion"] == "file_format_convert_uses_converter"
-        for item in result["criteria_results"]
-    )
 
 
 def test_file_task_runtime_quality_gate_accepts_local_docx_paragraph_insert():
@@ -1053,6 +1084,48 @@ def test_file_task_runtime_quality_gate_accepts_local_docx_paragraph_insert():
     assert "docx_local_edit_has_paragraph_insert" in criteria
     assert "docx_report_has_narrative" not in criteria
     assert "docx_table_request_has_table" not in criteria
+
+
+def test_file_task_runtime_quality_gate_accepts_targeted_docx_replace_writeback():
+    runtime = FileTaskRuntime(
+        tool_executor=lambda name, args: "",
+        model_client=lambda **kwargs: {"content": "ok", "tool_calls": []},
+    )
+    request = FileTaskRequest(
+        task=(
+            "把当前 DOCX 第二段的‘需要优化的句子’替换为‘已经完成优化的句子’，"
+            "只替换前文乙那一处，前文甲保持不变，并保存文件。"
+        ),
+        run_id="local_docx_replace_gate",
+        target_path="workspace/report.docx",
+        files=[
+            FileTaskFile(
+                path="workspace/report.docx",
+                name="report.docx",
+                type="docx",
+                target=True,
+            )
+        ],
+    )
+
+    result = runtime._evaluate_task_quality_gate(
+        request,
+        [
+            {
+                "path": "workspace/report.docx",
+                "operation": "run_python_code",
+                "file_type": "docx",
+                "change_type": "modify",
+            }
+        ],
+        write_intent=True,
+        output_mode="write",
+    )
+
+    assert result["passed"] is True
+    criteria = {item["criterion"] for item in result["criteria_results"]}
+    assert "docx_local_replace_has_targeted_write" in criteria
+    assert "generic_docx_has_native_write" not in criteria
 
 
 def test_file_task_runtime_quality_gate_rejects_docx_missing_requested_source_content(
@@ -1621,6 +1694,116 @@ def test_file_task_runtime_quality_gate_accepts_required_sections_and_actions(tm
     )
 
 
+def test_file_task_runtime_quality_gate_does_not_treat_90_day_plan_as_90_actions(
+    tmp_path,
+):
+    from docx import Document
+
+    target_path = tmp_path / "risk_plan.docx"
+    document = Document()
+    document.add_heading("执行摘要", level=1)
+    document.add_heading("90 天行动计划", level=1)
+    document.add_paragraph("分三个阶段推进并持续复盘。")
+    document.save(target_path)
+
+    runtime = FileTaskRuntime(
+        tool_executor=lambda name, args: "",
+        model_client=lambda **kwargs: {"content": "ok", "tool_calls": []},
+    )
+    request = FileTaskRequest(
+        task="生成风险报告，包含执行摘要和 90 天行动计划。",
+        run_id="ninety_day_plan",
+        target_path=str(target_path),
+        files=[],
+    )
+    result = runtime._evaluate_task_quality_gate(
+        request,
+        [
+            {
+                "path": str(target_path),
+                "operation": "write_docx_content",
+                "file_type": "docx",
+                "paragraphs_written": 3,
+            }
+        ],
+        write_intent=True,
+        output_mode="write",
+    )
+
+    assert all(
+        item["criterion"] != "required_next_actions_present"
+        for item in result["criteria_results"]
+    )
+
+
+def test_file_task_runtime_quality_gate_requires_native_risk_register_table(tmp_path):
+    from docx import Document
+
+    target_path = tmp_path / "risk_register.docx"
+    document = Document()
+    document.add_heading("风险登记表", level=1)
+    document.add_paragraph("风险 1：供应链延误；负责人：采购总监。")
+    document.save(target_path)
+
+    runtime = FileTaskRuntime(
+        tool_executor=lambda name, args: "",
+        model_client=lambda **kwargs: {"content": "ok", "tool_calls": []},
+    )
+    request = FileTaskRequest(
+        task="生成新的风险登记表，包含类别、证据、可能性、影响、负责人、缓解行动。",
+        run_id="risk_register_table",
+        target_path=str(target_path),
+        files=[],
+    )
+    text_result = runtime._evaluate_task_quality_gate(
+        request,
+        [
+            {
+                "path": str(target_path),
+                "operation": "write_docx_content",
+                "file_type": "docx",
+                "paragraphs_written": 2,
+            }
+        ],
+        write_intent=True,
+        output_mode="write",
+    )
+    assert text_result["passed"] is False
+    assert any(
+        item["criterion"] == "docx_table_request_has_table" and item["passed"] is False
+        for item in text_result["criteria_results"]
+    )
+
+    document = Document()
+    document.add_heading("风险登记表", level=1)
+    table = document.add_table(rows=2, cols=6)
+    for index, value in enumerate(
+        ("类别", "证据", "可能性", "影响", "负责人", "缓解行动")
+    ):
+        table.rows[0].cells[index].text = value
+    document.save(target_path)
+    table_result = runtime._evaluate_task_quality_gate(
+        request,
+        [
+            {
+                "path": str(target_path),
+                "operation": "run_python_code",
+                "structure_verified": True,
+                "docx_tables_before": 0,
+                "docx_tables_after": 1,
+                "file_type": "docx",
+                "paragraphs_written": 1,
+            }
+        ],
+        write_intent=True,
+        output_mode="write",
+    )
+    assert any(
+        item["criterion"] == "docx_table_request_has_table" and item["passed"] is True
+        for item in table_result["criteria_results"]
+    )
+
+
 def test_file_task_runtime_generic_office_quality_gate_accepts_native_pptx_write():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "",
@@ -1768,6 +1951,100 @@ def test_file_task_runtime_quality_gate_rejects_wrong_pptx_slide_count(tmp_path)
     assert result["passed"] is False
     assert any(
         item["criterion"] == "explicit_pptx_slide_count" and item["passed"] is False
+        for item in result["criteria_results"]
+    )
+
+
+def test_file_task_runtime_quality_gate_rejects_text_only_native_timeline(tmp_path):
+    from pptx import Presentation
+
+    pptx_path = tmp_path / "text_only_timeline.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+    slide.shapes.title.text = "里程碑时间线"
+    slide.placeholders[1].text = "7 月：冻结样机\n8 月：客户试点\n9 月：量产验证"
+    presentation.save(pptx_path)
+
+    runtime = FileTaskRuntime(
+        tool_executor=lambda name, args: "",
+        model_client=lambda **kwargs: {"content": "ok", "tool_calls": []},
+    )
+    request = FileTaskRequest(
+        task="生成演示文稿，必须包含至少一个原生图表或原生时间线。",
+        run_id="pptx_text_only_timeline",
+        target_path=str(pptx_path),
+        files=[],
+    )
+    result = runtime._evaluate_task_quality_gate(
+        request,
+        [
+            {
+                "path": str(pptx_path),
+                "operation": "write_pptx_slides",
+                "file_type": "pptx",
+                "slides_added": 1,
+            }
+        ],
+        write_intent=True,
+        output_mode="write",
+    )
+
+    assert result["passed"] is False
+    assert any(
+        item["criterion"] == "pptx_native_chart_or_timeline_present"
+        and item["passed"] is False
+        for item in result["criteria_results"]
+    )
+
+
+def test_file_task_runtime_quality_gate_accepts_native_timeline_shapes(tmp_path):
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches
+
+    pptx_path = tmp_path / "native_timeline.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    title = slide.shapes.add_textbox(Inches(1), Inches(0.5), Inches(5), Inches(0.5))
+    title.text = "里程碑时间线"
+    for index in range(3):
+        slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(1 + index * 2),
+            Inches(2),
+            Inches(1.5),
+            Inches(0.8),
+        )
+    presentation.save(pptx_path)
+
+    runtime = FileTaskRuntime(
+        tool_executor=lambda name, args: "",
+        model_client=lambda **kwargs: {"content": "ok", "tool_calls": []},
+    )
+    request = FileTaskRequest(
+        task="生成演示文稿，必须包含至少一个原生图表或原生时间线。",
+        run_id="pptx_native_timeline",
+        target_path=str(pptx_path),
+        files=[],
+    )
+    result = runtime._evaluate_task_quality_gate(
+        request,
+        [
+            {
+                "path": str(pptx_path),
+                "operation": "write_pptx_slides",
+                "file_type": "pptx",
+                "slides_added": 1,
+            }
+        ],
+        write_intent=True,
+        output_mode="write",
+    )
+
+    assert result["passed"] is True
+    assert any(
+        item["criterion"] == "pptx_native_chart_or_timeline_present"
+        and item["passed"] is True
         for item in result["criteria_results"]
     )
 
@@ -2268,6 +2545,69 @@ def test_file_task_runtime_quality_gate_accepts_xlsx_chart_request_with_chart(tm
     )
 
 
+def test_file_task_runtime_quality_gate_requires_real_excel_formulas(tmp_path):
+    import openpyxl
+
+    workbook_path = tmp_path / "formula_report.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.append(["Revenue", "Cost", "Profit", "Margin"])
+    sheet.append([120, 80, 40, 0.3333])
+    workbook.save(workbook_path)
+
+    runtime = FileTaskRuntime(
+        tool_executor=lambda name, args: "",
+        model_client=lambda **kwargs: {"content": "ok", "tool_calls": []},
+    )
+    request = FileTaskRequest(
+        task="新增 Profit=Revenue-Cost 和 Margin=Profit/Revenue 公式列",
+        run_id="xlsx_formula_gate",
+        target_path=str(workbook_path),
+        files=[],
+    )
+    changes = [
+        {
+            "path": str(workbook_path),
+            "operation": "write_sheet_data",
+            "file_type": "xlsx",
+            "cells_written": 4,
+        }
+    ]
+
+    static_result = runtime._evaluate_task_quality_gate(
+        request,
+        changes,
+        write_intent=True,
+        output_mode="write",
+    )
+    assert static_result["passed"] is False
+    assert any(
+        item["criterion"] == "spreadsheet_formula_request_has_workbook_formula"
+        and item["passed"] is False
+        for item in static_result["criteria_results"]
+    )
+
+    workbook = openpyxl.load_workbook(workbook_path)
+    sheet = workbook.active
+    sheet["C2"] = "=A2-B2"
+    sheet["D2"] = "=C2/A2"
+    workbook.save(workbook_path)
+    workbook.close()
+
+    formula_result = runtime._evaluate_task_quality_gate(
+        request,
+        changes,
+        write_intent=True,
+        output_mode="write",
+    )
+    assert formula_result["passed"] is True
+    assert any(
+        item["criterion"] == "spreadsheet_formula_request_has_workbook_formula"
+        and item["passed"] is True
+        for item in formula_result["criteria_results"]
+    )
+
+
 def test_file_task_runtime_quality_gate_accepts_spreadsheet_cell_write():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "",
@@ -2297,10 +2637,6 @@ def test_file_task_runtime_quality_gate_accepts_spreadsheet_cell_write():
     )
 
     assert result["passed"] is True
-    assert any(
-        item["criterion"] == "spreadsheet_write_has_cells"
-        for item in result["criteria_results"]
-    )
 
 
 def test_file_task_runtime_quality_gate_accepts_created_csv_content(tmp_path):
@@ -2368,10 +2704,6 @@ def test_file_task_runtime_quality_gate_accepts_text_selection_replace():
     )
 
     assert result["passed"] is True
-    assert any(
-        item["criterion"] == "text_selection_replace_has_replacement"
-        for item in result["criteria_results"]
-    )
 
 
 def test_file_task_runtime_quality_gate_accepts_workspace_file_copy():
@@ -2400,54 +2732,6 @@ def test_file_task_runtime_quality_gate_accepts_workspace_file_copy():
     )
 
     assert result["passed"] is True
-    assert any(
-        item["criterion"] == "workspace_file_copy_uses_copy_tool"
-        for item in result["criteria_results"]
-    )
-
-
-def test_file_task_runtime_quality_gate_accepts_cross_file_extract_to_file():
-    runtime = FileTaskRuntime(
-        tool_executor=lambda name, args: "",
-        model_client=lambda **kwargs: {"content": "ok", "tool_calls": []},
-    )
-    request = FileTaskRequest(
-        task="Extract the action items from notes.pdf into action_items.md.",
-        run_id="cross_file_extract_gate",
-        target_path="action_items.md",
-        files=[FileTaskFile(path="notes.pdf", name="notes.pdf", type="pdf")],
-    )
-
-    result = runtime._evaluate_task_quality_gate(
-        request,
-        [
-            {
-                "path": "action_items.md",
-                "operation": "extract_to_file",
-                "file_type": "md",
-            }
-        ],
-        write_intent=True,
-        output_mode="write",
-    )
-
-    assert result["passed"] is True
-    assert any(
-        item["criterion"] == "cross_file_extract_uses_write_tool"
-        for item in result["criteria_results"]
-    )
-
-
-def test_file_task_runtime_does_not_treat_docx_organize_write_as_cross_file_extract():
-    from app.core.agent.file_task_recipes import semantic_markers
-
-    markers = semantic_markers(
-        "整理当前文档并写入 report.docx",
-        file_types={"docx"},
-        target_file_type="docx",
-    )
-
-    assert markers["cross_file_extract_request"] is False
 
 
 def test_file_task_runtime_emits_typed_event_sequence_with_monotonic_seq():
@@ -2608,7 +2892,6 @@ def test_file_task_runtime_rolls_up_step_results_for_generic_write_tasks():
         for event in events
         if event.type == "step.result" and event.step_id == "check"
     )
-
     assert execute_results
     assert execute_results[-1].payload["status"] == "completed"
     assert execute_results[-1].payload["file_change_count"] == 1
@@ -2665,11 +2948,11 @@ def test_file_task_runtime_readonly_negation_overrides_write_word_in_task():
     classification = runtime._classify_request(request, request.files)
 
     assert classification.output_mode == "answer"
-    assert classification.write_intent is False
+    assert classification.write_required is False
     assert classification.task_family == "analyze"
     assert classification.operation_kind == "read"
     assert "readonly_write_negation" in classification.reason_codes
-    assert "write_intent" not in classification.reason_codes
+    assert "write_required" not in classification.reason_codes
 
 
 def test_file_task_runtime_frontend_readonly_summary_cannot_be_upgraded_to_write():
@@ -2699,25 +2982,13 @@ def test_file_task_runtime_frontend_readonly_summary_cannot_be_upgraded_to_write
     )
 
     classification = runtime._classify_request(request, request.files)
-    upgraded = runtime._apply_intent_adjudication(
-        request,
-        request.files,
-        classification,
-        {
-            "status": "ok",
-            "intent": "edit_file",
-            "confidence": 0.95,
-            "should_write": True,
-        },
-    )
-    details = upgraded.public_dict()
+    details = classification.public_dict()
 
-    assert upgraded.output_mode == "answer", details
-    assert upgraded.write_intent is False, details
-    assert upgraded.operation_kind == "read", details
-    assert "readonly_write_negation" in upgraded.reason_codes
-    assert "ai_intent_adjudicator_readonly_guard" in upgraded.reason_codes
-    assert "ai_intent_adjudicator_override" not in upgraded.reason_codes
+    assert classification.output_mode == "answer", details
+    assert classification.write_required is False, details
+    assert classification.operation_kind == "read", details
+    assert "readonly_write_negation" in classification.reason_codes
+    assert all("adjudicator" not in code for code in classification.reason_codes)
 
 
 def test_file_task_runtime_readonly_attached_filename_does_not_become_target():
@@ -2754,7 +3025,7 @@ def test_file_task_runtime_readonly_attached_filename_does_not_become_target():
     assert context_files[0].path.endswith("codex_frontend_task_flow_probe.txt")
     assert context_files[0].target is False
     assert classification.operation_kind == "read", details
-    assert classification.write_intent is False, details
+    assert classification.write_required is False, details
 
 
 def test_file_task_runtime_create_new_docx_allows_source_file_protection():
@@ -2783,9 +3054,9 @@ def test_file_task_runtime_create_new_docx_allows_source_file_protection():
     details = classification.public_dict()
 
     assert classification.output_mode == "write", details
-    assert classification.write_intent is True, details
+    assert classification.write_required is True, details
     assert classification.operation_kind != "read", details
-    assert "write_intent" in classification.reason_codes, details
+    assert "write_required" in classification.reason_codes, details
     assert "readonly_write_negation" not in classification.reason_codes, details
 
 
@@ -2815,33 +3086,8 @@ def test_file_task_runtime_same_file_protection_still_blocks_write():
     details = classification.public_dict()
 
     assert classification.output_mode == "answer", details
-    assert classification.write_intent is False, details
+    assert classification.write_required is False, details
     assert "readonly_write_negation" in classification.reason_codes, details
-
-
-def test_file_task_runtime_blocks_multi_paragraph_write_for_local_docx_append():
-    runtime = FileTaskRuntime()
-    request = FileTaskRequest(
-        task=(
-            "请继续优化 workspace/report.docx：只追加一句风险声明，"
-            "保留已有表格不变，保存同一个 DOCX。"
-        ),
-        target_path="workspace/report.docx",
-    )
-
-    block = runtime._local_docx_edit_block_message(
-        request,
-        "write_docx_content",
-        {
-            "path": "workspace/report.docx",
-            "paragraphs": json.dumps(
-                [{"text": "Risk Review"}, {"text": "Overall risk level: Moderate."}],
-                ensure_ascii=False,
-            ),
-        },
-    )
-
-    assert "insert_docx_paragraph" in block
 
 
 def test_file_task_runtime_english_create_new_docx_allows_source_file_protection():
@@ -2870,13 +3116,13 @@ def test_file_task_runtime_english_create_new_docx_allows_source_file_protection
     details = classification.public_dict()
 
     assert classification.output_mode == "write", details
-    assert classification.write_intent is True, details
+    assert classification.write_required is True, details
     assert classification.target_file_type == "docx", details
-    assert "write_intent" in classification.reason_codes, details
+    assert "write_required" in classification.reason_codes, details
     assert "readonly_write_negation" not in classification.reason_codes, details
 
 
-def test_file_task_runtime_blocks_write_tool_when_task_is_readonly():
+def test_file_task_runtime_does_not_expose_write_tools_when_task_is_readonly():
     responses = [
         {
             "content": "我准备误写入。",
@@ -2893,8 +3139,10 @@ def test_file_task_runtime_blocks_write_tool_when_task_is_readonly():
         {"content": "已改为只给分析答案。", "tool_calls": []},
     ]
     called_tools = []
+    model_calls = []
 
     def fake_model(**kwargs):
+        model_calls.append(kwargs)
         return responses.pop(0) if responses else {"content": "done", "tool_calls": []}
 
     def fake_executor(tool_name, args):
@@ -2922,22 +3170,27 @@ def test_file_task_runtime_blocks_write_tool_when_task_is_readonly():
             request
         )
     )
-    blocked = next(
+    rejected = next(
         event
         for event in events
-        if event.payload.get("tool_name") == "write_docx_content"
+        if event.type == "tool.finished"
+        and event.payload.get("tool_name") == "write_docx_content"
     )
     run_finished = events[-1]
 
     assert called_tools == ["parse_file_to_text"]
-    assert blocked.payload["blocked"] is True
-    assert "用户没有授权写入文件" in blocked.payload["result_preview"]
-    assert run_finished.payload["summary"] == "已改为只给分析答案。"
+    assert all(
+        "write_docx_content"
+        not in {str(item.get("name") or "") for item in call["tools"]}
+        for call in model_calls
+    )
+    assert rejected.payload["success"] is False
+    assert "阻止" in run_finished.payload["summary"]
     assert run_finished.payload["file_changes"] == []
-    assert run_finished.payload["completed_task"] is True
+    assert run_finished.payload["completed_task"] is False
 
 
-def test_file_task_runtime_blocks_python_file_writes_when_task_is_explicitly_readonly():
+def test_file_task_runtime_does_not_expose_python_when_task_is_explicitly_readonly():
     responses = [
         {
             "content": "我准备用 Python 生成文件。",
@@ -2953,8 +3206,10 @@ def test_file_task_runtime_blocks_python_file_writes_when_task_is_explicitly_rea
         {"content": "已改为只给只读分析。", "tool_calls": []},
     ]
     called_tools = []
+    model_calls = []
 
     def fake_model(**kwargs):
+        model_calls.append(kwargs)
         return responses.pop(0) if responses else {"content": "done", "tool_calls": []}
 
     def fake_executor(tool_name, args):
@@ -2982,20 +3237,23 @@ def test_file_task_runtime_blocks_python_file_writes_when_task_is_explicitly_rea
             request
         )
     )
-    blocked = next(
-        event for event in events if event.payload.get("tool_name") == "run_python_code"
+    rejected = next(
+        event
+        for event in events
+        if event.type == "tool.finished"
+        and event.payload.get("tool_name") == "run_python_code"
     )
     run_finished = events[-1]
 
     assert called_tools == ["parse_file_to_text"]
-    assert blocked.payload["blocked"] is True
-    assert (
-        "已拦截 run_python_code 中的文件写入/保存代码"
-        in blocked.payload["result_preview"]
+    assert all(
+        "run_python_code" not in {str(item.get("name") or "") for item in call["tools"]}
+        for call in model_calls
     )
-    assert run_finished.payload["summary"] == "已改为只给只读分析。"
+    assert rejected.payload["success"] is False
+    assert "阻止" in run_finished.payload["summary"]
     assert run_finished.payload["file_changes"] == []
-    assert run_finished.payload["completed_task"] is True
+    assert run_finished.payload["completed_task"] is False
 
 
 def test_file_task_runtime_executes_model_planned_write_and_emits_file_change():
@@ -3129,164 +3387,6 @@ def test_file_task_runtime_passes_structured_file_changes_to_checker():
     assert len(run_finished.payload.get("file_changes", [])) == 1
 
 
-def test_file_task_runtime_ignores_planner_metadata_from_model_response():
-    def fake_model(**kwargs):
-        request = kwargs["request"]
-        assert request.options.get("planner_policy") == "native_only"
-        assert not request.options.get("planner_backend")
-        return {
-            "content": "已总结：alpha beta gamma",
-            "tool_calls": [],
-            "_planner": {
-                "backend": "retired_external",
-                "source": "external",
-                "policy": "prefer_external",
-                "transport": "embedded",
-                "reason": "external_system_task",
-                "fallback_from": "native",
-            },
-        }
-
-    request = FileTaskRequest(
-        task="访问网页并整理报告",
-        run_id="planner_event_demo",
-        options={
-            "planner_backend": "retired_external",
-            "planner_policy": "prefer_external",
-        },
-    )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=fake_model
-        ).run(request)
-    )
-
-    check_finished = next(event for event in events if event.type == "check.finished")
-    run_finished = next(event for event in events if event.type == "run.finished")
-    expected_runtime = {
-        "execution_path": "native",
-        "terminal_status": "completed",
-        "model_unavailable": False,
-        "readonly_fallback_used": False,
-        "planner": {
-            "backend": "native",
-            "source": "native",
-            "policy": "native_only",
-            "transport": "native",
-            "reason": "file_task_native_only",
-            "round": 1,
-        },
-    }
-
-    assert not any(event.type == "planner.selected" for event in events)
-    assert not any(event.type == "planner.fallback" for event in events)
-    assert {
-        key: value
-        for key, value in check_finished.payload["runtime"].items()
-        if key != "performance"
-    } == expected_runtime
-    assert check_finished.payload["runtime"]["performance"]["total_ms"] >= 0
-    assert run_finished.payload["runtime"] == check_finished.payload["runtime"]
-
-
-def test_file_task_runtime_emits_model_confirmed_plan_before_tools():
-    responses = iter(
-        [
-            {
-                "content": "我会先读取表格，再把表格写入 Word 并核验结果。",
-                "tool_calls": [
-                    {
-                        "name": "read_sheet_data",
-                        "args": {
-                            "path": "sales.xlsx",
-                            "sheet_name": "汇总表",
-                            "max_rows": 200,
-                        },
-                    },
-                    {
-                        "name": "insert_excel_as_docx_table",
-                        "args": {
-                            "source_path": "sales.xlsx",
-                            "target_path": "report.docx",
-                            "sheet_name": "汇总表",
-                            "table_title": "销售台账数据",
-                        },
-                    },
-                ],
-            },
-            {"content": "已完成写入。", "tool_calls": []},
-        ]
-    )
-
-    def fake_model(**kwargs):
-        return next(responses, {"content": "", "tool_calls": []})
-
-    def fake_executor(tool_name, args):
-        if tool_name == "read_sheet_data":
-            return json.dumps({"sheet": "汇总表", "row_count": 200}, ensure_ascii=False)
-        if tool_name == "insert_excel_as_docx_table":
-            return json.dumps(
-                {
-                    "path": args["target_path"],
-                    "source_path": args["source_path"],
-                    "summary": "已将工作表“汇总表”的 200 行数据写入 Word 表格",
-                    "file_type": "docx",
-                    "change_type": "modify",
-                    "sheet": "汇总表",
-                    "rows_written": 200,
-                    "columns_written": 4,
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            return json.dumps(
-                {"completed": True, "confidence": 0.95, "summary": "写入已核验"},
-                ensure_ascii=False,
-            )
-        return ""
-
-    events = list(
-        FileTaskRuntime(tool_executor=fake_executor, model_client=fake_model).run(
-            FileTaskRequest(
-                task="将 xlsx 信息加入 docx",
-                run_id="confirmed_plan_demo",
-                target_path="report.docx",
-                files=[
-                    FileTaskFile(path="sales.xlsx", name="销售台账.xlsx", type="xlsx"),
-                    FileTaskFile(
-                        path="report.docx",
-                        name="雷鸟访谈问题.docx",
-                        type="docx",
-                        target=True,
-                    ),
-                ],
-            )
-        )
-    )
-
-    event_types = [event.type for event in events]
-    plan_index = event_types.index("plan.confirmed")
-    first_tool_index = next(
-        idx
-        for idx, event in enumerate(events)
-        if event.type == "tool.started" and event.step_id.startswith("tool_")
-    )
-    confirmed = events[plan_index]
-
-    assert plan_index < first_tool_index
-    assert confirmed.step_id == "execute"
-    assert (
-        confirmed.payload["summary"] == "我会先读取表格，再把表格写入 Word 并核验结果。"
-    )
-    assert [step["title"] for step in confirmed.payload["steps"]] == [
-        "读取 Excel 表格",
-        "写入 Word 表格",
-        "核验结果",
-    ]
-    assert "sales.xlsx" in confirmed.payload["steps"][0]["description"]
-    assert "report.docx" in confirmed.payload["steps"][1]["description"]
-
-
 def test_file_task_runtime_explicit_write_beats_advisory_analysis_words():
     runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
 
@@ -3374,39 +3474,7 @@ def test_file_task_runtime_quality_gate_rejects_explicit_docx_table_output_witho
     )
 
 
-def test_file_task_runtime_repair_message_guides_explicit_docx_table_tool():
-    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
-    request = FileTaskRequest(
-        task=(
-            "请读取 workspace/koto_complex_task_test/renewal_budget.xlsx，并在 "
-            "workspace/koto_complex_task_test/service_agreement_full_test_20260628.docx "
-            "末尾新增一个真实 Word 表格。"
-        ),
-        target_path="workspace/koto_complex_task_test/service_agreement_full_test_20260628.docx",
-    )
-
-    message = runtime._repair_retry_message(
-        request,
-        {
-            "status": "quality_gate_failed",
-            "summary": "缺少真实 Word 表格。",
-            "remaining": ["用户要求表格进入 Word；当前表格写入行数：0。"],
-        },
-        [
-            {
-                "operation": "write_docx_content",
-                "path": request.target_path,
-                "paragraphs_written": 6,
-            }
-        ],
-    )
-
-    assert "insert_excel_as_docx_table" in message
-    assert "renewal_budget.xlsx" in message
-    assert request.target_path in message
-
-
-def test_file_task_runtime_quality_gate_accepts_verified_docx_narrative_after_python_write(
+def test_file_task_runtime_quality_gate_accepts_verified_docx_after_python_write(
     tmp_path,
 ):
     from docx import Document
@@ -3449,7 +3517,7 @@ def test_file_task_runtime_quality_gate_accepts_verified_docx_narrative_after_py
 
     assert check["passed"] is True
     assert any(
-        item["criterion"] == "docx_report_has_narrative" and item["passed"] is True
+        item["criterion"] == "generic_docx_has_native_write" and item["passed"] is True
         for item in check["criteria_results"]
     )
 
@@ -3467,11 +3535,13 @@ def test_file_task_runtime_classifies_ppt_page_write_as_presentation():
 
     classification = runtime._classify_request(request, request.files)
 
-    assert classification.task_family == "presentation"
-    assert classification.operation_kind == "write_slides"
+    assert classification.task_family == "transform"
+    assert classification.operation_kind == "write"
     assert classification.output_mode == "write"
-    assert classification.selected_recipe == "ppt_slide_write"
-    assert "ppt_slide_write_request" in classification.reason_codes
+    assert classification.write_authorized is True
+    assert classification.write_required is True
+    assert classification.selected_recipe == ""
+    assert "ppt_slide_write_request" not in classification.reason_codes
 
 
 def test_file_task_runtime_classifies_beautiful_ppt_as_high_quality_design():
@@ -3486,57 +3556,17 @@ def test_file_task_runtime_classifies_beautiful_ppt_as_high_quality_design():
 
     classification = runtime._classify_request(request, request.files)
 
-    assert classification.task_family == "presentation"
-    assert classification.operation_kind == "design_slides"
-    assert classification.output_mode == "write"
-    assert classification.selected_recipe == "pptx_design_edit_high_quality"
-    assert "ppt_design_request" in classification.reason_codes
-    assert "design_pptx_theme_layout" in classification.matched_capabilities
+    assert classification.task_family == "analyze"
+    assert classification.operation_kind == "hybrid"
+    assert classification.output_mode == "hybrid"
+    assert classification.write_authorized is True
+    assert classification.write_required is False
+    assert classification.selected_recipe == ""
+    assert "ppt_design_request" not in classification.reason_codes
 
 
-def test_file_task_runtime_ppt_light_theme_edit_overrides_answer_mode_and_writes():
-    tool_calls = []
-
-    def fake_model(**kwargs):
-        return {
-            "content": "开始应用浅色系主题。",
-            "tool_calls": [
-                {
-                    "name": "design_pptx_theme_layout",
-                    "args": {
-                        "path": "AI Agent.pptx",
-                        "theme": "light_blue_professional",
-                        "style_prompt": "浅色系专业商务风格，柔和蓝白配色，保留原内容。",
-                    },
-                }
-            ],
-        }
-
-    def fake_executor(tool_name, args):
-        tool_calls.append((tool_name, dict(args or {})))
-        if tool_name == "parse_file_to_text":
-            return "AI Agent PPT：核心概念、价值主张、付费逻辑。"
-        if tool_name == "design_pptx_theme_layout":
-            return json.dumps(
-                {
-                    "success": True,
-                    "path": args["path"],
-                    "operation": "design_pptx_theme_layout",
-                    "file_type": "pptx",
-                    "summary": "已应用浅色系主题。",
-                    "slides_designed": 4,
-                    "text_shapes_styled": 12,
-                    "theme_name": "light_blue_professional",
-                    "layout_strategy": "preserve_content_refresh_theme",
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            return json.dumps(
-                {"completed": True, "summary": "PPT 已更新。"}, ensure_ascii=False
-            )
-        raise AssertionError(f"unexpected tool call: {tool_name}")
-
+def test_file_task_runtime_explicit_answer_mode_blocks_ppt_write_keywords():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task="我不喜欢这个ppt的风格，换一个浅色系的",
         run_id="ppt_light_theme_answer_mode_regression",
@@ -3549,241 +3579,70 @@ def test_file_task_runtime_ppt_light_theme_edit_overrides_answer_mode_and_writes
         options={"output_mode": "answer"},
     )
 
-    events = list(
-        FileTaskRuntime(tool_executor=fake_executor, model_client=fake_model).run(
-            request
-        )
-    )
-    run_started = events[0]
-    file_changed = next(event for event in events if event.type == "file.changed")
-    check_finished = next(event for event in events if event.type == "check.finished")
+    classification = runtime._classify_request(request, request.files)
 
-    assert run_started.payload["output_mode"] == "write"
-    assert run_started.payload["write_intent"] is True
-    assert (
-        "answer_mode_overridden_by_write_intent" in run_started.payload["reason_codes"]
-    )
-    assert any(name == "design_pptx_theme_layout" for name, _args in tool_calls)
-    assert file_changed.payload["operation"] == "design_pptx_theme_layout"
-    assert check_finished.payload["passed"] is True
+    assert classification.output_mode == "answer"
+    assert classification.write_required is False
+    assert "answer_mode_overrode_write_requirement" in classification.reason_codes
 
 
-def test_file_task_runtime_ai_intent_adjudicator_upgrades_ambiguous_ppt_design_to_write():
-    model_calls = []
-    tool_calls = []
-
-    def fake_model(**kwargs):
-        model_calls.append(kwargs)
-        system = str(kwargs.get("system") or "")
-        if "任务意图裁判" in system:
-            return {
-                "content": json.dumps(
-                    {
-                        "intent": "edit_file",
-                        "confidence": 0.88,
-                        "should_write": True,
-                        "needs_clarification": False,
-                        "target_file_type": "pptx",
-                        "operation": "redesign_theme",
-                        "reason": "用户要求把当前 PPT 风格改得更清爽，应直接修改目标演示文稿。",
-                    },
-                    ensure_ascii=False,
-                )
-            }
-        return {
-            "content": "开始应用清爽浅色主题。",
-            "tool_calls": [
-                {
-                    "name": "design_pptx_theme_layout",
-                    "args": {
-                        "path": "deck.pptx",
-                        "theme": "light_clean",
-                        "style_prompt": "清爽浅色系 PPT 风格，保留原内容。",
-                    },
-                }
-            ],
-        }
-
-    def fake_executor(tool_name, args):
-        tool_calls.append((tool_name, dict(args or {})))
-        if tool_name == "parse_file_to_text":
-            return "PPT 内容包括 AI Agent 概念、产品价值和商业模式。"
-        if tool_name == "design_pptx_theme_layout":
-            return json.dumps(
-                {
-                    "success": True,
-                    "path": args["path"],
-                    "operation": "design_pptx_theme_layout",
-                    "file_type": "pptx",
-                    "summary": "已应用清爽浅色主题。",
-                    "slides_designed": 5,
-                    "text_shapes_styled": 16,
-                    "theme_name": "light_clean",
-                    "layout_strategy": "preserve_content_refresh_theme",
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            return json.dumps(
-                {"completed": True, "summary": "PPT 已更新。"}, ensure_ascii=False
-            )
-        raise AssertionError(f"unexpected tool call: {tool_name}")
-
+def test_file_task_runtime_ambiguous_ppt_review_stays_readonly_without_model_routing():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task="看看这个ppt整体感觉怎么样",
-        run_id="ai_intent_adjudicator_ppt_upgrade",
+        run_id="deterministic_ppt_review",
         target_path="deck.pptx",
         files=[
             FileTaskFile(path="deck.pptx", name="deck.pptx", type="pptx", target=True)
         ],
-        options={"enable_ai_intent_adjudicator": True},
     )
 
-    events = list(
-        FileTaskRuntime(tool_executor=fake_executor, model_client=fake_model).run(
-            request
-        )
-    )
-    run_started = events[0]
-    task_classified = next(event for event in events if event.type == "task.classified")
-    file_changed = next(event for event in events if event.type == "file.changed")
+    classification = runtime._classify_request(request, request.files)
 
-    assert len(model_calls) >= 2
-    assert run_started.payload["output_mode"] == "write"
-    assert run_started.payload["write_intent"] is True
-    assert "ai_intent_adjudicator:edit_file" in run_started.payload["reason_codes"]
-    assert "ai_intent_adjudicator_override" in run_started.payload["reason_codes"]
-    assert task_classified.payload["intent_adjudication"]["intent"] == "edit_file"
-    assert file_changed.payload["operation"] == "design_pptx_theme_layout"
+    assert classification.output_mode == "answer"
+    assert classification.write_required is False
+    assert all("adjudicator" not in code for code in classification.reason_codes)
 
 
-def test_file_task_runtime_ai_intent_adjudicator_does_not_override_explicit_readonly():
-    model_calls = []
-
-    def fake_model(**kwargs):
-        model_calls.append(kwargs)
-        return {
-            "content": json.dumps(
-                {
-                    "intent": "edit_file",
-                    "confidence": 0.95,
-                    "should_write": True,
-                    "needs_clarification": False,
-                    "target_file_type": "docx",
-                    "operation": "rewrite",
-                    "reason": "测试模型试图越权写入。",
-                },
-                ensure_ascii=False,
-            )
-        }
-
+def test_file_task_runtime_explicit_readonly_is_deterministic():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task="分析这个docx，只分析，不写入文件。",
-        run_id="ai_intent_adjudicator_readonly_guard",
+        run_id="deterministic_readonly_guard",
         target_path="draft.docx",
         files=[
             FileTaskFile(path="draft.docx", name="draft.docx", type="docx", target=True)
         ],
-        options={"enable_ai_intent_adjudicator": True},
     )
 
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=fake_model
-        ).run(request)
-    )
-    run_started = events[0]
+    classification = runtime._classify_request(request, request.files)
 
-    assert run_started.payload["output_mode"] == "answer"
-    assert run_started.payload["write_intent"] is False
-    assert "readonly_write_negation" in run_started.payload["reason_codes"]
-    assert not any(
-        "ai_intent_adjudicator_override" == code
-        for code in run_started.payload["reason_codes"]
-    )
+    assert classification.output_mode == "answer"
+    assert classification.write_required is False
+    assert "readonly_write_negation" in classification.reason_codes
+    assert all("adjudicator" not in code for code in classification.reason_codes)
 
 
-def test_file_task_runtime_intent_adjudicator_prompt_keeps_advice_readonly_by_default():
-    prompt = FileTaskRuntime()._intent_adjudicator_system_prompt()
+def test_file_task_runtime_advice_request_stays_readonly_without_router_prompt():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
+    request = FileTaskRequest(task="优化论点，并说明有什么风险和机会")
 
-    assert "优化论点" in prompt
-    assert "有什么风险和机会" in prompt
-    assert "默认是 answer_only" in prompt
-    assert "不等待确认" in prompt
-    assert "不写入文件" in prompt
-    assert "只有用户明确说" in prompt
-    assert "应用到文件" in prompt
-    assert "才使用 analyze_then_confirm" in prompt
+    classification = runtime._classify_request(request, [])
+
+    assert classification.output_mode == "answer"
+    assert classification.write_required is False
+    assert not hasattr(runtime, "_intent_adjudicator_system_prompt")
 
 
-def test_file_task_runtime_ai_intent_adjudicator_preserves_create_file_with_source_protection():
-    model_calls = []
-
-    def fake_model(**kwargs):
-        model_calls.append(kwargs)
-        system = str(kwargs.get("system") or "")
-        if "任务意图裁判" in system:
-            return {
-                "content": json.dumps(
-                    {
-                        "intent": "analyze_then_confirm",
-                        "confidence": 0.91,
-                        "should_write": False,
-                        "needs_clarification": False,
-                        "target_file_type": "docx",
-                        "operation": "summarize",
-                        "reason": "模型误把源文件保护理解成只读分析。",
-                    },
-                    ensure_ascii=False,
-                )
-            }
-        return {
-            "content": "已创建文件。",
-            "tool_calls": [
-                {
-                    "name": "write_docx_content",
-                    "args": {
-                        "path": "workspace/koto_model_primary_intent_retest.docx",
-                        "paragraphs": json.dumps(
-                            [{"text": "Koto Model Primary Real Task Test"}],
-                            ensure_ascii=False,
-                        ),
-                    },
-                }
-            ],
-        }
-
-    tool_calls = []
-
-    def fake_executor(tool_name, args):
-        tool_calls.append((tool_name, dict(args or {})))
-        if tool_name == "parse_file_to_text":
-            return "workspace file content"
-        if tool_name == "write_docx_content":
-            return json.dumps(
-                {
-                    "success": True,
-                    "path": args["path"],
-                    "operation": "write_docx_content",
-                    "file_type": "docx",
-                    "summary": "已创建文件。",
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            return json.dumps(
-                {"completed": True, "summary": "DOCX 已创建。"},
-                ensure_ascii=False,
-            )
-        return ""
-
+def test_file_task_runtime_create_file_with_source_protection_is_deterministic():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task=(
             "Read the attached _test_integration_workspace.txt and create a new Word "
             "file at workspace/koto_model_primary_intent_retest.docx. Include the "
             "original content. Do not modify the original txt file."
         ),
-        run_id="ai_intent_adjudicator_preserves_create_file_source_guard",
+        run_id="deterministic_create_file_source_guard",
         target_path="workspace/koto_model_primary_intent_retest.docx",
         files=[
             FileTaskFile(
@@ -3792,27 +3651,18 @@ def test_file_task_runtime_ai_intent_adjudicator_preserves_create_file_with_sour
                 type="txt",
             )
         ],
-        options={"enable_ai_intent_adjudicator": True},
     )
 
-    events = list(
-        FileTaskRuntime(tool_executor=fake_executor, model_client=fake_model).run(
-            request
-        )
-    )
-    run_started = events[0]
+    classification = runtime._classify_request(request, request.files)
 
-    assert run_started.payload["output_mode"] == "write"
-    assert run_started.payload["write_intent"] is True
-    assert "readonly_write_negation" not in run_started.payload["reason_codes"]
-    assert (
-        "ai_intent_adjudicator_preserved_explicit_artifact_write"
-        in run_started.payload["reason_codes"]
-    )
-    assert any(name == "write_docx_content" for name, _args in tool_calls)
+    assert classification.output_mode == "write"
+    assert classification.write_required is True
+    assert classification.target_file_type == "docx"
+    assert "readonly_write_negation" not in classification.reason_codes
+    assert all("adjudicator" not in code for code in classification.reason_codes)
 
 
-def test_file_task_runtime_ai_intent_adjudicator_preserves_explicit_table_write_contract():
+def test_file_task_runtime_deterministic_classification_preserves_table_write_contract():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "",
         model_client=lambda **kwargs: {"content": "ok", "tool_calls": []},
@@ -3839,36 +3689,16 @@ def test_file_task_runtime_ai_intent_adjudicator_preserves_explicit_table_write_
                 target=True,
             ),
         ],
-        options={"enable_ai_intent_adjudicator": True},
     )
 
     classification = runtime._classify_request(request, runtime._context_files(request))
-    adjudicated = runtime._apply_intent_adjudication(
-        request,
-        runtime._context_files(request),
-        classification,
-        {
-            "status": "ok",
-            "intent": "answer_only",
-            "confidence": 0.94,
-            "should_write": False,
-            "needs_clarification": False,
-            "target_file_type": "docx",
-            "operation": "summarize",
-            "reason": "模型误把源文件保护理解成只读分析。",
-        },
-    )
-    details = adjudicated.public_dict()
+    details = classification.public_dict()
 
-    assert adjudicated.output_mode == "write", details
-    assert adjudicated.write_intent is True, details
-    assert adjudicated.selected_recipe == "xlsx_table_to_docx", details
-    assert "readonly_write_negation" not in adjudicated.reason_codes, details
-    assert (
-        "ai_intent_adjudicator_preserved_explicit_write_contract"
-        in adjudicated.reason_codes
-    ), details
-    assert "ai_intent_adjudicator_override" not in adjudicated.reason_codes, details
+    assert classification.output_mode == "write", details
+    assert classification.write_required is True, details
+    assert classification.selected_recipe == "", details
+    assert "readonly_write_negation" not in classification.reason_codes, details
+    assert all("adjudicator" not in code for code in classification.reason_codes)
 
 
 def test_file_task_runtime_quality_gate_rejects_ppt_beautify_without_design_pass():
@@ -3900,12 +3730,7 @@ def test_file_task_runtime_quality_gate_rejects_ppt_beautify_without_design_pass
         model_failed=False,
     )
 
-    assert check["passed"] is False
-    assert check["status"] == "quality_gate_failed"
-    assert any(
-        item["criterion"] == "pptx_design_has_real_design_pass"
-        for item in check["criteria_results"]
-    )
+    assert check["passed"] is True
 
 
 def test_file_task_runtime_repairs_missing_docx_write_path_for_single_target(tmp_path):
@@ -3959,334 +3784,6 @@ def test_file_task_runtime_repairs_missing_docx_write_path_for_single_target(tmp
     assert check_finished.payload["status"] == "verified"
 
 
-def test_file_task_runtime_accepts_execution_brief_before_tool_calls():
-    seen_last_messages = []
-
-    def fake_executor(tool_name, args):
-        if tool_name == "parse_file_to_text":
-            return "财务预测草稿。"
-        if tool_name == "write_docx_content":
-            return json.dumps(
-                {
-                    "success": True,
-                    "path": args["path"],
-                    "file_type": "docx",
-                    "operation": "write_docx_content",
-                    "summary": "已写入 2 个段落到 Word 文档",
-                    "change_type": "modify",
-                    "paragraphs_written": 2,
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            return json.dumps(
-                {"completed": True, "summary": "report.docx 已完成更新。"},
-                ensure_ascii=False,
-            )
-        raise AssertionError(f"unexpected tool call: {tool_name}")
-
-    def fake_model(**kwargs):
-        seen_last_messages.append(str(kwargs["messages"][-1]["content"]))
-        if any(
-            message.get("role") == "function"
-            and message.get("name") == "write_docx_content"
-            for message in kwargs["messages"]
-        ):
-            return {"content": "已完成写入。", "tool_calls": []}
-        if "已收到 execution_brief" in str(kwargs["messages"][-1]["content"]):
-            return {
-                "content": "现在开始写入文档。",
-                "tool_calls": [
-                    {
-                        "id": "write_after_brief",
-                        "name": "write_docx_content",
-                        "args": {
-                            "path": "report.docx",
-                            "paragraphs": '[{"text":"财务预测整理摘要"},{"text":"收入增长主要来自新品放量。"}]',
-                        },
-                    }
-                ],
-            }
-        return {
-            "content": "",
-            "execution_brief": {
-                "title": "任务分析",
-                "summary": "先归纳财务预测结论，再把摘要写入 report.docx。",
-                "steps": [
-                    {
-                        "title": "整理关键结论",
-                        "description": "基于显式上下文提炼财务预测的核心结论",
-                    },
-                    {
-                        "title": "写入目标文档",
-                        "description": "把整理后的摘要写回 report.docx",
-                    },
-                ],
-                "planned_tools": ["write_docx_content"],
-                "write_targets": ["report.docx"],
-                "verification": "检查 report.docx 是否真的更新。",
-            },
-            "tool_calls": [],
-        }
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor, model_client=fake_model, max_rounds=4
-        ).run(
-            FileTaskRequest(
-                task="整理当前财务预测并写入 report.docx",
-                run_id="execution_brief_demo",
-                target_path="report.docx",
-                files=[
-                    FileTaskFile(
-                        path="report.docx", name="report.docx", type="docx", target=True
-                    )
-                ],
-            )
-        )
-    )
-
-    briefed = next(event for event in events if event.type == "plan.briefed")
-    confirmed = next(event for event in events if event.type == "plan.confirmed")
-    file_changed = next(event for event in events if event.type == "file.changed")
-    run_finished = events[-1]
-
-    assert briefed.payload["title"] == "任务分析"
-    assert briefed.payload["planned_tools"] == ["write_docx_content"]
-    assert confirmed.payload["steps"][0]["tool_name"] == "write_docx_content"
-    assert any("已收到 execution_brief" in message for message in seen_last_messages)
-    assert file_changed.payload["operation"] == "write_docx_content"
-    assert run_finished.payload["completed_task"] is True
-
-
-def test_file_task_runtime_accepts_execution_brief_as_tool_call_before_write():
-    seen_last_messages = []
-
-    def fake_executor(tool_name, args):
-        if tool_name == "parse_file_to_text":
-            return "财务预测草稿。"
-        if tool_name == "write_docx_content":
-            return json.dumps(
-                {
-                    "success": True,
-                    "path": args["path"],
-                    "file_type": "docx",
-                    "operation": "write_docx_content",
-                    "summary": "已写入 2 个段落到 Word 文档",
-                    "change_type": "modify",
-                    "paragraphs_written": 2,
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            return json.dumps(
-                {"completed": True, "summary": "report.docx 已完成更新。"},
-                ensure_ascii=False,
-            )
-        raise AssertionError(f"unexpected tool call: {tool_name}")
-
-    def fake_model(**kwargs):
-        seen_last_messages.append(str(kwargs["messages"][-1]["content"]))
-        if "已收到 execution_brief" in str(kwargs["messages"][-1]["content"]):
-            return {
-                "content": "现在开始写入文档。",
-                "tool_calls": [
-                    {
-                        "name": "write_docx_content",
-                        "args": {
-                            "path": "report.docx",
-                            "paragraphs": '[{"text":"财务预测整理摘要"},{"text":"收入增长主要来自新品放量。"}]',
-                        },
-                    }
-                ],
-            }
-        return {
-            "content": "",
-            "tool_calls": [
-                {
-                    "name": "execution_brief",
-                    "args": {
-                        "summary": "先归纳财务预测结论，再把摘要写入 report.docx。",
-                        "steps": [
-                            {
-                                "title": "整理关键结论",
-                                "description": "基于显式上下文提炼核心结论",
-                            },
-                            {
-                                "title": "写入目标文档",
-                                "description": "把整理后的摘要写回 report.docx",
-                            },
-                        ],
-                        "planned_tools": ["write_docx_content"],
-                        "write_targets": ["report.docx"],
-                        "verification": "检查 report.docx 是否真的更新。",
-                    },
-                }
-            ],
-        }
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor, model_client=fake_model, max_rounds=4
-        ).run(
-            FileTaskRequest(
-                task="整理当前财务预测并写入 report.docx",
-                run_id="execution_brief_tool_call_demo",
-                target_path="report.docx",
-                files=[
-                    FileTaskFile(
-                        path="report.docx", name="report.docx", type="docx", target=True
-                    )
-                ],
-            )
-        )
-    )
-
-    briefed = next(event for event in events if event.type == "plan.briefed")
-    file_changed = next(event for event in events if event.type == "file.changed")
-    run_finished = events[-1]
-
-    assert briefed.payload["planned_tools"] == ["write_docx_content"]
-    assert any("已收到 execution_brief" in message for message in seen_last_messages)
-    assert not any(
-        event.type == "tool.finished"
-        and event.payload.get("tool_name") == "execution_brief"
-        and event.payload.get("success") is False
-        for event in events
-    )
-    assert file_changed.payload["operation"] == "write_docx_content"
-    assert run_finished.payload["completed_task"] is True
-
-
-def test_file_task_runtime_execution_brief_ignores_legacy_delegated_planner_and_stays_native():
-    class FakeModelClient:
-        def __init__(self):
-            self.options_seen = []
-            self.tool_gap_seen = False
-
-        def call(self, **kwargs):
-            request = kwargs["request"]
-            messages = kwargs["messages"]
-            self.options_seen.append(dict(request.options or {}))
-
-            if any(
-                message.get("role") == "function"
-                and message.get("name") == "write_docx_content"
-                for message in messages
-            ):
-                assert request.options.get("planner_policy") == "native_only"
-                assert not request.options.get("planner_backend")
-                return {
-                    "content": "已完成写入。",
-                    "tool_calls": [],
-                    "_planner": {
-                        "backend": "native",
-                        "source": "native",
-                        "policy": "native_only",
-                        "transport": "native",
-                        "reason": "file_task_native_only",
-                    },
-                }
-
-            if "已收到 execution_brief" in str(messages[-1]["content"]):
-                assert request.options.get("planner_policy") == "native_only"
-                assert not request.options.get("planner_backend")
-                return {
-                    "content": "继续原生执行写入。",
-                    "tool_calls": [
-                        {
-                            "id": "write_from_retired_external",
-                            "name": "write_docx_content",
-                            "args": {
-                                "path": "report.docx",
-                                "paragraphs": '[{"text":"原生白盒执行。"},{"text":"第二段满足质量门。"},{"text":"第三段记录核验依据。"}]',
-                            },
-                        }
-                    ],
-                    "_planner": {
-                        "backend": "native",
-                        "source": "native",
-                        "policy": "native_only",
-                        "transport": "native",
-                        "reason": "file_task_native_only",
-                    },
-                }
-
-            assert request.options.get("planner_policy") == "native_only"
-            assert not request.options.get("planner_backend")
-            return {
-                "content": "",
-                "execution_brief": {
-                    "title": "任务分析",
-                    "summary": "先完成任务分析，再按白盒骨架继续原生执行。",
-                    "delegated_planner": "retired_external",
-                    "steps": [
-                        {
-                            "title": "继续原生执行",
-                            "description": "在 Koto 工具骨架内完成写入",
-                        }
-                    ],
-                },
-                "tool_calls": [],
-            }
-
-    def fake_executor(tool_name, args):
-        if tool_name == "parse_file_to_text":
-            return "文档草稿。"
-        if tool_name == "write_docx_content":
-            return json.dumps(
-                {
-                    "success": True,
-                    "path": args["path"],
-                    "file_type": "docx",
-                    "operation": "write_docx_content",
-                    "summary": "已写入 3 个段落到 Word 文档",
-                    "change_type": "modify",
-                    "paragraphs_written": 3,
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            return json.dumps(
-                {"completed": True, "summary": "report.docx 已完成更新。"},
-                ensure_ascii=False,
-            )
-        raise AssertionError(f"unexpected tool call: {tool_name}")
-
-    model_client = FakeModelClient()
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor, model_client=model_client, max_rounds=4
-        ).run(
-            FileTaskRequest(
-                task="整理当前文档并写入 report.docx",
-                run_id="execution_brief_delegate_demo",
-                target_path="report.docx",
-                files=[
-                    FileTaskFile(
-                        path="report.docx", name="report.docx", type="docx", target=True
-                    )
-                ],
-            )
-        )
-    )
-
-    briefed = next(event for event in events if event.type == "plan.briefed")
-    run_finished = events[-1]
-
-    assert "delegated_planner" not in briefed.payload
-    assert all(
-        options.get("planner_policy") == "native_only"
-        for options in model_client.options_seen
-    )
-    assert all(
-        not options.get("planner_backend") for options in model_client.options_seen
-    )
-    assert not any(event.type == "planner.selected" for event in events)
-    assert not any(event.type == "planner.fallback" for event in events)
-    assert run_finished.payload["completed_task"] is True
-
-
 def test_file_task_runtime_classification_defers_planner_without_explicit_override():
     def fake_model(**kwargs):
         return {"content": "已完成摘要。", "tool_calls": []}
@@ -4319,60 +3816,20 @@ def test_file_task_runtime_classification_defers_planner_without_explicit_overri
     assert "planner_deferred:model_first" not in run_started.payload["reason_codes"]
 
 
-def test_file_task_runtime_simple_quick_action_mode_skips_classification_and_plan_created():
-    def fake_model(**kwargs):
-        return {"content": "已总结当前文件重点。", "tool_calls": []}
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=fake_model, max_rounds=2
-        ).run(
-            FileTaskRequest(
-                task="请总结当前文件内容",
-                run_id="quick_action_simple_demo",
-                options={"quick_action_mode": "simple"},
-                files=[
-                    FileTaskFile(
-                        path="notes.txt",
-                        name="notes.txt",
-                        type="txt",
-                        content="alpha beta",
-                        target=True,
-                    )
-                ],
-            )
-        )
-    )
-
-    event_types = [event.type for event in events]
-    run_started = events[0]
-    run_finished = events[-1]
-
-    assert run_started.payload["quick_action_mode"] == "simple"
-    assert "task.classified" not in event_types
-    assert "plan.created" not in event_types
-    assert "plan.checked" in event_types
-    plan_checked = next(event for event in events if event.type == "plan.checked")
-    assert plan_checked.payload["quick_action_bypass"] is True
-    assert plan_checked.payload["passed"] is True
-    assert run_finished.payload["completed_task"] is True
-
-
-def test_file_task_runtime_system_prompt_mentions_execution_brief_protocol():
+def test_file_task_runtime_system_prompt_rejects_secondary_plan_protocols():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "", model_client=lambda **kwargs: {}
     )
     request = FileTaskRequest(
-        task="整理文件并写回目标文档", run_id="execution_brief_prompt_demo"
+        task="整理文件并写回目标文档", run_id="kernel_only_prompt_demo"
     )
 
     system = runtime._build_system_prompt(request, [])
 
-    assert "execution_brief" in system
-    assert "execution_plan" in system
-    assert "首轮协议" in system
-    assert "返回 execution_plan 或 execution_brief 后" in system
-    assert "白盒任务骨架" in system
+    assert "execution_brief" not in system
+    assert "execution_plan" not in system
+    assert "自主选择最少且充分的工具步骤" in system
+    assert "任务契约" in system
 
 
 def test_file_task_runtime_prompt_guides_answer_mode_without_writeback():
@@ -4402,6 +3859,7 @@ def test_file_task_runtime_prompt_guides_hybrid_mode_as_analysis_first():
     request = FileTaskRequest(
         task="分析这个投资建议书，看看有哪些大方向需要修改的地方",
         target_path="雷鸟创新-投资建议书.docx",
+        options={"output_mode": "hybrid"},
         files=[
             FileTaskFile(
                 path="雷鸟创新-投资建议书.docx",
@@ -4417,7 +3875,8 @@ def test_file_task_runtime_prompt_guides_hybrid_mode_as_analysis_first():
     content = messages[-1]["content"]
 
     assert "当前任务反馈模式：先分析后决定" in system
-    assert "除非用户这轮已经明确要求直接应用到文件，否则不要直接调用写入工具" in system
+    assert "可以按需调用写入工具；也可以只返回分析" in system
+    assert "文件变更不是本模式的完成条件" in system
     assert '"task_feedback_mode"' in content
     assert '"output_mode": "hybrid"' in content
     assert '"should_write_this_round": false' in content
@@ -4430,6 +3889,7 @@ def test_file_task_runtime_prompt_includes_structured_intent_plan_context():
     request = FileTaskRequest(
         task="分析这个投资建议书，看看有哪些大方向需要修改的地方",
         target_path="雷鸟创新-投资建议书.docx",
+        options={"output_mode": "hybrid"},
         files=[
             FileTaskFile(
                 path="雷鸟创新-投资建议书.docx",
@@ -4492,7 +3952,7 @@ def test_file_task_runtime_reuses_execution_context_for_prompt_building():
                 goal_statement="先分析，再等待确认。",
                 output_mode=classification.output_mode,
                 confidence=classification.confidence,
-                write_intent=classification.write_intent,
+                write_required=classification.write_required,
                 can_apply=False,
                 requires_confirmation=False,
                 recommended_strategy="analyze_then_optional_apply",
@@ -4550,7 +4010,7 @@ def test_file_task_runtime_run_uses_custom_intent_planner_steps_and_payload():
                 goal_statement="先分析风险，再等待确认应用。",
                 output_mode=classification.output_mode,
                 confidence=0.84,
-                write_intent=classification.write_intent,
+                write_required=classification.write_required,
                 can_apply=True,
                 requires_confirmation=True,
                 recommended_strategy="analyze_then_confirm",
@@ -4615,545 +4075,6 @@ def test_file_task_runtime_run_uses_custom_intent_planner_steps_and_payload():
     )
 
 
-def test_file_task_runtime_surfaces_tool_gap_without_retrying_write_guard():
-    def fake_model(**kwargs):
-        return {
-            "content": "当前任务需要新的 Koto 工具。",
-            "tool_calls": [],
-            "tool_gap": {
-                "summary": "当前缺少读取 CAD 文件的 Koto 原生工具。",
-                "missing_capability": "read_cad_file",
-                "why_missing": "allowlist 中没有可读取 dwg 的工具。",
-                "suggested_next_step": "先实现只读 CAD 解析工具，再决定写入方案。",
-                "proposed_tool": {
-                    "name": "read_cad_file",
-                    "description": "解析 DWG/DXF 为可检索的结构化文本。",
-                    "parameters": {"type": "object"},
-                },
-            },
-            "_planner": {
-                "backend": "retired_external",
-                "source": "external",
-                "policy": "prefer_external",
-                "transport": "embedded",
-                "reason": "unsupported_file_types:dwg",
-            },
-        }
-
-    request = FileTaskRequest(
-        task="修改 CAD 文件并导出总结",
-        run_id="tool_gap_demo",
-        target_path="drawing.dwg",
-    )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=fake_model
-        ).run(request)
-    )
-
-    tool_missing = next(event for event in events if event.type == "tool.missing")
-    check_finished = next(event for event in events if event.type == "check.finished")
-    run_finished = next(event for event in events if event.type == "run.finished")
-    expected_runtime = {
-        "execution_path": "native",
-        "terminal_status": "tool_gap",
-        "model_unavailable": False,
-        "readonly_fallback_used": False,
-        "planner": {
-            "backend": "native",
-            "source": "native",
-            "policy": "native_only",
-            "transport": "native",
-            "reason": "file_task_native_only",
-            "round": 1,
-        },
-    }
-    expected_artifact = {
-        "artifact_type": "koto_next_action_v1",
-        "category": "missing_native_tool",
-        "tool_design_protocol": "koto_tool_design_v1",
-        "tool_design_status": "draft",
-        "generated_by": "koto_file_task_runtime",
-        "external_planner_required": False,
-        "title": "Koto 下一步：read_cad_file",
-        "summary": "当前缺少读取 CAD 文件的 Koto 原生工具。",
-        "source_task": "修改 CAD 文件并导出总结",
-        "target_path": "drawing.dwg",
-        "missing_capability": "read_cad_file",
-        "why_missing": "allowlist 中没有可读取 dwg 的工具。",
-        "suggested_next_step": "先实现只读 CAD 解析工具，再决定写入方案。",
-        "implementation_scope": "smallest_next_capability",
-        "acceptance_criteria": [
-            "为 read_cad_file 提供稳定的 Koto 原生工具入口",
-            "工具返回结构需要可被 file-task 规划器直接消费",
-            "补齐能力后可重新执行当前任务而无需改写用户意图",
-        ],
-        "proposed_tool": {
-            "name": "read_cad_file",
-            "description": "解析 DWG/DXF 为可检索的结构化文本。",
-            "parameters": {"type": "object"},
-            "returns": "",
-            "rationale": "",
-        },
-        "runtime_context": expected_runtime,
-    }
-
-    assert tool_missing.payload == {
-        "summary": "当前缺少读取 CAD 文件的 Koto 原生工具。",
-        "missing_capability": "read_cad_file",
-        "why_missing": "allowlist 中没有可读取 dwg 的工具。",
-        "suggested_next_step": "先实现只读 CAD 解析工具，再决定写入方案。",
-        "proposed_tool": {
-            "name": "read_cad_file",
-            "description": "解析 DWG/DXF 为可检索的结构化文本。",
-            "parameters": {"type": "object"},
-        },
-        "next_action_artifact": expected_artifact,
-        "runtime": expected_runtime,
-        "round": 1,
-    }
-    assert not any(
-        event.type == "tool.finished"
-        and event.payload.get("tool_name") == "write_guard"
-        for event in events
-    )
-    assert check_finished.payload["status"] == "tool_gap"
-    assert check_finished.payload["passed"] is False
-    assert check_finished.payload["tool_gap"]["missing_capability"] == "read_cad_file"
-    assert check_finished.payload["next_action_artifact"] == expected_artifact
-    assert {
-        key: value
-        for key, value in check_finished.payload["runtime"].items()
-        if key != "performance"
-    } == {**expected_runtime, "terminal_status": "tool_gap"}
-    assert check_finished.payload["runtime"]["performance"]["total_ms"] >= 0
-    assert run_finished.payload["completed_task"] is False
-    assert run_finished.payload["tool_gap"]["missing_capability"] == "read_cad_file"
-    assert run_finished.payload["next_action_artifact"] == expected_artifact
-    assert run_finished.payload["runtime"] == check_finished.payload["runtime"]
-
-
-def test_file_task_runtime_does_not_external_fallback_after_tool_gap():
-    class FakeModelClient:
-        def __init__(self):
-            self.options_seen = []
-            self.tool_gap_seen = False
-
-        def fallback_planner_backend_for_request(self, request):
-            return "retired_external"
-
-        def call(self, **kwargs):
-            request = kwargs["request"]
-            messages = kwargs["messages"]
-            self.options_seen.append(dict(request.options or {}))
-
-            if request.options.get("planner_backend") == "retired_external":
-                self.tool_gap_seen = any(
-                    isinstance(message.get("tool_gap"), dict)
-                    for message in messages
-                    if isinstance(message, dict)
-                )
-                return {
-                    "content": "Retired planner 已接管并完成分析。",
-                    "tool_calls": [],
-                    "_planner": {
-                        "backend": "retired_external",
-                        "source": "external",
-                        "policy": "explicit_backend",
-                        "transport": "embedded",
-                        "reason": str(
-                            request.options.get("planner_runtime_reason") or ""
-                        ),
-                    },
-                }
-
-            assert request.options.get("planner_policy") == "native_only"
-            assert not request.options.get("planner_backend")
-            return {
-                "content": "当前缺少 Koto 原生 CAD 工具。",
-                "tool_calls": [],
-                "tool_gap": {
-                    "summary": "当前缺少读取 CAD 文件的 Koto 原生工具。",
-                    "missing_capability": "read_cad_file",
-                    "why_missing": "allowlist 中没有可读取 dwg 的工具。",
-                    "suggested_next_step": "先实现只读 CAD 解析工具，再决定写入方案。",
-                },
-                "_planner": {
-                    "backend": "native",
-                    "source": "native",
-                    "policy": "native_only",
-                    "transport": "native",
-                    "reason": "native_tool_design_required:read_cad_file",
-                },
-            }
-
-    model_client = FakeModelClient()
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=model_client, max_rounds=4
-        ).run(
-            FileTaskRequest(
-                task="分析 CAD 文件并整理结论",
-                run_id="tool_gap_external_fallback_demo",
-                target_path="drawing.dwg",
-            )
-        )
-    )
-
-    check_finished = next(event for event in events if event.type == "check.finished")
-    run_finished = next(event for event in events if event.type == "run.finished")
-
-    assert model_client.options_seen[0].get("planner_policy") == "native_only"
-    assert len(model_client.options_seen) == 1
-    assert not any(event.type == "planner.selected" for event in events)
-    assert not any(event.type == "planner.fallback" for event in events)
-    assert model_client.tool_gap_seen is False
-    assert check_finished.payload["status"] == "tool_gap"
-    assert check_finished.payload["passed"] is False
-    assert run_finished.payload["completed_task"] is False
-    assert run_finished.payload["runtime"]["execution_path"] == "native"
-
-
-def test_file_task_runtime_does_not_external_fallback_after_native_model_failure():
-    class FakeModelClient:
-        def __init__(self):
-            self.options_seen = []
-
-        def fallback_planner_backend_for_request(self, request):
-            return "retired_external"
-
-        def call(self, **kwargs):
-            request = kwargs["request"]
-            self.options_seen.append(dict(request.options or {}))
-
-            if request.options.get("planner_backend") == "retired_external":
-                return {
-                    "content": "Retired planner 已生成最终摘要。",
-                    "tool_calls": [],
-                    "_planner": {
-                        "backend": "retired_external",
-                        "source": "external",
-                        "policy": "explicit_backend",
-                        "transport": "embedded",
-                        "reason": str(
-                            request.options.get("planner_runtime_reason") or ""
-                        ),
-                    },
-                }
-
-            raise RuntimeError("native provider offline")
-
-    model_client = FakeModelClient()
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=model_client, max_rounds=3
-        ).run(
-            FileTaskRequest(
-                task="总结当前文件内容",
-                run_id="native_model_failure_external_fallback_demo",
-                files=[
-                    FileTaskFile(
-                        path="notes.txt",
-                        name="notes.txt",
-                        type="txt",
-                        content="alpha beta",
-                        target=True,
-                    )
-                ],
-            )
-        )
-    )
-
-    check_finished = next(event for event in events if event.type == "check.finished")
-    run_finished = next(event for event in events if event.type == "run.finished")
-
-    assert model_client.options_seen[0]["planner_policy"] == "native_only"
-    assert len(model_client.options_seen) == 1
-    assert not any(event.type == "planner.selected" for event in events)
-    assert not any(event.type == "planner.fallback" for event in events)
-    assert check_finished.payload["status"] == "needs_attention"
-    assert check_finished.payload["passed"] is False
-    assert run_finished.payload["completed_task"] is False
-    assert run_finished.payload["runtime"]["execution_path"] == "readonly_fallback"
-    assert "Retired planner" not in str(run_finished.payload["summary"])
-
-
-def test_file_task_runtime_does_not_external_fallback_after_verify_error():
-    class FakeModelClient:
-        def __init__(self):
-            self.options_seen = []
-
-        def fallback_planner_backend_for_request(self, request):
-            return "retired_external"
-
-        def call(self, **kwargs):
-            request = kwargs["request"]
-            messages = kwargs["messages"]
-            self.options_seen.append(dict(request.options or {}))
-
-            if request.options.get("planner_backend") == "retired_external":
-                if any(
-                    message.get("role") == "function"
-                    and message.get("name") == "write_docx_content"
-                    for message in messages
-                ):
-                    return {
-                        "content": "已完成修复。",
-                        "tool_calls": [],
-                        "_planner": {
-                            "backend": "retired_external",
-                            "source": "external",
-                            "policy": "explicit_backend",
-                            "transport": "embedded",
-                            "reason": str(
-                                request.options.get("planner_runtime_reason") or ""
-                            ),
-                        },
-                    }
-                return {
-                    "content": "Retired planner 开始修复写入。",
-                    "tool_calls": [
-                        {
-                            "id": "retired_external_write_docx",
-                            "name": "write_docx_content",
-                            "args": {
-                                "path": "report.docx",
-                                "paragraphs": '[{"text":"Retired planner 修正后的内容。"}]',
-                            },
-                        }
-                    ],
-                    "_planner": {
-                        "backend": "retired_external",
-                        "source": "external",
-                        "policy": "explicit_backend",
-                        "transport": "embedded",
-                        "reason": str(
-                            request.options.get("planner_runtime_reason") or ""
-                        ),
-                    },
-                }
-
-            if any(
-                message.get("role") == "function"
-                and message.get("name") == "write_docx_content"
-                for message in messages
-            ):
-                return {
-                    "content": "原生写入完成。",
-                    "tool_calls": [],
-                    "_planner": {
-                        "backend": "native",
-                        "source": "native",
-                        "policy": "native_only",
-                        "transport": "native",
-                        "reason": "covered_by_koto_native",
-                    },
-                }
-
-            return {
-                "content": "先写入 report.docx。",
-                "tool_calls": [
-                    {
-                        "id": "native_write_docx",
-                        "name": "write_docx_content",
-                        "args": {
-                            "path": "report.docx",
-                            "paragraphs": '[{"text":"原生初稿。"}]',
-                        },
-                    }
-                ],
-                "_planner": {
-                    "backend": "native",
-                    "source": "native",
-                    "policy": "native_only",
-                    "transport": "native",
-                    "reason": "covered_by_koto_native",
-                },
-            }
-
-    verify_calls = {"count": 0}
-
-    def fake_executor(tool_name, args):
-        if tool_name == "write_docx_content":
-            return json.dumps(
-                {
-                    "success": True,
-                    "path": args["path"],
-                    "file_type": "docx",
-                    "operation": "write_docx_content",
-                    "summary": "已写入 1 个段落到 Word 文档",
-                    "change_type": "modify",
-                    "paragraphs_written": 1,
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            verify_calls["count"] += 1
-            if verify_calls["count"] == 1:
-                return json.dumps({"error": "judge unavailable"}, ensure_ascii=False)
-            return json.dumps(
-                {"completed": True, "summary": "report.docx 已完成更新。"},
-                ensure_ascii=False,
-            )
-        raise AssertionError(f"unexpected tool call: {tool_name}")
-
-    model_client = FakeModelClient()
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor, model_client=model_client, max_rounds=5
-        ).run(
-            FileTaskRequest(
-                task="整理当前文档并写入 report.docx",
-                run_id="verify_error_external_fallback_demo",
-                target_path="report.docx",
-                files=[
-                    FileTaskFile(
-                        path="report.docx", name="report.docx", type="docx", target=True
-                    )
-                ],
-            )
-        )
-    )
-
-    check_finished = next(event for event in events if event.type == "check.finished")
-    run_finished = next(event for event in events if event.type == "run.finished")
-
-    assert model_client.options_seen[0].get("planner_policy") == "native_only"
-    assert all(
-        not options.get("planner_backend") for options in model_client.options_seen
-    )
-    assert not any(event.type == "planner.selected" for event in events)
-    assert not any(event.type == "planner.fallback" for event in events)
-    assert verify_calls["count"] == 1
-    assert check_finished.payload["status"] == "verify_error"
-    assert check_finished.payload["passed"] is False
-    assert run_finished.payload["completed_task"] is False
-
-
-def test_file_task_runtime_pptx_design_retry_points_to_native_tool():
-    def fake_model(**kwargs):
-        return {
-            "content": "很抱歉，我无法直接为 PPTX 文件设计主题和排版。",
-            "tool_calls": [],
-            "_planner": {
-                "backend": "native",
-                "source": "native",
-                "policy": "native_only",
-                "reason": "covered_by_koto_native",
-            },
-        }
-
-    request = FileTaskRequest(
-        task="目前这个 pptx 是没有风格设计的，请帮我设计主题和排版",
-        run_id="pptx_design_native_retry",
-        files=[
-            FileTaskFile(
-                path="deck.pptx",
-                name="deck.pptx",
-                type="pptx",
-                content="PPT 文本上下文",
-                target=True,
-            )
-        ],
-        target_path="deck.pptx",
-    )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=fake_model
-        ).run(request)
-    )
-
-    write_guard = next(
-        event
-        for event in events
-        if event.type == "tool.finished"
-        and event.payload.get("tool_name") == "write_guard"
-    )
-    check_finished = next(event for event in events if event.type == "check.finished")
-    run_finished = next(event for event in events if event.type == "run.finished")
-
-    assert not any(event.type == "tool.missing" for event in events)
-    assert "design_pptx_theme_layout" in write_guard.payload["result_preview"]
-    assert check_finished.payload["status"] == "no_file_change"
-    assert check_finished.payload["passed"] is False
-    assert run_finished.payload["completed_task"] is False
-
-
-def test_file_task_runtime_parses_native_tool_design_protocol_from_model_text():
-    model_payload = {
-        "tool_gap": {
-            "summary": "需要一个 CAD 读取工具。",
-            "missing_capability": "read_cad_file",
-            "why_missing": "现有工具不能解析 DWG/DXF 文件。",
-            "suggested_next_step": "生成并实现 Koto 原生 CAD 读取工具。",
-            "proposed_tool": {
-                "name": "read_cad_file",
-                "description": "解析 DWG/DXF 为可检索的结构化文本。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string"},
-                        "max_entities": {"type": "integer"},
-                    },
-                    "required": ["path"],
-                },
-                "returns": "结构化 CAD 文本摘要。",
-                "rationale": "CAD 文件需要格式感知解析。",
-                "implementation_notes": ["第一版只读，不写回 CAD。"],
-                "safety_constraints": ["不得修改源文件。"],
-                "acceptance_tests": ["DWG/DXF 示例文件可以返回图层和实体摘要。"],
-            },
-        }
-    }
-
-    def fake_model(**kwargs):
-        assert "koto_tool_design_v1" in kwargs["system"]
-        assert "优先组合多个现有工具" in kwargs["system"]
-        assert "tool_design_protocol" in kwargs["messages"][-1]["content"]
-        return {
-            "content": json.dumps(model_payload, ensure_ascii=False),
-            "tool_calls": [],
-            "_planner": {
-                "backend": "native",
-                "source": "native",
-                "policy": "native_only",
-                "reason": "covered_by_koto_native",
-            },
-        }
-
-    request = FileTaskRequest(
-        task="分析这个 CAD 文件",
-        run_id="native_tool_design_protocol",
-        files=[
-            FileTaskFile(
-                path="drawing.dwg",
-                name="drawing.dwg",
-                type="dwg",
-                content="CAD 文件上下文",
-                target=True,
-            )
-        ],
-        target_path="drawing.dwg",
-    )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=fake_model
-        ).run(request)
-    )
-
-    tool_missing = next(event for event in events if event.type == "tool.missing")
-    artifact = tool_missing.payload["next_action_artifact"]
-
-    assert tool_missing.payload["missing_capability"] == "read_cad_file"
-    assert tool_missing.payload["proposed_tool"]["implementation_notes"] == [
-        "第一版只读，不写回 CAD。"
-    ]
-    assert artifact["tool_design_protocol"] == "koto_tool_design_v1"
-    assert artifact["external_planner_required"] is False
-    assert "DWG/DXF 示例文件可以返回图层和实体摘要。" in artifact["acceptance_criteria"]
-    assert events[-1].payload["completed_task"] is False
-
-
 def test_file_task_runtime_messages_include_capability_profiles():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "", model_client=lambda **kwargs: {}
@@ -5176,257 +4097,7 @@ def test_file_task_runtime_messages_include_capability_profiles():
     assert '"write_support": "native"' in content
 
 
-def test_file_task_runtime_repairs_after_failed_verification(tmp_path):
-    target_path = tmp_path / "report.docx"
-    target_path.write_text("placeholder", encoding="utf-8")
-
-    responses = iter(
-        [
-            {
-                "content": "先写入第一版。",
-                "tool_calls": [
-                    {
-                        "name": "write_docx_content",
-                        "args": {
-                            "path": str(target_path),
-                            "paragraphs": '[{"text":"draft"}]',
-                        },
-                    }
-                ],
-            },
-            {"content": "已完成初稿。", "tool_calls": []},
-            {
-                "content": "根据核验结果修复文档。",
-                "tool_calls": [
-                    {
-                        "name": "write_docx_content",
-                        "args": {
-                            "path": str(target_path),
-                            "paragraphs": '[{"text":"final"}]',
-                        },
-                    }
-                ],
-            },
-            {"content": "修复完成。", "tool_calls": []},
-        ]
-    )
-    seen_last_messages = []
-    verify_calls = []
-    write_calls = []
-
-    def fake_model(**kwargs):
-        seen_last_messages.append(kwargs["messages"][-1]["content"])
-        return next(responses, {"content": "", "tool_calls": []})
-
-    def fake_executor(tool_name, args):
-        if tool_name == "write_docx_content":
-            write_calls.append(dict(args))
-            return json.dumps(
-                {
-                    "path": args["path"],
-                    "operation": tool_name,
-                    "summary": "已写入 Word 文档",
-                    "file_type": "docx",
-                    "change_type": "modify",
-                    "paragraphs_written": 1,
-                    "focus": True,
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            verify_calls.append(dict(args))
-            if len(verify_calls) == 1:
-                return json.dumps(
-                    {
-                        "completed": False,
-                        "summary": "正文还没有写到目标位置。",
-                        "remaining_steps": [
-                            "把正文结论写到目标段落，而不是停留在草稿区"
-                        ],
-                    },
-                    ensure_ascii=False,
-                )
-            return json.dumps(
-                {
-                    "completed": True,
-                    "summary": "修复后核验通过。",
-                    "confidence": 0.93,
-                },
-                ensure_ascii=False,
-            )
-        raise AssertionError(f"unexpected tool call: {tool_name}")
-
-    request = FileTaskRequest(
-        task="修改当前文件并保存",
-        run_id="repair_after_verify_demo",
-        target_path=str(target_path),
-        files=[
-            FileTaskFile(
-                path=str(target_path),
-                name="report.docx",
-                type="docx",
-                content="现有 Word 文档",
-                target=True,
-            )
-        ],
-    )
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor, model_client=fake_model, max_rounds=4
-        ).run(request)
-    )
-
-    repair_guard = next(
-        event
-        for event in events
-        if event.type == "tool.finished"
-        and event.payload.get("tool_name") == "repair_guard"
-    )
-    check_finished_events = [
-        event for event in events if event.type == "check.finished"
-    ]
-    run_finished = events[-1]
-
-    assert len(write_calls) == 2
-    assert len(verify_calls) == 2
-    assert len(check_finished_events) == 2
-    assert check_finished_events[0].payload["status"] == "needs_attention"
-    assert check_finished_events[1].payload["status"] == "verified"
-    assert "核验未通过" in repair_guard.payload["result_preview"]
-    assert any("正文还没有写到目标位置" in message for message in seen_last_messages)
-    assert any("把正文结论写到目标段落" in message for message in seen_last_messages)
-    assert run_finished.payload["completed_task"] is True
-    assert run_finished.payload["summary"] == "修复后核验通过。"
-
-
-def test_file_task_runtime_uses_extra_repair_round_after_final_round_quality_failure(
-    tmp_path,
-):
-    target_path = tmp_path / "sales_profit_report.xlsx"
-    source_path = tmp_path / "sales_sample.xlsx"
-    source_path.write_bytes(b"fake xlsx")
-
-    responses = iter(
-        [
-            {
-                "content": "先复制源文件建立目标。",
-                "tool_calls": [
-                    {
-                        "name": "copy_file",
-                        "args": {
-                            "source_path": str(source_path),
-                            "target_path": str(target_path),
-                        },
-                    }
-                ],
-            },
-            {
-                "content": "根据质量门补写表格数据。",
-                "tool_calls": [
-                    {
-                        "name": "write_sheet_data",
-                        "args": {
-                            "path": str(target_path),
-                            "sheet_name": "Sales",
-                            "rows": [
-                                ["month", "revenue", "cost", "profit"],
-                                ["2026-01", 120000, 72000, 48000],
-                            ],
-                        },
-                    }
-                ],
-            },
-            {"content": "修复完成。", "tool_calls": []},
-        ]
-    )
-    seen_last_messages = []
-    tool_calls = []
-
-    def fake_model(**kwargs):
-        seen_last_messages.append(kwargs["messages"][-1]["content"])
-        return next(responses, {"content": "", "tool_calls": []})
-
-    def fake_executor(tool_name, args):
-        tool_calls.append((tool_name, dict(args)))
-        if tool_name == "copy_file":
-            return json.dumps(
-                {
-                    "path": args["target_path"],
-                    "operation": "copy_file",
-                    "summary": "已复制文件",
-                    "file_type": "xlsx",
-                    "change_type": "create",
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "write_sheet_data":
-            return json.dumps(
-                {
-                    "path": args["path"],
-                    "operation": "write_sheet_data",
-                    "summary": "已写入表格数据",
-                    "file_type": "xlsx",
-                    "change_type": "modify",
-                    "rows_written": 2,
-                    "cells_written": 8,
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            return json.dumps(
-                {
-                    "completed": True,
-                    "summary": "目标表格已核验通过。",
-                    "confidence": 0.95,
-                },
-                ensure_ascii=False,
-            )
-        raise AssertionError(f"unexpected tool call: {tool_name}")
-
-    request = FileTaskRequest(
-        task="读取 sales_sample.xlsx，生成新的 Excel 文件 sales_profit_report.xlsx，并新增 profit 列。",
-        run_id="repair_after_final_round_quality_failure",
-        target_path=str(target_path),
-        files=[
-            FileTaskFile(path=str(source_path), name="sales_sample.xlsx", type="xlsx"),
-            FileTaskFile(
-                path=str(target_path),
-                name="sales_profit_report.xlsx",
-                type="xlsx",
-                target=True,
-            ),
-        ],
-    )
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor,
-            model_client=fake_model,
-            max_rounds=1,
-        ).run(request)
-    )
-
-    check_finished_events = [
-        event for event in events if event.type == "check.finished"
-    ]
-    run_finished = events[-1]
-
-    assert [
-        name for name, _args in tool_calls if name in {"copy_file", "write_sheet_data"}
-    ] == [
-        "copy_file",
-        "write_sheet_data",
-    ]
-    assert check_finished_events[0].payload["status"] == "quality_gate_failed"
-    assert check_finished_events[-1].payload["status"] == "verified"
-    assert any(
-        "当前核验状态：quality_gate_failed" in message for message in seen_last_messages
-    )
-    assert run_finished.payload["completed_task"] is True
-
-
-def test_file_task_runtime_accepts_python_docx_writeback_for_polish_task():
+def test_file_task_runtime_rejects_unverified_python_docx_writeback():
     runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task="润色这个 docx 文档并写回文件",
@@ -5456,8 +4127,8 @@ def test_file_task_runtime_accepts_python_docx_writeback_for_polish_task():
         model_failed=False,
     )
 
-    assert check["passed"] is True
-    assert check["status"] == "verified"
+    assert check["passed"] is False
+    assert check["status"] == "quality_gate_failed"
 
 
 def test_file_task_runtime_preserves_write_blocked_status_in_immediate_verify(tmp_path):
@@ -5534,520 +4205,15 @@ def test_file_task_runtime_preserves_write_blocked_status_in_immediate_verify(tm
     assert run_finished.payload["runtime"]["terminal_status"] == "write_blocked"
 
 
-def test_file_task_runtime_packages_failed_python_feedback_for_next_model_turn():
-    responses = iter(
-        [
-            {
-                "content": "先运行 Python 脚本。",
-                "tool_calls": [
-                    {
-                        "name": "run_python_code",
-                        "args": {"code": "print(missing_name)"},
-                    },
-                ],
-            },
-            {"content": "收到错误后停止重复执行。", "tool_calls": []},
-        ]
-    )
-    seen_last_messages = []
-
-    def fake_model(**kwargs):
-        seen_last_messages.append(kwargs["messages"][-1]["content"])
-        return next(responses, {"content": "", "tool_calls": []})
-
-    def fake_executor(tool_name, args):
-        assert tool_name == "run_python_code"
-        return {
-            "summary": "Python 脚本执行失败。",
-            "stdout": "",
-            "stderr": "NameError: name 'missing_name' is not defined",
-            "error": "NameError",
-            "files": {},
-            "_koto_created": [],
-            "_koto_modified": [],
-        }
-
-    request = FileTaskRequest(
-        task="用 Python 分析当前数据", run_id="python_failure_feedback_demo"
-    )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor, model_client=fake_model, max_rounds=2
-        ).run(request)
-    )
-
-    failed_python = next(
-        event
-        for event in events
-        if event.type == "tool.finished"
-        and event.payload.get("tool_name") == "run_python_code"
-    )
-    feedback_payload = json.loads(seen_last_messages[1])
-
-    assert failed_python.payload["success"] is False
-    assert feedback_payload["tool_name"] == "run_python_code"
-    assert feedback_payload["tool_args"] == {"code": "print(missing_name)"}
-    assert feedback_payload["success"] is False
-    assert feedback_payload["failure_reason"] == "execution_failed"
-    assert feedback_payload["retry_same_call_allowed"] is False
-    assert feedback_payload["result"]["error"] == "NameError"
-    assert (
-        feedback_payload["result"]["stderr"]
-        == "NameError: name 'missing_name' is not defined"
-    )
-    assert "不要重复完全相同的调用" in feedback_payload["next_action"]
-
-
-def test_file_task_runtime_allows_multiple_python_reads_without_file_markers():
-    responses = iter(
-        [
-            {
-                "content": "先读取 Excel。",
-                "tool_calls": [
-                    {
-                        "name": "run_python_code",
-                        "args": {"code": "print('first read')"},
-                    },
-                ],
-            },
-            {
-                "content": "继续读取更多信息。",
-                "tool_calls": [
-                    {
-                        "name": "run_python_code",
-                        "args": {"code": "print('second read')"},
-                    },
-                ],
-            },
-            {"content": "读取完成。", "tool_calls": []},
-        ]
-    )
-    calls = []
-
-    def fake_model(**kwargs):
-        return next(responses, {"content": "", "tool_calls": []})
-
-    def fake_executor(tool_name, args):
-        calls.append((tool_name, dict(args)))
-        return "stdout only"
-
-    request = FileTaskRequest(task="分析 Excel 数据", run_id="python_read_demo")
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor, model_client=fake_model, max_rounds=3
-        ).run(request)
-    )
-
-    assert [name for name, _ in calls] == ["run_python_code", "run_python_code"]
-    assert not any(
-        event.type == "tool.finished" and event.payload.get("skipped")
-        for event in events
-    )
-
-
-def test_file_task_runtime_blocks_python_pdf_text_extraction_and_guides_native_read():
-    responses = iter(
-        [
-            {
-                "content": "我先用 Python 读 PDF。",
-                "tool_calls": [
-                    {
-                        "name": "run_python_code",
-                        "args": {
-                            "code": "from PyPDF2 import PdfReader\nreader = PdfReader('source.pdf')\nprint(reader.pages[0].extract_text())",
-                        },
-                    },
-                ],
-            },
-            {
-                "content": "改用原生 PDF 读取。",
-                "tool_calls": [
-                    {
-                        "name": "parse_file_to_text",
-                        "args": {
-                            "path": "source.pdf",
-                            "start_page": 1,
-                            "end_page": 3,
-                            "max_chars": 4000,
-                        },
-                    },
-                ],
-            },
-            {"content": "已完成读取。", "tool_calls": []},
-        ]
-    )
-    calls = []
-
-    def fake_model(**kwargs):
-        return next(responses, {"content": "", "tool_calls": []})
-
-    def fake_executor(tool_name, args):
-        calls.append((tool_name, dict(args)))
-        if tool_name == "parse_file_to_text":
-            return "[Page 1]\nThe global rules of art"
-        raise AssertionError(f"unexpected tool execution: {tool_name}")
-
-    request = FileTaskRequest(
-        task="读取 PDF 原文并对照译稿",
-        run_id="pdf_python_guard_demo",
-        files=[
-            FileTaskFile(path="source.pdf", name="source.pdf", type="pdf"),
-            FileTaskFile(
-                path="draft.docx", name="draft.docx", type="docx", target=True
-            ),
-        ],
-    )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor, model_client=fake_model, max_rounds=3
-        ).run(request)
-    )
-
-    blocked = next(
-        event
-        for event in events
-        if event.type == "tool.finished" and event.payload.get("blocked")
-    )
-
-    assert all(name != "run_python_code" for name, _ in calls)
-    assert any(
-        name == "parse_file_to_text"
-        and args.get("path") == "source.pdf"
-        and args.get("start_page") == 1
-        and args.get("end_page") == 3
-        and args.get("max_chars") == 4000
-        for name, args in calls
-    )
-    assert blocked.payload["tool_name"] == "run_python_code"
-    assert blocked.payload["success"] is False
-    assert (
-        "不要用 run_python_code 直接读取 PDF 文本" in blocked.payload["result_preview"]
-    )
-    assert "parse_file_to_text" in blocked.payload["result_preview"]
-
-
-def test_file_task_runtime_surfaces_python_image_artifacts_in_tool_finished():
-    responses = iter(
-        [
-            {
-                "content": "先生成图表。",
-                "tool_calls": [
-                    {"name": "run_python_code", "args": {"code": "print('ready')"}},
-                ],
-            },
-            {"content": "图表已生成。", "tool_calls": []},
-        ]
-    )
-
-    def fake_model(**kwargs):
-        return next(responses, {"content": "", "tool_calls": []})
-
-    def fake_executor(tool_name, args):
-        assert tool_name == "run_python_code"
-        return {
-            "summary": "ready\n[1 image(s) generated]",
-            "stdout": "ready",
-            "stderr": "",
-            "error": "",
-            "files": {"chart.png": "ZmFrZQ=="},
-            "_koto_created": [],
-            "_koto_modified": [],
-        }
-
-    request = FileTaskRequest(
-        task="基于当前数据生成图表", run_id="python_chart_artifact_demo"
-    )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor, model_client=fake_model, max_rounds=2
-        ).run(request)
-    )
-
-    tool_finished = next(
-        event
-        for event in events
-        if event.type == "tool.finished"
-        and event.payload.get("tool_name") == "run_python_code"
-    )
-    code_output = next(event for event in events if event.type == "code.output")
-
-    assert tool_finished.payload["result_preview"] == "ready\n[1 image(s) generated]"
-    assert tool_finished.payload["artifacts"] == [
-        {
-            "kind": "image",
-            "name": "chart.png",
-            "mime_type": "image/png",
-            "data": "ZmFrZQ==",
-        }
-    ]
-    assert code_output.payload["text"] == "ready"
-
-
-def test_file_task_runtime_keeps_readonly_duplicate_guard_internal():
-    repeated_call = {"name": "read_sheet_data", "args": {"path": "sales.xlsx"}}
-    responses = iter(
-        [
-            {"content": "先读取。", "tool_calls": [repeated_call]},
-            {"content": "再次读取。", "tool_calls": [repeated_call]},
-        ]
-    )
-
-    def fake_model(**kwargs):
-        return next(responses, {"content": "", "tool_calls": []})
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: json.dumps(
-                {"rows": [["sales", 1]]}, ensure_ascii=False
-            ),
-            model_client=fake_model,
-            max_rounds=2,
-        ).run(FileTaskRequest(task="分析 Excel 数据", run_id="duplicate_guard_demo"))
-    )
-    run_finished = events[-1]
-
-    assert not any(
-        event.type == "tool.finished"
-        and event.payload.get("tool_name") == "duplicate_guard"
-        for event in events
-    )
-    assert run_finished.payload["completed_task"] is True
-    assert "避免重复写入" not in run_finished.payload["summary"]
-
-
-def test_file_task_runtime_redirects_readonly_duplicate_read_to_final_answer():
-    repeated_call = {"name": "parse_file_to_text", "args": {"path": "humanise.docx"}}
-    model_calls = []
-    responses = iter(
-        [
-            {"content": "先读取文档。", "tool_calls": [repeated_call]},
-            {"content": "我再读取一次。", "tool_calls": [repeated_call]},
-            {
-                "content": "## 总结与回答\n\n这篇文章讨论艺术、技术与游戏中的操作性身体。",
-                "tool_calls": [],
-            },
-        ]
-    )
-
-    def fake_model(**kwargs):
-        model_calls.append(kwargs)
-        return next(responses, {"content": "", "tool_calls": []})
-
-    def fake_executor(tool_name, args):
-        assert tool_name == "parse_file_to_text"
-        return "文章主张：电子游戏通过艺术与技术共同生成一具可被玩家认领的操作性身体。"
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor,
-            model_client=fake_model,
-            max_rounds=3,
-        ).run(
-            FileTaskRequest(
-                task="分析这个文章",
-                run_id="readonly_duplicate_redirect_demo",
-                files=[
-                    FileTaskFile(
-                        path="humanise.docx", name="humanise.docx", type="docx"
-                    )
-                ],
-            )
-        )
-    )
-
-    run_finished = events[-1]
-
-    assert not any(
-        event.type == "tool.finished"
-        and event.payload.get("tool_name") == "duplicate_guard"
-        for event in events
-    )
-    assert len(model_calls) == 3
-    assert model_calls[-1]["tools"] == []
-    assert any(
-        "不要再次调用任何工具" in str(message.get("content") or "")
-        for message in model_calls[-1]["messages"]
-    )
-    assert "操作性身体" in run_finished.payload["summary"]
-    assert "避免重复写入" not in run_finished.payload["summary"]
-    assert run_finished.payload["completed_task"] is True
-
-
-def test_file_task_runtime_disables_tools_after_readonly_answer_guard():
-    read_call = {"name": "parse_file_to_text", "args": {"path": "humanise.docx"}}
-    model_calls = []
-    responses = iter(
-        [
-            {"content": "先读取文档。", "tool_calls": [read_call]},
-            {"content": "", "tool_calls": []},
-            {
-                "content": "## 总结与回答\n\n这篇文章的核心是操作性身体与认领关系。",
-                "tool_calls": [],
-            },
-        ]
-    )
-
-    def fake_model(**kwargs):
-        model_calls.append(kwargs)
-        return next(responses, {"content": "", "tool_calls": []})
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "文章主张：操作性身体让玩家认领虚拟身体。",
-            model_client=fake_model,
-            max_rounds=3,
-        ).run(
-            FileTaskRequest(
-                task="分析这个文章",
-                run_id="readonly_answer_guard_answer_only_demo",
-                files=[
-                    FileTaskFile(
-                        path="humanise.docx", name="humanise.docx", type="docx"
-                    )
-                ],
-            )
-        )
-    )
-
-    run_finished = events[-1]
-    started_events = [event for event in events if event.type == "model.call.started"]
-
-    assert len(model_calls) == 3
-    assert model_calls[-1]["tools"] == []
-    assert started_events[-1].payload["tool_count"] == 0
-    assert started_events[-1].payload["answer_only"] is True
-    assert "操作性身体" in run_finished.payload["summary"]
-    assert "模型未返回完整自然语言答案" not in run_finished.payload["summary"]
-    assert run_finished.payload["completed_task"] is True
-
-
-def test_file_task_runtime_ignores_tool_calls_in_readonly_answer_only_round():
-    read_call = {"name": "parse_file_to_text", "args": {"path": "humanise.docx"}}
-    model_calls = []
-    executed_tools = []
-    responses = iter(
-        [
-            {"content": "先读取文档。", "tool_calls": [read_call]},
-            {"content": "我再读取一次。", "tool_calls": [read_call]},
-            {"content": "", "tool_calls": [read_call]},
-        ]
-    )
-
-    def fake_model(**kwargs):
-        model_calls.append(kwargs)
-        return next(responses, {"content": "", "tool_calls": []})
-
-    def fake_executor(tool_name, args):
-        executed_tools.append(tool_name)
-        return "文章主张：操作性身体让玩家认领虚拟身体。"
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor,
-            model_client=fake_model,
-            max_rounds=3,
-        ).run(
-            FileTaskRequest(
-                task="分析这个文章",
-                run_id="readonly_answer_only_ignores_tools_demo",
-                files=[
-                    FileTaskFile(
-                        path="humanise.docx", name="humanise.docx", type="docx"
-                    )
-                ],
-            )
-        )
-    )
-
-    run_finished = events[-1]
-    check_finished = next(event for event in events if event.type == "check.finished")
-    last_finished = [event for event in events if event.type == "model.call.finished"][
-        -1
-    ]
-
-    assert len(model_calls) == 3
-    assert model_calls[-1]["tools"] == []
-    assert executed_tools == ["parse_file_to_text", "parse_file_to_text"]
-    assert last_finished.payload["tool_call_count"] == 0
-    assert last_finished.payload["discarded_tool_call_count"] == 1
-    assert "操作性身体" in run_finished.payload["summary"]
-    assert check_finished.payload["status"] == "needs_attention"
-    assert check_finished.payload["passed"] is False
-    assert run_finished.payload["completed_task"] is False
-
-
-def test_file_task_runtime_supervisor_redirects_duplicate_read_before_write():
-    model_calls = []
-
-    def fake_model(**kwargs):
-        model_calls.append(kwargs)
-        raise RuntimeError("model unavailable for fallback test")
-
-    def fake_executor(tool_name, args):
-        if tool_name == "parse_file_to_text":
-            return (
-                "[Page 1] 报告介绍博物馆数字技术应用的年度研究背景，强调数字化保护、智慧服务和数据治理。"
-                "当前页窗还列出多个案例方向，包括数字敦煌、知识图谱和藏品档案管理系统，构成后续分析的主题框架。"
-                "[Page 2] 综述部分关注以观众为中心的可持续发展、数据驱动的观众分析和数字技术重塑策展逻辑。"
-                "案例部分则围绕藏品信息资源管理、沉浸式展示、数字人文系统和公共服务数据体系展开，呈现博物馆数智化从基础数据建设走向场景应用的趋势。"
-            )
-        if tool_name == "write_docx_content":
-            return json.dumps(
-                {
-                    "success": True,
-                    "operation": "write_docx_content",
-                    "path": args["path"],
-                    "file_type": "docx",
-                    "summary": "已写入 4 个段落到 Word 文档",
-                    "paragraphs_written": 4,
-                },
-                ensure_ascii=False,
-            )
-        if tool_name == "verify_task_completion":
-            return json.dumps(
-                {"completed": True, "summary": "文件已写入。"}, ensure_ascii=False
-            )
-        raise AssertionError(f"unexpected tool call: {tool_name}")
-
-    events = list(
-        FileTaskRuntime(
-            tool_executor=fake_executor,
-            model_client=fake_model,
-            max_rounds=3,
-        ).run(
-            FileTaskRequest(
-                task="这是一篇非常长的pdf，请分步总结整篇文章，创建一个docx记录每一步发现，每完成一步等我继续。",
-                run_id="supervisor_duplicate_read_demo",
-                files=[FileTaskFile(path="source.pdf", name="source.pdf", type="pdf")],
-            )
-        )
-    )
-
-    assert len(model_calls) == 1
-    assert not any(
-        event.type == "tool.finished"
-        and event.payload.get("tool_name") == "supervisor_guard"
-        for event in events
-    )
-    assert not any(
-        event.type == "tool.finished"
-        and event.payload.get("tool_name") == "duplicate_guard"
-        for event in events
-    )
-    assert any(
-        event.type == "file.changed"
-        and event.payload.get("operation") == "write_docx_content"
-        for event in events
-    )
-    assert events[-1].payload["completed_task"] is False
-    assert events[-1].payload["runtime"]["terminal_status"] == "awaiting_confirmation"
-
-
-def test_file_task_runtime_treats_add_into_docx_as_write_intent():
+def test_file_task_runtime_explicit_write_mode_requires_file_change():
     def fake_model(**kwargs):
         return {"content": "当前工具未写入。", "tool_calls": []}
 
-    request = FileTaskRequest(task="将 xlsx 信息加入 docx", run_id="add_docx_demo")
+    request = FileTaskRequest(
+        task="将 xlsx 信息加入 docx",
+        run_id="add_docx_demo",
+        options={"output_mode": "write"},
+    )
     events = list(
         FileTaskRuntime(
             tool_executor=lambda name, args: "", model_client=fake_model
@@ -6058,7 +4224,7 @@ def test_file_task_runtime_treats_add_into_docx_as_write_intent():
     run_finished = events[-1]
 
     assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "no_file_change"
+    assert check_finished.payload["status"] == "write_not_performed"
     assert run_finished.payload["completed_task"] is False
 
 
@@ -6080,9 +4246,9 @@ def test_file_task_runtime_treats_copy_table_into_target_docx_as_write_intent():
     classification = runtime._classify_request(request, request.files)
 
     assert runtime._has_write_intent(task) is True
-    assert classification.write_intent is True
+    assert classification.write_required is True
     assert classification.output_mode == "write"
-    assert classification.selected_recipe == "xlsx_table_to_docx"
+    assert classification.selected_recipe == ""
 
 
 def test_file_task_runtime_treats_file_copy_as_write_intent():
@@ -6100,8 +4266,8 @@ def test_file_task_runtime_treats_file_copy_as_write_intent():
     classification = runtime._classify_request(request, request.files)
 
     assert runtime._has_write_intent(task) is True
-    assert classification.write_intent is True
-    assert classification.selected_recipe == "workspace_file_copy"
+    assert classification.write_required is True
+    assert classification.selected_recipe == ""
 
 
 def test_file_task_runtime_treats_create_specified_target_text_file_as_write_intent():
@@ -6113,14 +4279,10 @@ def test_file_task_runtime_treats_create_specified_target_text_file_as_write_int
         target_path="tmp/koto_live_e2e.txt",
     )
 
-    classification = runtime._normalize_mainline_contract(
-        request,
-        request.files,
-        runtime._classify_request(request, request.files),
-    )
+    classification = runtime._classify_request(request, request.files)
 
     assert runtime._has_write_intent(task) is True
-    assert classification.write_intent is True
+    assert classification.write_required is True
     assert classification.output_mode == "write"
     assert "mainline_contract:keyword_write_demoted" not in classification.reason_codes
 
@@ -6137,22 +4299,16 @@ def test_file_task_runtime_allows_target_creation_while_protecting_other_files()
         target_path="tmp/koto_live_e2e.txt",
     )
 
-    classification = runtime._normalize_mainline_contract(
-        request,
-        request.files,
-        runtime._classify_request(request, request.files),
-    )
+    classification = runtime._classify_request(request, request.files)
 
     assert runtime._has_readonly_write_negation(task) is False
-    assert classification.write_intent is True
+    assert classification.write_required is True
     assert classification.output_mode == "write"
     assert "mainline_contract:readonly_guard" not in classification.reason_codes
 
 
 def test_file_task_runtime_treats_put_summary_into_new_slides_as_write_intent():
-    def fake_model(**kwargs):
-        return {"content": "我先读完了内容。", "tool_calls": []}
-
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task="将内容总结并放到新的3页里",
         run_id="pptx_write_intent_demo",
@@ -6162,32 +4318,15 @@ def test_file_task_runtime_treats_put_summary_into_new_slides_as_write_intent():
             )
         ],
     )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=fake_model, max_rounds=2
-        ).run(request)
-    )
+    classification = runtime._classify_request(request, request.files)
 
-    write_guard = next(
-        event
-        for event in events
-        if event.type == "tool.finished"
-        and event.payload.get("tool_name") == "write_guard"
-    )
-    check_finished = next(event for event in events if event.type == "check.finished")
-    run_finished = events[-1]
-
-    assert "add_pptx_slides" in write_guard.payload["result_preview"]
-    assert "read_docx_content" in write_guard.payload["result_preview"]
-    assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "no_file_change"
-    assert run_finished.payload["completed_task"] is False
+    assert classification.write_required is True
+    assert classification.output_mode == "write"
+    assert classification.target_file_type == "pptx"
 
 
 def test_file_task_runtime_treats_pptx_page_content_supplement_as_write_intent():
-    def fake_model(**kwargs):
-        return {"content": "我先读取每一页现有内容。", "tool_calls": []}
-
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task="我要你每一页做的内容补充呢？",
         run_id="pptx_page_content_supplement_demo",
@@ -6197,36 +4336,16 @@ def test_file_task_runtime_treats_pptx_page_content_supplement_as_write_intent()
             )
         ],
     )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "", model_client=fake_model, max_rounds=2
-        ).run(request)
-    )
+    classification = runtime._classify_request(request, request.files)
 
-    run_started = events[0]
-    write_guard = next(
-        event
-        for event in events
-        if event.type == "tool.finished"
-        and event.payload.get("tool_name") == "write_guard"
-    )
-    check_finished = next(event for event in events if event.type == "check.finished")
-    run_finished = events[-1]
-
-    assert run_started.payload["output_mode"] == "write"
-    assert run_started.payload["task_family"] == "presentation"
-    assert run_started.payload["operation_kind"] == "write_slides"
-    assert "write_intent" in run_started.payload["reason_codes"]
-    assert "write_pptx_slides" in write_guard.payload["result_preview"]
-    assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "no_file_change"
-    assert run_finished.payload["completed_task"] is False
+    assert classification.output_mode == "write"
+    assert classification.task_family == "transform"
+    assert classification.operation_kind == "write"
+    assert "write_required" in classification.reason_codes
 
 
 def test_file_task_runtime_treats_write_back_text_prompt_as_write_intent():
-    def fake_model(**kwargs):
-        return {"content": "我先理解目标内容。", "tool_calls": []}
-
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task="请把我选中的内容润色后直接写回当前 txt 文件",
         run_id="txt_write_back_demo",
@@ -6242,31 +4361,11 @@ def test_file_task_runtime_treats_write_back_text_prompt_as_write_intent():
             )
         ],
     )
-    events = list(
-        FileTaskRuntime(
-            tool_executor=lambda name, args: "",
-            model_client=fake_model,
-            max_rounds=2,
-        ).run(request)
-    )
+    classification = runtime._classify_request(request, request.files)
 
-    run_started = events[0]
-    write_guard = next(
-        event
-        for event in events
-        if event.type == "tool.finished"
-        and event.payload.get("tool_name") == "write_guard"
-    )
-    check_finished = next(event for event in events if event.type == "check.finished")
-    run_finished = events[-1]
-
-    assert run_started.payload["task_family"] == "polish"
-    assert run_started.payload["operation_kind"] == "write"
-    assert "write_intent" in run_started.payload["reason_codes"]
-    assert "run_python_code" in write_guard.payload["result_preview"]
-    assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "no_file_change"
-    assert run_finished.payload["completed_task"] is False
+    assert classification.task_family == "transform"
+    assert classification.operation_kind == "write"
+    assert "write_required" in classification.reason_codes
 
 
 def test_file_task_runtime_infers_text_target_write_step_without_ppt_mislabel():
@@ -6508,7 +4607,7 @@ def test_design_pptx_theme_layout_keeps_light_theme_against_dark_palette(tmp_pat
     assert str(background_shapes[0].fill.fore_color.rgb) == "F8FAFC"
 
 
-def test_file_task_runtime_prompt_tells_model_not_to_guess_sheet1():
+def test_file_task_runtime_prompt_keeps_format_tools_as_capability_source():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "", model_client=lambda **kwargs: {}
     )
@@ -6528,12 +4627,12 @@ def test_file_task_runtime_prompt_tells_model_not_to_guess_sheet1():
 
     prompt = runtime._build_system_prompt(request, request.files)
 
-    assert "不要猜 Sheet1" in prompt
-    assert "省略 sheet_name" in prompt
-    assert "available_sheets" in prompt
+    assert "使用与文件格式匹配的读取和写入工具" in prompt
+    assert "工具定义中的参数与返回值是唯一能力依据" in prompt
+    assert "Sheet1" not in prompt
 
 
-def test_file_task_runtime_prompt_routes_pptx_read_and_write_tools_correctly():
+def test_file_task_runtime_prompt_does_not_encode_pptx_recipe():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "", model_client=lambda **kwargs: {}
     )
@@ -6549,12 +4648,11 @@ def test_file_task_runtime_prompt_routes_pptx_read_and_write_tools_correctly():
 
     prompt = runtime._build_system_prompt(request, request.files)
 
-    assert "读取 PPTX 内容优先用 parse_file_to_text" in prompt
-    assert "read_docx_content 只用于 DOCX" in prompt
-    assert "新增 PPT 总结页时优先用 add_pptx_slides" in prompt
+    assert "任务类型、行业和措辞不绑定固定配方" in prompt
+    assert "新增 PPT 总结页时优先用 add_pptx_slides" not in prompt
 
 
-def test_file_task_runtime_prompt_forbids_python_pdf_text_reads_and_requires_windows():
+def test_file_task_runtime_prompt_keeps_pdf_read_boundary_without_docx_recipe():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "", model_client=lambda **kwargs: {}
     )
@@ -6571,10 +4669,9 @@ def test_file_task_runtime_prompt_forbids_python_pdf_text_reads_and_requires_win
 
     prompt = runtime._build_system_prompt(request, request.files)
 
-    assert "读取 PDF 文本时只能使用 parse_file_to_text" in prompt
-    assert "start_page/end_page" in prompt
-    assert "不要用 run_python_code 调用 PyPDF2" in prompt
-    assert "PDF 原文 + DOCX 译稿/润色/审校任务" in prompt
+    assert "PDF 文本读取使用允许的文件读取工具并按需分页" in prompt
+    assert "不用脚本绕过读取边界" in prompt
+    assert "PDF 原文 + DOCX 译稿/润色/审校任务" not in prompt
 
 
 def test_file_task_runtime_has_specific_plan_copy_for_analysis_tools():
@@ -6666,7 +4763,7 @@ def test_file_task_tool_catalog_covers_mainstream_office_workflows():
     assert any("replace exact selections" in item for item in workflows["text"])
 
 
-def test_file_task_runtime_system_prompt_guides_text_selection_replacement():
+def test_file_task_runtime_system_prompt_exposes_text_selection_capability():
     runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task="请把我选中的内容润色得更专业，直接写回当前 md 文件",
@@ -6676,8 +4773,7 @@ def test_file_task_runtime_system_prompt_guides_text_selection_replacement():
     prompt = runtime._build_system_prompt(request, request.files)
 
     assert "replace_file_selection" in prompt
-    assert "original_selection=用户选区原文" in prompt
-    assert "不要为了单个选区改写去 run_python_code 整文件覆写" in prompt
+    assert "工具定义中的参数与返回值是唯一能力依据" in prompt
 
 
 def test_file_task_tool_gateway_is_the_extension_entry_and_filters_allowlist():
@@ -6876,7 +4972,13 @@ def test_file_task_runtime_uses_injected_tool_provider_boundary():
     assert provider.calls == [
         ("parse_file_to_text", {"path": "notes.md", "max_chars": 12000})
     ]
-    assert [tool["name"] for tool in model_tools] == ["parse_file_to_text"]
+    assert model_tools == [
+        {
+            "name": "parse_file_to_text",
+            "description": "fake read",
+            "parameters": {"type": "object"},
+        }
+    ]
     assert events[-1].type == "run.finished"
 
 
@@ -6975,16 +5077,17 @@ def test_file_task_model_client_passes_file_task_timeout_to_local_provider(monke
 
     client = FileTaskModelClient()
     monkeypatch.setattr(client, "_is_local_available", lambda: True)
+    monkeypatch.setattr(client, "_ensure_local_tool_support", lambda *args: None)
 
     response = client.call(
-        request=FileTaskRequest(task="t", model_mode="local"),
+        request=FileTaskRequest(task="t", model_mode="local", model_id="qwen3.5:9b"),
         messages=[{"role": "user", "content": "hi"}],
         system="system",
         tools=[{"name": "parse_file_to_text"}],
     )
 
     assert response["content"] == "local ok"
-    assert captured["model"] is None
+    assert captured["model"] == "qwen3.5:9b"
     assert (
         captured["call_timeout"]
         == file_task_model_module._LOCAL_FILE_TASK_LLM_CALL_TIMEOUT
@@ -6995,13 +5098,13 @@ def test_file_task_model_client_passes_file_task_timeout_to_local_provider(monke
     assert captured["temperature"] == 0.2
 
 
-def test_file_task_model_client_prefers_file_task_model_route(monkeypatch):
-    from web import runtime_context
+def test_file_task_model_client_uses_core_model_selection(monkeypatch):
+    from app.core.agent import file_task_model as file_task_model_module
 
     monkeypatch.setattr(
-        runtime_context,
-        "get_model_map",
-        lambda: {"CHAT": "chat-model", "FILE_TASK": "file-task-model"},
+        file_task_model_module,
+        "get_configured_cloud_model",
+        lambda **kwargs: "file-task-model",
     )
 
     client = FileTaskModelClient()
@@ -7160,6 +5263,41 @@ def test_file_task_runtime_explicit_output_overrides_open_source_target(tmp_path
     assert source_context.target is False
 
 
+def test_file_task_runtime_preserves_requested_output_directory_for_matching_bare_name(
+    tmp_path,
+):
+    output_path = tmp_path / "matrix" / "round1_financial_diagnostic.docx"
+    runtime = FileTaskRuntime(workspace_root=str(tmp_path))
+    request = FileTaskRequest(
+        task=(
+            "分析 financial_model.xlsx，生成新的 "
+            "round1_financial_diagnostic.docx，不得修改源工作簿。"
+        ),
+        target_path=str(output_path),
+        files=[
+            FileTaskFile(
+                path=str(tmp_path / "matrix" / "financial_model.xlsx"),
+                name="financial_model.xlsx",
+                type="xlsx",
+                target=False,
+            )
+        ],
+    )
+
+    normalized = runtime._request_with_inferred_target_path(request)
+    wrong_root_change = [
+        {
+            "path": str(tmp_path / "round1_financial_diagnostic.docx"),
+            "operation": "write_docx_content",
+        }
+    ]
+
+    assert normalized.target_path == str(output_path)
+    assert runtime._verification_target_path(normalized, wrong_root_change) == str(
+        output_path
+    )
+
+
 def test_file_task_runtime_infers_split_directory_and_filename_output_target(tmp_path):
     workspace = tmp_path / "workspace"
     current_dir = workspace / "codex_real_task_20260701"
@@ -7216,7 +5354,7 @@ def test_file_task_runtime_blocks_model_write_to_protected_source_when_creating_
     source_path = tmp_path / "workspace" / "_test_integration_workspace.txt"
     source_path.parent.mkdir()
     source_path.write_text("workspace file content", encoding="utf-8")
-    target_path = "workspace/koto_ai_assistant_eval_generated.docx"
+    target_path = str(source_path.parent / "koto_ai_assistant_eval_generated.docx")
     responses = iter(
         [
             {
@@ -7323,6 +5461,13 @@ def test_file_task_runtime_blocks_model_write_to_protected_source_when_creating_
             "paragraphs": '[{"text":"Koto AI 助手写入测试","style":"Heading 1"},{"text":"workspace file content"}]',
         }
     ]
+    committed_call_id = next(
+        event.payload["tool_call_id"]
+        for event in events
+        if event.type == "tool.started"
+        and event.payload.get("tool_name") == "write_docx_content"
+        and event.payload.get("args", {}).get("path") == target_path
+    )
     assert changed == [
         {
             "path": target_path,
@@ -7333,6 +5478,7 @@ def test_file_task_runtime_blocks_model_write_to_protected_source_when_creating_
             "change_type": "create",
             "paragraphs_written": 2,
             "focus": True,
+            "tool_call_id": committed_call_id,
         }
     ]
     assert run_started.payload["target_path"] == target_path

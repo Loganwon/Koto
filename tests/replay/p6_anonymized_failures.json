@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "schema_version": 1,
+      "case_id": "p6-startup-model-missing",
+      "replay_key": "startup.local_model_missing",
+      "surface": "startup",
+      "operation": "launch_without_installed_model",
+      "symptom_code": "local_model_missing",
+      "observed": {"mode": "local", "model": "missing:latest", "expected": "app_healthy_model_actionable"}
+    },
+    {
+      "schema_version": 1,
+      "case_id": "p6-startup-runtime-incompatible",
+      "replay_key": "startup.runtime_incompatible",
+      "surface": "startup",
+      "operation": "launch_with_old_local_runtime",
+      "symptom_code": "runtime_incompatible",
+      "observed": {"mode": "local", "expected": "app_healthy_update_or_switch"}
+    },
+    {
+      "schema_version": 1,
+      "case_id": "p6-startup-legacy-upgrade",
+      "replay_key": "startup.legacy_upgrade",
+      "surface": "startup",
+      "operation": "launch_after_settings_upgrade",
+      "symptom_code": "legacy_model_config",
+      "observed": {"legacy_mode": "ollama", "expected": "local_mode_migrated"}
+    },
+    {
+      "schema_version": 1,
+      "case_id": "p6-docx-review-scale",
+      "replay_key": "docx.large_review",
+      "surface": "docx",
+      "operation": "load_comments_and_revisions",
+      "symptom_code": "review_ui_stall",
+      "observed": {"comment_count": 500, "expected": "virtualized_usable_editor"}
+    },
+    {
+      "schema_version": 1,
+      "case_id": "p6-pdf-text-position",
+      "replay_key": "pdf.text_position",
+      "surface": "pdf",
+      "operation": "annotate_zoom_save_reload",
+      "symptom_code": "annotation_position_drift",
+      "observed": {"expected": "position_survives_transform"}
+    },
+    {
+      "schema_version": 1,
+      "case_id": "p6-pdf-watermark-cleanup",
+      "replay_key": "pdf.watermark_cleanup",
+      "surface": "pdf",
+      "operation": "remove_watermark",
+      "symptom_code": "cleanup_no_effect",
+      "observed": {"expected": "effect_report_or_safe_noop"}
+    },
+    {
+      "schema_version": 1,
+      "case_id": "p6-health-ping-tail",
+      "replay_key": "health.ping_liveness",
+      "surface": "startup",
+      "operation": "poll_liveness_without_local_runtime",
+      "symptom_code": "ping_tail_latency",
+      "observed": {"expected": "no_ollama_socket_probe"}
+    },
+    {
+      "schema_version": 1,
+      "case_id": "p6-office-corrupt-pptx",
+      "replay_key": "office.corrupt_pptx",
+      "surface": "pptx",
+      "operation": "open_corrupt_upload",
+      "symptom_code": "misleading_package_error",
+      "observed": {"expected": "bounded_actionable_error"}
+    }
+  ]
+}

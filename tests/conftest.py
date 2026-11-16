@@ -6,9 +6,22 @@ Shared pytest fixtures for Koto test suite.
 
 from __future__ import annotations
 
-# phase2_smoke_test.py is a standalone script (calls sys.exit at module level)
-# and must not be collected by pytest.
-collect_ignore = ["phase2_smoke_test.py"]
+# These files are manual/live validation scripts rather than hermetic pytest
+# modules.  Several of them read local credentials or call ``sys.exit`` while
+# being imported, which used to abort a repository-wide pytest collection.
+# They remain directly executable through the commands documented in each
+# file, but are deliberately outside the automatic test suite boundary.
+collect_ignore = [
+    "phase2_smoke_test.py",
+    "test_annotation.py",
+    "test_e2e_agent.py",
+    "test_editor_pipeline.py",
+    "test_full_paper_processing.py",
+    "test_intelligent_analyzer.py",
+    "test_model_calls_live.py",
+    "test_output_modes.py",
+    "test_workflows_integration.py",
+]
 
 import os
 import shutil
@@ -67,9 +80,9 @@ except ImportError:
 def _load_project_api_keys() -> None:
     """Load API keys from project config when env vars are not already set."""
     try:
-        from app.core.llm.gemini_config import load_gemini_config_env
+        from app.core.llm.deepseek_config import load_deepseek_config_env
 
-        load_gemini_config_env(override=False)
+        load_deepseek_config_env(override=False)
     except Exception:
         # Key loading should never break the test run.
         pass
@@ -77,6 +90,23 @@ def _load_project_api_keys() -> None:
 
 def _root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def _assert_source_mode_imports_are_unshadowed(root: Path) -> None:
+    """Stop source-mode tests before stale compiled modules mask current code."""
+    from src.startup_diagnostics import _source_shadowing_extensions
+
+    artifacts = _source_shadowing_extensions(root)
+    if not artifacts:
+        return
+    preview = ", ".join(str(path.relative_to(root)) for path in artifacts[:3])
+    remainder = len(artifacts) - 3
+    suffix = f" (+{remainder} more)" if remainder > 0 else ""
+    raise pytest.UsageError(
+        f"Found {len(artifacts)} in-place .pyd file(s) shadowing source modules: "
+        f"{preview}{suffix}. Run `.venv\\Scripts\\python.exe "
+        "scripts\\clean_inplace_cython_artifacts.py --apply` before pytest."
+    )
 
 
 def _cleanup_test_artifacts() -> None:
@@ -97,6 +127,8 @@ def pytest_configure(config):
     """
     global _CURRENT_PYTEST_TMP
 
+    _assert_source_mode_imports_are_unshadowed(_root())
+
     pytest_tmp = _root() / ".pytest_tmp"
     pytest_tmp.mkdir(exist_ok=True)
     run_tmp = pytest_tmp / f"run-{os.getpid()}"
@@ -104,6 +136,52 @@ def pytest_configure(config):
         shutil.rmtree(run_tmp, ignore_errors=True)
     _CURRENT_PYTEST_TMP = run_tmp
     config.option.basetemp = str(run_tmp)
+
+    # Every mutable runtime store must stay inside this pytest process's
+    # isolated root.  Tests previously wrote task summaries, ledgers and Addon
+    # audit data into the real project config directory.
+    runtime_state = run_tmp / "runtime-state"
+    runtime_state.mkdir(parents=True, exist_ok=True)
+    _os_env = os.environ
+    _os_env["KOTO_DB_DIR"] = str(runtime_state)
+    _os_env["KOTO_ADDON_AUDIT_DB_PATH"] = str(runtime_state / "addon_audit.sqlite")
+    _os_env["KOTO_ADDON_REGISTRY_PATH"] = str(runtime_state / "addons.json")
+    _os_env["KOTO_FILE_TASK_SUMMARY_PATH"] = str(
+        runtime_state / "file_task_summaries.json"
+    )
+    _os_env["KOTO_FILE_TASK_PLAN_PATH"] = str(runtime_state / "file_task_plans.json")
+    _os_env["KOTO_FILE_TASK_FOLLOWUP_PATH"] = str(
+        runtime_state / "file_task_followups.json"
+    )
+    _os_env["KOTO_KB_CONFIG_PATH"] = str(runtime_state / "kb_config.json")
+    _os_env["KOTO_CALENDAR_EVENTS_PATH"] = str(
+        runtime_state / "calendar" / "events.json"
+    )
+    _os_env["KOTO_REMINDERS_PATH"] = str(runtime_state / "reminders" / "reminders.json")
+    _os_env["KOTO_SCHEDULED_TASKS_PATH"] = str(
+        runtime_state / "tasks" / "scheduled_tasks.json"
+    )
+    _os_env["KOTO_RATING_DB_PATH"] = str(runtime_state / "ratings.db")
+    _os_env["KOTO_SHADOW_OBSERVATIONS_PATH"] = str(
+        runtime_state / "shadow_observations.json"
+    )
+    _os_env["KOTO_FILE_INDEX_PATH"] = str(runtime_state / "file_index.json")
+    _os_env["KOTO_TOKEN_USAGE_PATH"] = str(runtime_state / "token_usage.json")
+    _os_env["KOTO_PROACTIVE_QUEUE_PATH"] = str(runtime_state / "proactive_queue.json")
+    _os_env["KOTO_TRIGGERS_PATH"] = str(runtime_state / "triggers.json")
+    _os_env["KOTO_RUNTIME_DATA_DIR"] = str(runtime_state)
+    _os_env["KOTO_RAG_INDEX_DIR"] = str(runtime_state / "rag_index")
+    _os_env["KOTO_FILE_NETWORK_DB_PATH"] = str(
+        runtime_state / "processed_file_network.db"
+    )
+    _os_env["KOTO_MEMORY_PATH"] = str(runtime_state / "memory.json")
+    _os_env["KOTO_USERS_FILE"] = str(runtime_state / "users.json")
+    _os_env["KOTO_ACTIVATION_CODES_FILE"] = str(runtime_state / "activation_codes.json")
+    _os_env["KOTO_JWT_SECRET_FILE"] = str(runtime_state / "jwt_secret.txt")
+    _os_env["KOTO_WORK_FILE_LIBRARY_DB_PATH"] = str(
+        runtime_state / "work_file_library.db"
+    )
+    _os_env["KOTO_AUDIT_DB_PATH"] = str(runtime_state / "audit.db")
 
     # Pre-import packages so that module-level _stub() calls in test files
     # (which only stub when 'name not in sys.modules') won't replace the real
@@ -173,10 +251,8 @@ def app(_koto_tmp_db):
     from flask import Flask
 
     from app.api.job_routes import job_bp
-    from app.api.skill_routes import skill_bp
 
     application = Flask(__name__)
-    application.register_blueprint(skill_bp)
     application.register_blueprint(job_bp)
     application.config["TESTING"] = True
     return application
@@ -185,18 +261,6 @@ def app(_koto_tmp_db):
 @pytest.fixture(scope="session")
 def client(app):
     return app.test_client()
-
-
-@pytest.fixture(scope="session")
-def binding_id(client):
-    """Create a test intent binding and return its ID for dependent tests."""
-    resp = client.post(
-        "/api/skills/concise_mode/bindings/intent",
-        json={"patterns": ["测试极简", "最短回答"], "auto_disable_after_turns": 1},
-    )
-    assert resp.status_code == 201, resp.get_data(as_text=True)
-    data = resp.get_json()
-    return data["binding"]["binding_id"]
 
 
 # ── Full-app fixture (all blueprints) ────────────────────────────────────────
@@ -211,31 +275,23 @@ def full_app(_koto_tmp_db):
 
     from flask import Flask
 
-    from app.api.agent_routes import agent_bp
     from app.api.file_hub_routes import file_hub_bp
     from app.api.goal_routes import goal_bp
     from app.api.job_routes import job_bp
-    from app.api.macro_routes import macro_bp
     from app.api.mcp_routes import mcp_bp
     from app.api.ops_routes import ops_bp
-    from app.api.shadow_routes import shadow_bp
-    from app.api.skill_marketplace_routes import marketplace_bp
-    from app.api.skill_routes import skill_bp
+    from app.api.plugin_protocol_routes import plugin_protocol_bp
     from app.api.task_routes import task_bp
 
     application = Flask(__name__)
-    application.register_blueprint(skill_bp)
     application.register_blueprint(job_bp)
     application.register_blueprint(ops_bp)
-    application.register_blueprint(marketplace_bp)
-    application.register_blueprint(macro_bp)
+    application.register_blueprint(plugin_protocol_bp)
     application.register_blueprint(mcp_bp)
-    application.register_blueprint(shadow_bp)
     # Blueprints without built-in url_prefix need it provided here
     application.register_blueprint(task_bp, url_prefix="/api/tasks")
     application.register_blueprint(goal_bp, url_prefix="/api/goals")
     application.register_blueprint(file_hub_bp, url_prefix="/api/files")
-    application.register_blueprint(agent_bp, url_prefix="/api/agent")
     application.config["TESTING"] = True
     return application
 
@@ -291,73 +347,69 @@ def pytest_unconfigure(config):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_app_context_and_singletons():
-    """Reset AppContext singletons before/after each test to prevent cross-test pollution."""
-    try:
-        from app.core.app_context import ctx
+def _isolate_process_singletons():
+    """Reset stateful service owners around every test."""
 
-        ctx.reset()
-    except Exception:
-        pass
+    def _reset() -> None:
+        resetters = (
+            ("app.core.agent.checkpoint_manager", "reset_checkpointer"),
+            ("app.core.agent.kernel_agent_service", "reset_kernel_agent_for_tests"),
+            ("app.core.config.configuration_manager", "reset_config_manager_for_tests"),
+            (
+                "app.core.services.auto_catalog_scheduler",
+                "reset_auto_catalog_scheduler_for_tests",
+            ),
+            ("app.core.services.file_rag_indexer", "reset_file_rag_indexers_for_tests"),
+            ("app.core.services.knowledge_base", "reset_knowledge_base_for_tests"),
+            ("app.core.services.memory_manager", "reset_memory_manager_for_tests"),
+            ("app.core.services.rag_service", "reset_rag_service_cache_for_tests"),
+            ("web.session_manager", "reset_session_runtime_for_tests"),
+        )
+        for module_name, function_name in resetters:
+            try:
+                module = __import__(module_name, fromlist=[function_name])
+                getattr(module, function_name)()
+            except Exception:
+                pass
 
-    try:
-        from app.core.agent.checkpoint_manager import reset_checkpointer
-
-        reset_checkpointer()
-    except Exception:
-        pass
+    _reset()
 
     yield
-
-    try:
-        from app.core.app_context import ctx
-
-        ctx.reset()
-    except Exception:
-        pass
-
-    try:
-        from app.core.agent.checkpoint_manager import reset_checkpointer
-
-        reset_checkpointer()
-    except Exception:
-        pass
+    _reset()
 
 
 @pytest.fixture(autouse=True)
 def _isolate_shadow_watcher(monkeypatch, tmp_path):
     """Isolate ShadowWatcher singleton and file path in each test."""
     try:
-        from app.core.learning.shadow_tracer import ShadowWatcher
+        from app.core.monitoring import shadow_watcher
 
-        ShadowWatcher._instance = None
-        monkeypatch.setattr(
-            ShadowWatcher, "_OBS_FILE", str(tmp_path / "shadow_obs.json")
-        )
+        shadow_watcher.ShadowWatcher._instance = None
+        monkeypatch.setattr(shadow_watcher, "_OBS_FILE", tmp_path / "shadow_obs.json")
     except Exception:
         pass
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _protect_user_settings():
-    """Back up config/user_settings.json before the test session and restore it
-    afterwards.  Integration tests that call /api/settings/reset or
-    /api/skillmarket/toggle must not permanently modify the developer's
-    production settings file."""
+    """Protect the primary settings file and its recovery backup."""
     settings_path = _root() / "config" / "user_settings.json"
-    backup: bytes | None = None
-    if settings_path.exists():
+    protected_paths = (
+        settings_path,
+        settings_path.with_name(f"{settings_path.name}.bak"),
+    )
+    snapshots: dict[Path, bytes | None] = {}
+    for path in protected_paths:
         try:
-            backup = settings_path.read_bytes()
+            snapshots[path] = path.read_bytes() if path.exists() else None
         except Exception:
-            pass
+            snapshots[path] = None
     yield
-    if backup is not None:
+    for path, snapshot in snapshots.items():
         try:
-            settings_path.write_bytes(backup)
+            if snapshot is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(snapshot)
         except Exception:
             pass
-    elif settings_path.exists():
-        # File was created during the session but didn't exist before — remove it
-        # only if created by tests (i.e. it existed before = backup would be set).
-        pass

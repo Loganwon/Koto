@@ -19,9 +19,21 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Dict, List, Set
 
 logger = logging.getLogger(__name__)
+
+_knowledge_graph_factory: Callable[[], object] | None = None
+
+
+def configure_knowledge_graph_factory(factory: Callable[[], object]) -> None:
+    """Bind the knowledge-graph implementation at the application boundary."""
+    if not callable(factory):
+        raise TypeError("knowledge graph factory must be callable")
+    global _knowledge_graph_factory
+    _knowledge_graph_factory = factory
+
 
 # ── Minimal Chinese / English stopwords ────────────────────────────────────
 _STOPWORDS: Set[str] = {
@@ -129,21 +141,13 @@ def _extract_entities(text: str) -> List[str]:
 
 
 def _get_kg():
-    """Lazily load KnowledgeGraph — avoids circular imports."""
+    """Construct the configured graph without importing Web from Core."""
+    factory = _knowledge_graph_factory
+    if factory is None:
+        logger.debug("[GraphRAG] knowledge graph factory is not configured")
+        return None
     try:
-        import sys
-
-        # Try web context first
-        if "knowledge_graph" in sys.modules:
-            mod = sys.modules["knowledge_graph"]
-        else:
-            try:
-                import importlib
-
-                mod = importlib.import_module("web.knowledge_graph")
-            except ImportError:
-                mod = importlib.import_module("knowledge_graph")
-        return mod.KnowledgeGraph()
+        return factory()
     except Exception as e:
         logger.debug(f"[GraphRAG] _get_kg failed: {e}")
         return None

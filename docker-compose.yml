@@ -24,12 +24,14 @@ services:
     environment:
       # Core / required
       - KOTO_DEPLOY_MODE=${KOTO_DEPLOY_MODE:-local}
+      - KOTO_AUTH_ENABLED=true
       - KOTO_JWT_SECRET=${KOTO_JWT_SECRET:-}
       # Logging
       - KOTO_LOG_LEVEL=${KOTO_LOG_LEVEL:-INFO}
       - KOTO_LOG_FORMAT=${KOTO_LOG_FORMAT:-text}
       # AI provider keys (supply at least one)
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Observability (optional)
@@ -49,6 +51,7 @@ services:
       - koto_chats:/app/chats
       - koto_config:/app/config
       - koto_logs:/app/logs
+      - koto_data:/app/data
 
     # ── Restart policy ───────────────────────────────────────────────
     # Restart on crash but stop after 5 consecutive failures to avoid
@@ -63,7 +66,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import requests; requests.get('http://localhost:5000/api/health').raise_for_status()",
+          "import requests; requests.get('http://localhost:5000/api/health', timeout=3).raise_for_status()",
         ]
       interval: 30s
       timeout: 10s
@@ -96,3 +99,4 @@ volumes:
   koto_chats:
   koto_config:
   koto_logs:
+  koto_data:

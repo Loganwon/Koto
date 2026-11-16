@@ -1,0 +1,80 @@
+#wa-ai-messages > .wa-inline-task-workbench .wa-task-workbench-summary {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* ── Dark mode overrides (synced with style.css dark palette) ── */
+[data-theme="dark"] {
+  --bg: #0e1117;
+  --surface: #161c28;
+  --surface2: #1a1f30;
+  --surface3: #161c28;
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.08);
+  --hover: rgba(255, 255, 255, 0.04);
+  --accent: #5b9df5;
+  --accent-medium: rgba(91, 157, 245, 0.22);
+  --accent-hover: #7eb5f8;
+  --text: #edf2fc;
+  --text-muted: #a8bbd4;
+  --success: #34d399;
+  --ai-bg: #161c28;
+  --ai-surface: #1a1f30;
+  --ai-border: rgba(255, 255, 255, 0.10);
+  --scrollbar: rgba(255, 255, 255, 0.16);
+  --scrollbar-hover: rgba(255, 255, 255, 0.28);
+  --code-bg: #1e2639;
+  --code-text: #edf2fc;
+}
+
+/* These settings also apply to the unified workspace, not just the retired
+   classic chat renderer.  The rows remain in task state for audit/history and
+   become visible immediately when users enable the corresponding preference. */
+[data-koto-show-thinking="false"] .koto-thinking-summary,
+[data-koto-show-task-type="false"] .koto-task-type-meta {
+  display: none !important;
+}
+
+/* merged inline */
+/* Extracted workspace layout and utility styles. */
+
+/* == Startup Splash == */
+        #startupSplash {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 12px;
+            background: #f5f7fb;
+            color: #0c1526;
+            z-index: var(--z-toast);
+            font-family: 'Noto Sans SC', 'Segoe UI', sans-serif;
+        }
+
+#startupSplash .spinner {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 3px solid #dbe2ef;
+            border-top-color: #10b981;
+            animation: splashSpin 0.9s linear infinite;
+        }
+
+@keyframes splashSpin { to { transform: rotate(360deg); } }
+
+#startupSplash.hidden { opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+
+/* == Fallback Fonts == */
+        body { font-family: 'Noto Sans SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif !important; }
+
+code, pre { font-family: 'JetBrains Mono', 'Consolas', 'Fira Code', monospace !important; }
+
+/* ?? Virtual scrolling optimization ?? */
+#wa-files-list,
+#wa-recent-list,
+#wa-tmpws-list,
+#wa-myws-list {
+  contain: layout style;
+}

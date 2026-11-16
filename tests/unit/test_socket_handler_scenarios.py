@@ -289,7 +289,7 @@ class TestInsertAtCursorFallback:
         from app.core.agent.doc_websocket_agent_executor import (
             DocWebSocketAgentExecutor,
         )
-        from app.core.agent.lifecycle import AgentRequest
+        from app.core.agent.kernel import AgentRequest
 
         request = AgentRequest(prompt=prompt, file_type=file_type, history=history)
         result = DocWebSocketAgentExecutor()._insert_fallback(request, tool_calls, "")
@@ -377,7 +377,7 @@ class TestSelectionContext:
     """
 
     def _build_prompt(self, selection: str, user_prompt: str, history=None):
-        from app.core.agent.lifecycle import AgentRequest
+        from app.core.agent.kernel import AgentRequest
         from app.core.agent.request_validator import RequestValidator
 
         request = AgentRequest(

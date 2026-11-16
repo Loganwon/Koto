@@ -31,47 +31,28 @@ def test_shared_local_provider_uses_configured_model_before_tag_heuristic(monkey
     assert provider.model == "chosen:latest"
 
 
-def test_router_response_model_uses_configured_tag(monkeypatch):
+def test_ollama_runtime_response_model_uses_configured_tag(monkeypatch):
     from app.core.llm import local_model_runtime
-    from app.core.routing.local_model_router import LocalModelRouter
+    from app.core.llm.local_model_runtime import OllamaRuntime
 
-    monkeypatch.setattr(LocalModelRouter, "_response_model", None)
-    monkeypatch.setattr(LocalModelRouter, "_response_model_inited", False)
+    monkeypatch.setattr(OllamaRuntime, "_response_model", None)
+    monkeypatch.setattr(OllamaRuntime, "_response_model_inited", False)
     monkeypatch.setattr(
         local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest"
     )
-    monkeypatch.setattr(LocalModelRouter, "is_ollama_available", lambda: True)
     response = MagicMock()
     response.status_code = 200
     response.json.return_value = {
         "models": [{"name": "chosen:latest"}, {"name": "qwen3:8b"}]
     }
     monkeypatch.setattr(
-        "app.core.routing.local_model_router.requests.get",
-        lambda *args, **kwargs: response,
+        OllamaRuntime,
+        "_installed_models",
+        classmethod(lambda cls: ["chosen:latest", "qwen3:8b"]),
     )
 
-    assert LocalModelRouter._init_response_model() is True
-    assert LocalModelRouter._response_model == "chosen:latest"
-
-
-def test_router_plan_uses_configured_tag(monkeypatch):
-    from app.core.llm import local_model_runtime
-    from app.core.routing.local_model_router import LocalModelRouter
-
-    monkeypatch.setattr(
-        local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest"
-    )
-    monkeypatch.setattr(LocalModelRouter, "_initialized", True)
-    monkeypatch.setattr(LocalModelRouter, "_model_name", "router:auto")
-    response = MagicMock()
-    response.status_code = 200
-    response.json.return_value = {"message": {"content": '{"steps":["one"]}'}}
-    post = MagicMock(return_value=response)
-    monkeypatch.setattr("app.core.routing.local_model_router.requests.post", post)
-
-    assert LocalModelRouter.generate_plan("plan", "CHAT") == ["one"]
-    assert post.call_args.kwargs["json"]["model"] == "chosen:latest"
+    assert OllamaRuntime._init_response_model() is True
+    assert OllamaRuntime._response_model == "chosen:latest"
 
 
 def test_ollama_provider_no_longer_reads_user_settings_file_directly():
@@ -86,6 +67,39 @@ def test_ollama_provider_no_longer_reads_user_settings_file_directly():
 
     assert "get_configured_local_model_tag" in resolver
     assert '"config" / "user_settings.json"' not in resolver
+
+
+def test_ollama_provider_does_not_report_unloadable_model_as_running(monkeypatch):
+    from app.core.llm import local_model_runtime, ollama_provider, ollama_runtime_compat
+
+    monkeypatch.setattr(
+        local_model_runtime, "get_configured_model_mode", lambda: "local"
+    )
+    monkeypatch.setattr(
+        local_model_runtime,
+        "get_configured_local_model_tag",
+        lambda: "broken:latest",
+    )
+    monkeypatch.setattr(ollama_provider, "_is_ollama_running", lambda: True)
+    monkeypatch.setattr(
+        "app.core.llm.local_model_capabilities.get_ollama_model_capabilities",
+        lambda _model: {"chat"},
+    )
+    monkeypatch.setattr(
+        ollama_runtime_compat,
+        "inspect_ollama_model_compatibility",
+        lambda _model: {
+            "model_id": "broken:latest",
+            "compatible": None,
+            "reason": "model_load_failed",
+        },
+    )
+
+    info = ollama_provider.get_local_model_info()
+
+    assert info["ollama_reachable"] is True
+    assert info["running"] is False
+    assert info["runtime_error"] == "model_load_failed"
 
 
 def test_ollama_provider_disables_qwen_thinking_only_when_requested(monkeypatch):

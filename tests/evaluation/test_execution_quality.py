@@ -1,9 +1,8 @@
 """Execution quality evaluation for the file assistant AI.
 
-Tests the full end-to-end task execution path using real LLM calls and
-validates results with AI-as-Judge.
-
-All tests auto-skip when GOOGLE_API_KEY is not set.
+Tests the full FileTaskRuntime execution path. By default both generation and
+judging use offline fixtures, exercising contracts rather than real model
+quality. KOTO_LIVE_EVALUATION=1 opts into the configured live runtime provider.
 
 Run:  pytest tests/evaluation/test_execution_quality.py -v --tb=short
 """

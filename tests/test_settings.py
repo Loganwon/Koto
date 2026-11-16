@@ -67,6 +67,12 @@ class TestSettingsManager:
         assert "storage" in all_settings
         assert "appearance" in all_settings
 
+    def test_retired_extension_settings_are_rejected(self, settings_mgr, settings_file):
+        assert settings_mgr.patch({"skills": {"legacy": {"enabled": True}}}) is True
+        assert settings_mgr.get("skills") is None
+        persisted = json.loads(settings_file.read_text(encoding="utf-8"))
+        assert "skills" not in persisted
+
     def test_storage_paths_exist(self, settings_mgr):
         paths = settings_mgr.get("storage") or {}
         assert isinstance(paths, dict)
@@ -123,3 +129,54 @@ class TestSettingsValidation:
         assert mgr2.get("appearance", "theme") == "ocean"
         mgr2 = _settings_mod.SettingsManager()
         assert mgr2.get("appearance", "theme") == "ocean"
+
+    def test_clean_shutdown_flush_does_not_overwrite_external_change(
+        self, settings_mgr_val, tmp_path
+    ):
+        settings_mgr_val.set("appearance", "ui_zoom", 1.0)
+        settings_file = tmp_path / "user_settings.json"
+        external = json.loads(settings_file.read_text(encoding="utf-8"))
+        external["appearance"]["ui_zoom"] = 1.2
+        settings_file.write_text(
+            json.dumps(external, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        assert settings_mgr_val._dirty is False
+        assert settings_mgr_val.flush() is True
+        persisted = json.loads(settings_file.read_text(encoding="utf-8"))
+        assert persisted["appearance"]["ui_zoom"] == 1.2
+
+    def test_clean_singleton_reloads_external_setting_changes(
+        self, settings_mgr_val, tmp_path
+    ):
+        settings_mgr_val.set("appearance", "theme", "light")
+        settings_file = tmp_path / "user_settings.json"
+        external = json.loads(settings_file.read_text(encoding="utf-8"))
+        external["appearance"]["theme"] = "forest"
+        settings_file.write_text(
+            json.dumps(external, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        assert settings_mgr_val.get("appearance", "theme") == "forest"
+
+    def test_get_returns_defensive_copy(self, settings_mgr_val):
+        appearance = settings_mgr_val.get("appearance")
+        appearance["theme"] = "mutated-without-save"
+
+        assert settings_mgr_val.get("appearance", "theme") != "mutated-without-save"
+
+    @pytest.mark.parametrize("operation", ["update", "reset"])
+    def test_failed_bulk_write_stays_dirty_for_shutdown_retry(
+        self, settings_mgr_val, monkeypatch, operation
+    ):
+        monkeypatch.setattr(settings_mgr_val, "_save_settings", lambda: False)
+
+        if operation == "update":
+            result = settings_mgr_val.update("appearance", {"ui_zoom": 1.1})
+        else:
+            result = settings_mgr_val.reset("appearance")
+
+        assert result is False
+        assert settings_mgr_val._dirty is True

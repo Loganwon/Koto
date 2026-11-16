@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from app.core.agent.file_task_capability import build_request_capability_profiles
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
-from app.core.agent.file_task_tool_catalog import supported_file_workflows
+from app.core.agent.toolkits.foundation.catalog import supported_file_workflows
 
 
 @dataclass(frozen=True)

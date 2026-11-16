@@ -1,9 +1,9 @@
+import { getFeatureRegistry } from '../shared/feature-registry';
 /**
  * Review rail positioning, card layout, and selection launcher for DOCX review.
  * Uses the SVG module for anchor resolution and connector drawing.
  *
- * Exports `createDocxReviewLayout()` as the main entry point — looks for
- * `window.KotoDocxReviewGeometry` for geometry computation, falls back to inline.
+ * Exports `createDocxReviewLayout()` as the main entry point.
  */
 import {
   createDocxReviewLayoutSvg,
@@ -12,8 +12,8 @@ import {
   RailMetrics,
   LayoutState,
   ReviewLayoutDeps,
-  ReviewSvgApi,
 } from './layout-svg';
+import { computeReviewGeometry } from './geometry';
 
 const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 0;
 const DEFAULT_REVIEW_RAIL_RIGHT_SHIFT = 0;
@@ -55,6 +55,7 @@ interface ReviewLayoutApi {
 
 export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi {
   const svg = createDocxReviewLayoutSvg(deps);
+  let reviewShellLayoutFrame = 0;
   const {
     state,
     $,
@@ -66,6 +67,9 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     _isReviewEditorFocused,
     _getSelectionViewportBounds,
     _previewReviewText,
+    captureReviewSelection,
+    createReviewComment,
+    createReviewRevision,
   } = deps;
 
   function _reviewRailLeftShift(host: HTMLElement | null): number {
@@ -187,26 +191,29 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
 
   function getDocxReviewRailMetrics(host: HTMLElement, viewport: HTMLElement): RailMetrics | null {
     if (!host || !viewport) return null;
-    if ((window as any).KotoDocxReviewGeometry) {
-      const geo = (window as any).KotoDocxReviewGeometry.computeReviewGeometry(host, viewport);
-      if (geo) {
-        return Object.assign(geo, {
-          edgeInset:          8,
-          laneLeft:           geo.cardColLeft,
-          pageContentLeft:    geo.scrollLeft,
-          pageContentTop:     geo.scrollTop,
-          pageEdgeRight:      geo.textColRight,
-          pageOffsetHeight:   geo.pageContentHeight,
-          pageOffsetWidth:    geo.pageRect ? Math.round(geo.pageRect.width) : 0,
-          scaleX:             geo.zoom ? geo.zoom.x : 1,
-          scaleY:             geo.zoom ? geo.zoom.y : 1,
-          viewportScrollLeft: geo.scrollLeft,
-          viewportScrollTop:  geo.scrollTop,
-          viewportRight:      Number.isFinite(geo.viewportRight)
-            ? geo.viewportRight
-            : Math.round(geo.scrollLeft + (geo.viewportWidth || 0)),
-        });
-      }
+    const geo = computeReviewGeometry(host, viewport);
+    if (geo) {
+      // Keep the rendered CSS width in the same unscaled coordinate system
+      // used by the geometry result. Otherwise a page-level UI zoom (for
+      // example 120%) expands the visible card beyond the intended rail.
+      _setDocxReviewRailWidth(host, geo.railWidth);
+      return Object.assign(geo, {
+        edgeInset:          8,
+        laneLeft:           geo.cardColLeft,
+        pageContentLeft:    geo.scrollLeft,
+        pageContentTop:     geo.scrollTop,
+        pageContentRight:   geo.pageRect ? geo.toContentX(geo.pageRect.right) : geo.viewportRight,
+        pageEdgeRight:      geo.textColRight,
+        pageOffsetHeight:   geo.pageContentHeight,
+        pageOffsetWidth:    geo.pageRect ? Math.round(geo.pageRect.width) : 0,
+        scaleX:             geo.zoom ? geo.zoom.x : 1,
+        scaleY:             geo.zoom ? geo.zoom.y : 1,
+        viewportScrollLeft: geo.scrollLeft,
+        viewportScrollTop:  geo.scrollTop,
+        viewportRight:      Number.isFinite(geo.viewportRight)
+          ? geo.viewportRight
+          : Math.round(geo.scrollLeft + (geo.viewportWidth || 0)),
+      });
     }
 
     const hostRect = host.getBoundingClientRect();
@@ -337,14 +344,22 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     if (!shell || !host || !viewport || !listEl || shell.style.display === 'none') {
       if (host) {
         host.classList.remove('has-review-shell');
+        host.classList.remove('has-review-toolbar-alignment');
         host.style.removeProperty('--wa-review-canvas-width');
+        host.style.removeProperty('--wa-review-toolbar-center');
       }
       return;
     }
     const cards = Array.from(listEl.querySelectorAll('.koto-docx-comment-card, .wa-proposal-card'));
     if (!cards.length) {
       host.classList.remove('has-review-shell');
+      host.classList.remove('has-review-toolbar-alignment');
       host.style.removeProperty('--wa-review-canvas-width');
+      host.style.removeProperty('--wa-review-toolbar-center');
+      // A previous comment-heavy document may have scrolled the shared DOCX
+      // viewport horizontally to reveal its review rail. Do not carry that
+      // offset into a document with no review cards, where it hides the page.
+      if (viewport.scrollLeft) viewport.scrollLeft = 0;
       return;
     }
     host.classList.add('has-review-shell');
@@ -359,7 +374,7 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
         ? railMetrics.viewportWidth
         : ((viewportRect.width || viewport.clientWidth || 0) / layoutScale.x)
     );
-    let viewportScrollTop = Math.max(0, Math.round(viewport.scrollTop || 0));
+    const viewportScrollTop = Math.max(0, Math.round(viewport.scrollTop || 0));
     let viewportScrollLeft = Math.max(0, Math.round(viewport.scrollLeft || 0));
     const shellTop = railMetrics && Number.isFinite(railMetrics.shellTop)
       ? Math.round(railMetrics.shellTop)
@@ -416,12 +431,18 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
       ...cards.map((card) => Math.round((card as HTMLElement).offsetWidth || 0)),
     );
     const desiredCardColLeft = Math.max(12, _positionReviewRail(rawCardColLeft, host));
-    const viewportRight2 = railMetrics && Number.isFinite(railMetrics.viewportRight)
-      ? Math.round(railMetrics.viewportRight)
-      : Math.round(viewportScrollLeft + viewportWidth);
     const minCardColFromText = railMetrics && Number.isFinite(railMetrics.textColRight)
       ? Math.round(railMetrics.textColRight + Math.max(6, railMetrics.railGap || 12) + 4)
       : 12;
+    // On narrow workspaces the document and review rail cannot both fit at
+    // scrollLeft=0. Move only far enough to expose the complete rail; otherwise
+    // the card is painted over the adjacent AI panel and becomes unclickable.
+    const requiredScrollLeft = Math.max(
+      0,
+      Math.round(minCardColFromText + cardColWidth + 12 - viewportWidth),
+    );
+    const targetViewportScrollLeft = Math.max(viewportScrollLeft, requiredScrollLeft);
+    const viewportRight2 = Math.round(targetViewportScrollLeft + viewportWidth);
     const maxVisibleCardColLeft = Math.round(viewportRight2 - cardColWidth - 12);
     const cardColLeft = Math.max(
       12,
@@ -434,6 +455,10 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
 
     const shellCoverWidth = Math.max(
       viewportWidth,
+      // An overlaid AI panel reduces the usable width without reducing the
+      // scroll element's clientWidth. Extend the canvas by the reveal offset
+      // so the browser can actually apply that horizontal scroll position.
+      Math.round((viewport.clientWidth || viewportRect.width || viewportWidth) + requiredScrollLeft),
       railMetrics ? (railMetrics as any).contentWidth || 0 : 0,
       cardColLeft + cardColWidth + 14
     );
@@ -441,33 +466,58 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     shell.style.overflow = 'hidden';
     listEl.style.width = Math.max(160, Math.round(shellCoverWidth)) + 'px';
     host.style.setProperty('--wa-review-canvas-width', `${Math.round(shellCoverWidth)}px`);
-    // Make the rail part of the horizontal document canvas. Narrow editors
-    // reveal it by scrolling the page left, keeping cards out of both the text
-    // column and the adjacent AI panel.
-    const revealScrollLeft = Math.max(
-      viewportScrollLeft,
-      Math.round(cardColLeft + cardColWidth + 12 - viewportWidth),
-    );
-    const maxScrollLeft = Math.max(0, Math.round(viewport.scrollWidth - viewport.clientWidth));
-    const nextScrollLeft = Math.min(revealScrollLeft, maxScrollLeft);
-    if (nextScrollLeft > viewportScrollLeft) {
-      viewport.scrollLeft = nextScrollLeft;
-      viewportScrollLeft = Math.max(0, Math.round(viewport.scrollLeft || nextScrollLeft));
+    if (viewportScrollLeft < requiredScrollLeft) {
+      // Force the updated canvas width to participate in scrollWidth before
+      // assigning scrollLeft; Chromium otherwise clamps the first write to 0.
+      void viewport.scrollWidth;
+      viewport.scrollLeft = requiredScrollLeft;
+      viewportScrollLeft = Math.max(0, Math.round(viewport.scrollLeft || requiredScrollLeft));
     }
+    // Preserve the reader's vertical position and any horizontal position that
+    // already exposes the rail. Narrow viewports receive only the minimum
+    // horizontal correction calculated above.
     // Anchor content coordinate (0, 0) to the scroll viewport. Chromium can
     // paint an oversized absolutely-positioned flex child at a different
     // origin than offsetLeft reports, so derive the correction from the live
     // rectangle after its final width has been applied.
     const listRectWithoutScroll = listEl.getBoundingClientRect();
+    // The rectangle delta is measured in screen pixels, while CSS transforms
+    // are applied before the workspace/page zoom. Convert the correction back
+    // to CSS pixels so a 120% UI zoom does not shift the rail 1.2x twice.
     const listTranslateX = Math.round(
-      viewportRect.left - (viewportScrollLeft * layoutScale.x) - listRectWithoutScroll.left
+      (viewportRect.left - (viewportScrollLeft * layoutScale.x) - listRectWithoutScroll.left)
+      / (layoutScale.x || 1)
     );
     const listTranslateY = Math.round(
-      viewportRect.top - (viewportScrollTop * layoutScale.y) - listRectWithoutScroll.top
+      (viewportRect.top - (viewportScrollTop * layoutScale.y) - listRectWithoutScroll.top)
+      / (layoutScale.y || 1)
     );
     listEl.style.transform = `translate(${listTranslateX}px, ${listTranslateY}px)`;
     if (connectorLayer) {
       connectorLayer.setAttribute('width', String(Math.max(160, Math.round(shellCoverWidth))));
+    }
+
+    cards.forEach((card) => {
+      (card as HTMLElement).style.left = cardColLeft + 'px';
+      (card as HTMLElement).style.right = 'auto';
+    });
+    const toolbar = host.querySelector('.koto-tt-toolbar') as HTMLElement | null;
+    const railCard = cards[0] as HTMLElement | undefined;
+    if (toolbar && railCard) {
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const railCardRect = railCard.getBoundingClientRect();
+      const toolbarScaleX = toolbar.offsetWidth > 0
+        ? (toolbarRect.width / toolbar.offsetWidth)
+        : layoutScale.x;
+      const toolbarCenter = Math.round(
+        ((railCardRect.left + (railCardRect.width / 2)) - toolbarRect.left)
+        / (toolbarScaleX || 1)
+      );
+      host.style.setProperty('--wa-review-toolbar-center', `${toolbarCenter}px`);
+      host.classList.add('has-review-toolbar-alignment');
+    } else {
+      host.style.removeProperty('--wa-review-toolbar-center');
+      host.classList.remove('has-review-toolbar-alignment');
     }
 
     const layoutEntries: LayoutEntry[] = [];
@@ -544,17 +594,20 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
       return a.index - b.index;
     });
 
+    // Cards are sorted by page and desired top, and share one rail column.
+    // Therefore only the last placed card on the same page can collide with
+    // the next card. Scanning every earlier card made layout O(n²).
+    const lastLayoutEntryByPage = new Map<string, LayoutEntry>();
     measuredCards.forEach((item) => {
       const fallbackTop = layoutEntries.length
         ? _reviewLayoutEntryBottom(layoutEntries[layoutEntries.length - 1]) + 10
         : 0;
       const desiredTop = Number.isFinite(item.desiredTop) ? item.desiredTop : fallbackTop;
-      const peerEntries = item.pageBounds
-        ? layoutEntries.filter((entry) => (
-            entry.pageTop === item.pageBounds!.minTop
-            && entry.pageBottom === item.pageBounds!.maxTop
-          ))
-        : layoutEntries;
+      const pageKey = item.pageBounds
+        ? `${item.pageBounds.minTop}:${item.pageBounds.maxTop}`
+        : '__unbounded__';
+      const previousEntry = lastLayoutEntryByPage.get(pageKey);
+      const peerEntries = previousEntry ? [previousEntry] : [];
       const top = _resolveNonOverlappingCardTop(
         peerEntries,
         desiredTop,
@@ -565,7 +618,7 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
         item.cardCollisionHeight,
       );
       item.card.style.top = top + 'px';
-      layoutEntries.push({
+      const placedEntry = {
         collisionHeight: item.cardCollisionHeight,
         height: item.cardHeight,
         left: cardColLeft,
@@ -573,7 +626,9 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
         pageTop: item.pageBounds ? item.pageBounds.minTop : null,
         top,
         width: item.cardWidth,
-      });
+      };
+      layoutEntries.push(placedEntry);
+      lastLayoutEntryByPage.set(pageKey, placedEntry);
       if (highlightLayer && item.anchorGeometry) {
         svg._drawReviewAnchorHighlight(highlightLayer, {
           rects: item.anchorGeometry.highlightRects || [],
@@ -612,8 +667,23 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
   }
 
   function scheduleReviewShellLayout(): void {
-    requestAnimationFrame(() => {
+    if (reviewShellLayoutFrame) return;
+    reviewShellLayoutFrame = requestAnimationFrame(() => {
+      const viewport = $('wa-editor-content');
+      const scrollLeftBeforeLayout = Math.round(viewport?.scrollLeft || 0);
       layoutReviewShellInDocx();
+      const scrollLeftAfterLayout = Math.round(viewport?.scrollLeft || 0);
+      // A second full layout is only needed when the first pass changed the
+      // horizontal viewport geometry. Running it unconditionally doubled all
+      // anchor measurement and card layout work for large review sets.
+      if (scrollLeftAfterLayout !== scrollLeftBeforeLayout) {
+        reviewShellLayoutFrame = requestAnimationFrame(() => {
+          reviewShellLayoutFrame = 0;
+          layoutReviewShellInDocx();
+        });
+      } else {
+        reviewShellLayoutFrame = 0;
+      }
     });
   }
 
@@ -708,8 +778,8 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
         renderReviewSelectionLauncher();
       }, { passive: true } as any);
     }
-    if (!(window as any).__waReviewShellResizeBound) {
-      (window as any).__waReviewShellResizeBound = true;
+    if (!getFeatureRegistry().__waReviewShellResizeBound) {
+      getFeatureRegistry().__waReviewShellResizeBound = true;
       window.addEventListener('resize', () => {
         const shell = $('wa-review-shell');
         if (shell && shell.style.display !== 'none') scheduleReviewShellLayout();
@@ -772,23 +842,20 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
       launcher.addEventListener('mousedown', (event) => {
         if (event && typeof event.preventDefault === 'function') event.preventDefault();
         if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-        (window as any).WA.captureReviewSelection(event);
+        captureReviewSelection(event);
       });
       launcher.querySelectorAll('.wa-review-selection-add').forEach((button) => {
         button.addEventListener('mousedown', (event) => {
           if (event && typeof event.preventDefault === 'function') event.preventDefault();
           if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-          (window as any).WA.captureReviewSelection(event);
+          captureReviewSelection(event);
         });
         button.addEventListener('click', (event) => {
           if (event && typeof event.preventDefault === 'function') event.preventDefault();
           if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
           const createMode = String((button as HTMLElement).dataset.reviewCreate || '').trim();
-          if (createMode === 'revision' && (window as any).WA && typeof (window as any).WA.createReviewRevision === 'function') {
-            (window as any).WA.createReviewRevision();
-          } else if ((window as any).WA && typeof (window as any).WA.createReviewComment === 'function') {
-            (window as any).WA.createReviewComment();
-          }
+          if (createMode === 'revision') createReviewRevision();
+          else createReviewComment();
         });
       });
       host.appendChild(launcher);
@@ -815,9 +882,4 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     hideReviewSelectionLauncher,
     renderReviewSelectionLauncher,
   };
-}
-
-// Backward compat
-if (typeof window !== 'undefined') {
-  (window as any).KotoDocxReviewLayout = { create: createDocxReviewLayout };
 }

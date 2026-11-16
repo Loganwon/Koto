@@ -3,6 +3,8 @@
  */
 
 import { csrfFetch } from '../shared/csrf';
+import { getLogicalViewportSize } from '../shared/ui-scale';
+import { getFeatureRegistry } from '../shared/feature-registry';
 
 export interface KotoSessionBridge {
   getSession(): string;
@@ -27,7 +29,7 @@ const sessionDomCache = new Map<string, DocumentFragment>();
 const isScrollLocked = false;
 
 export { currentSession, sessionStates, sessionDomCache, isScrollLocked };
-(window as any).currentSession = currentSession;
+getFeatureRegistry().currentSession = currentSession;
 
 export function getProjectOptions(): Array<{ key: string; label: string }> {
   try {
@@ -47,6 +49,16 @@ export function getProjectOptions(): Array<{ key: string; label: string }> {
 
 export function saveProjectOptions(opts: Array<{ key: string; label: string }>): void {
   localStorage.setItem('koto.projectOptions', JSON.stringify(opts));
+}
+
+export function getCurrentProject(): string {
+  return currentProject;
+}
+
+export function setCurrentProject(projectKey: string): void {
+  currentProject = String(projectKey || 'default');
+  localStorage.setItem('koto.currentProject', currentProject);
+  getFeatureRegistry().currentProject = currentProject;
 }
 
 export function getProjectSessionPrefix(projectKey: string = currentProject): string {
@@ -125,19 +137,19 @@ export async function loadSessions(): Promise<void> {
     const response = await fetch('/api/sessions?preview=1');
     const data = await response.json();
     const raw = data.sessions || [];
-    (window as any)._allSessions = raw.map((s: string | { id: string }) => typeof s === 'string' ? s : s.id);
-    (window as any)._sessionPreviews = {};
+    getFeatureRegistry()._allSessions = raw.map((s: string | { id: string }) => typeof s === 'string' ? s : s.id);
+    getFeatureRegistry()._sessionPreviews = {};
     raw.forEach((s: string | { id: string; preview?: string; mtime?: number }) => {
       if (typeof s === 'object' && s.id) {
-        (window as any)._sessionPreviews[s.id] = { preview: s.preview || '', mtime: s.mtime || 0 };
+        getFeatureRegistry()._sessionPreviews[s.id] = { preview: s.preview || '', mtime: s.mtime || 0 };
       }
     });
-    (window as any)._projectSessions = listProjectSessions((window as any)._allSessions);
+    getFeatureRegistry()._projectSessions = listProjectSessions(getFeatureRegistry()._allSessions);
     const q = document.getElementById('sessionSearchInput') as HTMLInputElement | null;
     const query = q ? q.value.trim() : '';
     renderSessions(query
-      ? (window as any)._projectSessions.filter((s: string) => toSessionDisplayName(s).toLowerCase().includes(query.toLowerCase()))
-      : (window as any)._projectSessions);
+      ? getFeatureRegistry()._projectSessions.filter((s: string) => toSessionDisplayName(s).toLowerCase().includes(query.toLowerCase()))
+      : getFeatureRegistry()._projectSessions);
   } catch (error) {
     if (isSessionLoadInterruption(error)) {
       console.debug('Session list refresh interrupted:', error);
@@ -148,7 +160,7 @@ export async function loadSessions(): Promise<void> {
 }
 
 export function filterSessions(query: string): void {
-  const all = (window as any)._projectSessions || [];
+  const all = getFeatureRegistry()._projectSessions || [];
   const filtered = query.trim()
     ? all.filter((s: string) => toSessionDisplayName(s).toLowerCase().includes(query.trim().toLowerCase()))
     : all;
@@ -169,32 +181,32 @@ export function renderSessions(sessions: string[]): void {
   }
 
   container.innerHTML = sessions.map((session: string) => {
-    const meta = ((window as any)._sessionPreviews || {})[session] || {};
+    const meta = (getFeatureRegistry()._sessionPreviews || {})[session] || {};
     const preview = meta.preview || '';
     return `
       <div class="session-item ${currentSession === session ? 'active' : ''}"
-           data-session="${(window as any).escapeHtml(session)}">
+           data-session="${getFeatureRegistry().escapeHtml(session)}">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
         </svg>
         <div class="session-item-body">
           <div class="session-item-top">
-            <span class="session-name">${(window as any).escapeHtml(toSessionDisplayName(session))}</span>
+            <span class="session-name">${getFeatureRegistry().escapeHtml(toSessionDisplayName(session))}</span>
           </div>
-          ${preview ? `<span class="session-preview">${(window as any).escapeHtml(preview)}</span>` : ''}
+          ${preview ? `<span class="session-preview">${getFeatureRegistry().escapeHtml(preview)}</span>` : ''}
         </div>
-        <button class="session-rename-btn" data-session="${(window as any).escapeHtml(session)}" onclick="renameSession(this.dataset.session, event)" title="\u91cd\u547d\u540d\u5bf9\u8bdd">\u270e</button>
-        <button class="session-delete-btn" data-session="${(window as any).escapeHtml(session)}" onclick="deleteSession(this.dataset.session, event)" title="\u5220\u9664\u5bf9\u8bdd">\u2715</button>
+        <button class="session-rename-btn" data-koto-action="rename-session" data-session="${encodeURIComponent(session)}" title="\u91cd\u547d\u540d\u5bf9\u8bdd">\u270e</button>
+        <button class="session-delete-btn" data-koto-action="delete-session" data-session="${encodeURIComponent(session)}" title="\u5220\u9664\u5bf9\u8bdd">\u2715</button>
       </div>`;
   }).join('');
 
   container.querySelectorAll('.session-item').forEach((el: Element) => {
     const htmlEl = el as HTMLElement;
-    el.addEventListener('click', function(this: HTMLElement, e: Event) {
+    el.addEventListener('click', (e: Event) => {
       if ((e.target as HTMLElement)?.closest('.session-rename-btn') || (e.target as HTMLElement)?.closest('.session-delete-btn')) return;
       if (el.querySelector('.session-name-input')) return;
-      if (typeof (window as any).selectSession === 'function') {
-        (window as any).selectSession(htmlEl.dataset.session);
+      if (typeof getFeatureRegistry().selectSession === 'function') {
+        getFeatureRegistry().selectSession(htmlEl.dataset.session);
       }
     });
   });
@@ -214,8 +226,8 @@ export function _syncSessionSelectionUi(sessionName: string): void {
 // ── Session CRUD ──
 export async function createNewSession(name: string | null = null): Promise<void> {
   if (!name) {
-    if (typeof (window as any).showNewSessionModal === 'function') {
-      (window as any).showNewSessionModal();
+    if (typeof getFeatureRegistry().showNewSessionModal === 'function') {
+      getFeatureRegistry().showNewSessionModal();
     }
     return;
   }
@@ -254,9 +266,9 @@ export async function confirmNewSession(): Promise<void> {
     });
     const data = await response.json();
     if (data.success) {
-      if (typeof (window as any).closeModal === 'function') (window as any).closeModal();
+      if (typeof getFeatureRegistry().closeModal === 'function') getFeatureRegistry().closeModal();
       await loadSessions();
-      if (typeof (window as any).selectSession === 'function') (window as any).selectSession(data.session);
+      if (typeof getFeatureRegistry().selectSession === 'function') getFeatureRegistry().selectSession(data.session);
     }
   } catch (error) {
     console.error('Failed to create session:', error);
@@ -264,7 +276,7 @@ export async function confirmNewSession(): Promise<void> {
 }
 
 export function showNewSessionModal(): void {
-  if (typeof (window as any).switchToChatView === 'function') (window as any).switchToChatView();
+  if (typeof getFeatureRegistry().switchToChatView === 'function') getFeatureRegistry().switchToChatView();
   const modal = document.getElementById('newSessionModal');
   if (modal) modal.classList.add('active');
   const input = document.getElementById('newSessionName') as HTMLInputElement | null;
@@ -300,7 +312,7 @@ export async function deleteSession(sessionName: string, event?: Event): Promise
         if (container) container.querySelectorAll('.message, .chat-date-sep').forEach((el: Element) => el.remove());
         const ws = document.getElementById('welcomeScreen');
         if (ws) ws.style.display = 'block';
-        if (typeof (window as any).renderWelcomeScreen === 'function') (window as any).renderWelcomeScreen();
+        if (typeof getFeatureRegistry().renderWelcomeScreen === 'function') getFeatureRegistry().renderWelcomeScreen();
       }
     }
   } catch (error) {
@@ -384,27 +396,22 @@ export function initProjectSelector(): void {
   if (!select) return;
   const options = getProjectOptions();
   if (!options.some(p => p.key === currentProject)) {
-    currentProject = 'default';
-    localStorage.setItem('koto.currentProject', currentProject);
+    setCurrentProject('default');
   }
   select.innerHTML = options.map(project =>
-    `<option value="${(window as any).escapeHtml(project.key)}">${(window as any).escapeHtml(project.label)}</option>`
+    `<option value="${getFeatureRegistry().escapeHtml(project.key)}">${getFeatureRegistry().escapeHtml(project.label)}</option>`
   ).join('');
   select.value = currentProject;
   select.onchange = async (e: Event) => {
-    currentProject = (e.target as HTMLSelectElement).value || 'default';
-    localStorage.setItem('koto.currentProject', currentProject);
-    if (typeof (window as any).goToWelcome === 'function') (window as any).goToWelcome();
+    setCurrentProject((e.target as HTMLSelectElement).value || 'default');
+    if (typeof getFeatureRegistry().goToWelcome === 'function') getFeatureRegistry().goToWelcome();
     await loadSessions();
   };
 }
 
 export function _isSidebarOverlayMode(): boolean {
-  try {
-    return window.matchMedia('(max-width: 1200px)').matches;
-  } catch (_) {
-    return false;
-  }
+  return document.body.classList.contains('koto-layout-max-1200')
+    || getLogicalViewportSize().width <= 1200;
 }
 
 export function _syncSidebarState(options: { forceOpenOverlay?: boolean } = {}): void {
@@ -450,8 +457,8 @@ export const KotoSessionBridge: KotoSessionBridge = {
   setSession(sessionName: string | null) {
     currentSession = sessionName || null;
     if (currentSession) _syncSessionSelectionUi(currentSession);
-    if ((window as any).WA && typeof (window as any).WA.useHostSession === 'function') {
-      (window as any).WA.useHostSession(currentSession || '', { force: true });
+    if (getFeatureRegistry() && typeof getFeatureRegistry().useHostSession === 'function') {
+      getFeatureRegistry().useHostSession(currentSession || '', { force: true });
     }
   },
   refreshSessions() {
@@ -460,24 +467,26 @@ export const KotoSessionBridge: KotoSessionBridge = {
 };
 
 // ── Backward compat ──
-(window as any).KotoSessionBridge = KotoSessionBridge;
-(window as any).loadSessions = loadSessions;
-(window as any).filterSessions = filterSessions;
-(window as any).renderSessions = renderSessions;
-(window as any).createNewSession = createNewSession;
-(window as any).confirmNewSession = confirmNewSession;
-(window as any).showNewSessionModal = showNewSessionModal;
-(window as any).closeModal = closeModal;
-(window as any).deleteSession = deleteSession;
-(window as any).deleteCurrentSession = deleteCurrentSession;
-(window as any).renameSession = renameSession;
-(window as any).initProjectSelector = initProjectSelector;
-(window as any).toggleSidebar = toggleSidebar;
-(window as any).toggleSidebarSearch = toggleSidebarSearch;
-(window as any).toSessionDisplayName = toSessionDisplayName;
-(window as any).toProjectSessionName = toProjectSessionName;
-(window as any).getProjectSessionPrefix = getProjectSessionPrefix;
-(window as any).listProjectSessions = listProjectSessions;
-(window as any).getProjectOptions = getProjectOptions;
-(window as any).saveProjectOptions = saveProjectOptions;
-(window as any).currentProject = currentProject;
+getFeatureRegistry().KotoSessionBridge = KotoSessionBridge;
+getFeatureRegistry().loadSessions = loadSessions;
+getFeatureRegistry().filterSessions = filterSessions;
+getFeatureRegistry().renderSessions = renderSessions;
+getFeatureRegistry().createNewSession = createNewSession;
+getFeatureRegistry().confirmNewSession = confirmNewSession;
+getFeatureRegistry().showNewSessionModal = showNewSessionModal;
+getFeatureRegistry().closeModal = closeModal;
+getFeatureRegistry().deleteSession = deleteSession;
+getFeatureRegistry().deleteCurrentSession = deleteCurrentSession;
+getFeatureRegistry().renameSession = renameSession;
+getFeatureRegistry().initProjectSelector = initProjectSelector;
+getFeatureRegistry().toggleSidebar = toggleSidebar;
+getFeatureRegistry().toggleSidebarSearch = toggleSidebarSearch;
+getFeatureRegistry().toSessionDisplayName = toSessionDisplayName;
+getFeatureRegistry().toProjectSessionName = toProjectSessionName;
+getFeatureRegistry().getProjectSessionPrefix = getProjectSessionPrefix;
+getFeatureRegistry().listProjectSessions = listProjectSessions;
+getFeatureRegistry().getProjectOptions = getProjectOptions;
+getFeatureRegistry().saveProjectOptions = saveProjectOptions;
+getFeatureRegistry().getCurrentProject = getCurrentProject;
+getFeatureRegistry().setCurrentProject = setCurrentProject;
+getFeatureRegistry().currentProject = currentProject;

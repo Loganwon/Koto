@@ -18,12 +18,20 @@
 
 import json
 import logging
+import os
 import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from app.core.config.runtime_storage import (
+    prepare_runtime_database,
+    project_root,
+    runtime_data_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,12 +118,13 @@ class AuditLog:
 class AuditLogger:
     """审计日志系统"""
 
-    def __init__(self, db_path: str = ".koto_audit.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = str(_resolve_audit_db_path(db_path))
         self._init_database()
 
     def _init_database(self):
         """初始化审计日志数据库"""
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -638,6 +647,18 @@ class AuditLogger:
 
 # 全局实例
 _audit_logger: Optional[AuditLogger] = None
+
+
+def _resolve_audit_db_path(db_path: Optional[str] = None) -> str | Path:
+    if db_path:
+        return db_path
+    configured = os.environ.get("KOTO_AUDIT_DB_PATH", "").strip()
+    if configured:
+        return configured
+    return prepare_runtime_database(
+        runtime_data_path("db", "audit.db"),
+        legacy_paths=(project_root() / ".koto_audit.db",),
+    )
 
 
 def get_audit_logger() -> AuditLogger:

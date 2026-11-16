@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
+
+from app.core.file_assistant.cancellation import FileOpenCancelledError
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,12 @@ def _configure_tesseract() -> bool:
     return False
 
 
-def _ocr_pdf_pages(file_path: str, page_indices: list[int]) -> dict[int, str]:
+def _ocr_pdf_pages(
+    file_path: str,
+    page_indices: list[int],
+    cancel_check: Callable[[], None],
+) -> dict[int, str]:
+    cancel_check()
     try:
         import fitz
         import pytesseract
@@ -55,6 +62,7 @@ def _ocr_pdf_pages(file_path: str, page_indices: list[int]) -> dict[int, str]:
             lang = "eng"
 
         for idx in page_indices:
+            cancel_check()
             if idx >= len(doc):
                 continue
             page = doc[idx]
@@ -67,7 +75,10 @@ def _ocr_pdf_pages(file_path: str, page_indices: list[int]) -> dict[int, str]:
                 logger.warning("[PdfOCR] lang=%s 失败，回退 eng: %s", lang, exc)
                 text = pytesseract.image_to_string(img, lang="eng").strip()
             results[idx] = text
+            cancel_check()
         doc.close()
+    except FileOpenCancelledError:
+        raise
     except Exception as exc:
         logger.warning("[PdfOCR] OCR 执行失败: %s", exc)
     return results
@@ -129,7 +140,9 @@ def _apply_ocr_fallback(
     raw_url: str,
     outline: list | None = None,
     meta: dict | None = None,
+    cancel_check: Callable[[], None] = lambda: None,
 ) -> dict[str, Any]:
+    cancel_check()
     scanned_indices = [
         i
         for i, page in enumerate(pages_text)
@@ -142,8 +155,9 @@ def _apply_ocr_fallback(
             len(scanned_indices),
             [i + 1 for i in scanned_indices],
         )
-        ocr_results = _ocr_pdf_pages(file_path, scanned_indices)
+        ocr_results = _ocr_pdf_pages(file_path, scanned_indices, cancel_check)
         for idx, text in ocr_results.items():
+            cancel_check()
             if text:
                 pages_text[idx]["text"] = text
                 full_text_parts.append(text)
@@ -160,9 +174,17 @@ def _apply_ocr_fallback(
     }
 
 
-def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
+def parse_pdf(
+    file_path: str,
+    file_id: str,
+    *,
+    cancel_check: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    check_cancelled = cancel_check or (lambda: None)
+    check_cancelled()
     raw_url = f"/api/v1/workspace/raw/{file_id}"
     outline, meta = _get_pdf_meta(file_path)
+    check_cancelled()
     pages_text: list[dict[str, Any]] = []
     full_text_parts: list[str] = []
     page_count = 0
@@ -173,6 +195,7 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
         with pdfplumber.open(file_path) as pdf:
             page_count = len(pdf.pages)
             for i, page in enumerate(pdf.pages):
+                check_cancelled()
                 try:
                     page_text = page.extract_text() or ""
                 except Exception as exc:
@@ -185,6 +208,7 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                 pages_text.append({"page": i + 1, "text": page_text})
                 if page_text:
                     full_text_parts.append(page_text)
+                check_cancelled()
 
         return _apply_ocr_fallback(
             file_path,
@@ -194,13 +218,17 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
             raw_url,
             outline,
             meta,
+            check_cancelled,
         )
     except ImportError:
         logger.info("[PdfParser] pdfplumber 未安装，尝试 pypdf/PyPDF2")
+    except FileOpenCancelledError:
+        raise
     except Exception as exc:
         logger.warning("[PdfParser] pdfplumber 解析失败: %s，尝试下一库", exc)
 
     for pkg_name, mod_name in [("pypdf", "pypdf"), ("PyPDF2", "PyPDF2")]:
+        check_cancelled()
         try:
             mod = __import__(mod_name)
             PdfReader = getattr(mod, "PdfReader")
@@ -208,6 +236,7 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                 reader = PdfReader(fh)
                 page_count = len(reader.pages)
                 for i, page in enumerate(reader.pages):
+                    check_cancelled()
                     try:
                         page_text = page.extract_text() or ""
                     except Exception as exc:
@@ -221,6 +250,7 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                     pages_text.append({"page": i + 1, "text": page_text})
                     if page_text:
                         full_text_parts.append(page_text)
+                    check_cancelled()
 
             return _apply_ocr_fallback(
                 file_path,
@@ -230,10 +260,13 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                 raw_url,
                 outline,
                 meta,
+                check_cancelled,
             )
         except ImportError:
             logger.info("[PdfParser] %s 未安装，尝试下一库", pkg_name)
             continue
+        except FileOpenCancelledError:
+            raise
         except Exception as exc:
             logger.warning("[PdfParser] %s 解析失败: %s，尝试下一库", pkg_name, exc)
             pages_text = []
@@ -245,17 +278,25 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
         " 建议执行: pip install pdfplumber"
     )
     try:
+        check_cancelled()
         import fitz
 
         doc = fitz.open(file_path)
         page_count = len(doc)
         doc.close()
+    except FileOpenCancelledError:
+        raise
     except Exception:
         page_count = 0
 
     if page_count:
-        ocr_results = _ocr_pdf_pages(file_path, list(range(page_count)))
+        ocr_results = _ocr_pdf_pages(
+            file_path,
+            list(range(page_count)),
+            check_cancelled,
+        )
         for i in range(page_count):
+            check_cancelled()
             text = ocr_results.get(i, "")
             pages_text.append({"page": i + 1, "text": text})
             if text:

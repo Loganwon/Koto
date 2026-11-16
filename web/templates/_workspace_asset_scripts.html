@@ -1,28 +1,18 @@
-<!-- Split.js served locally so a CDN failure cannot crash the workspace runtime -->
-<script src="{{ asset_url('vendor/split.min.js') }}"></script>
-<script>
-  var $, WA = window.WA = window.WA || {}, state, Router, showToast, autoResize, lastSelectionText;
-  var _csrfFetch, _escHtml, _fileIcon, _normalizeWorkspaceModelMode;
-  var _DEFAULT_FILE_SVG, _DOC_SVG, _FOLDER_SVG, _FOLDER_OPEN_SVG, _FOLDER_PICK_SVG;
-  var _PIN_SVG, _PENCIL_SVG, _SEARCH_SVG, _CLIPBOARD_SVG, _CHART_SVG, _LIGHTBULB_SVG;
-  var _TRASH_SVG, _PAUSE_SVG, _SEND_SVG, _DOWNLOAD_SVG, _CHAT_SVG, _SLIDES_SVG;
-  var _SUN_SVG, _MOON_SVG, _WORD_FILE_SVG, _EXCEL_FILE_SVG, _POWERPOINT_FILE_SVG, _PDF_SVG, _TEXT_SVG, _CODE_SVG, _IMAGE_SVG, _EXT_ICON;
-  var _fsHandleMap;
-  var _waAiResultsRuntime, _waQuickActionRuntime, _waConversationRuntime, _waTaskDispatcher, _waQuickActionDispatcherAttached;
-  var _hostSessionId, _WA_RUNTIME_SESSION_ID, _initWorkspaceAiRuntimes, _hydrateAiConversation, _waSession, _waRenderMarkdown, _waQuickActionModelMode, _waSampleTaskContext, _persistWorkspaceConversationTurn;
-  var _sanitizeRenderedHtml, _getPinnedSelectionSourceMeta, _selectionContextText, _selectionContextSourceLabel, _createPinnedSelectionContext, _setStreamBtn;
-  WA._pendingSendBrowserFilesToAI = WA._pendingSendBrowserFilesToAI || [];
-  WA.sendBrowserFileToAI = WA.sendBrowserFileToAI || function(path) {
-    path = String(path || '').trim();
-    if (!path) return Promise.resolve();
-    if (typeof WA.attachFilesToTask === 'function') {
-      return WA.attachFilesToTask([path], { source: 'file_tree_inline_action', focusInput: true });
-    }
-    WA._pendingSendBrowserFilesToAI.push(path);
-    return Promise.resolve();
-  };
-</script>
-<!-- Bundled TS → IIFE: workspace + editors + ui -->
-<script src="{{ asset_url('js/build/workspace-bundle.js') }}"></script>
-<!-- Bundled TS → IIFE: docx review modules -->
-<script src="{{ asset_url('js/build/review-bundle.js') }}"></script>
+<!-- Asset host: template-runtime loads the workspace IIFE after first paint. -->
+<script
+  id="koto-workspace-bundle"
+  data-workspace-bundle-url="{{ asset_url('js/build/workspace-bundle.js') }}"
+  data-pptx-editor-bundle-url="{{ asset_url('js/build/pptx-editor-bundle.js') }}"
+  data-pdf-viewer-bundle-url="{{ asset_url('js/build/pdf-viewer-bundle.js') }}"
+  data-xlsx-editor-bundle-url="{{ asset_url('js/build/xlsx-editor-bundle.js') }}"
+  data-image-viewer-bundle-url="{{ asset_url('js/build/image-viewer-bundle.js') }}"
+  data-docx-review-engine-bundle-url="{{ asset_url('js/build/docx-review-engine-bundle.js') }}"
+  data-document-review-bundle-url="{{ asset_url('js/build/document-review-bundle.js') }}"
+  data-rag-panel-bundle-url="{{ asset_url('js/build/rag-panel-bundle.js') }}"
+  data-frontend-observer-bundle-url="{{ asset_url('js/build/frontend-observer-bundle.js') }}"
+  data-find-replace-bundle-url="{{ asset_url('js/build/find-replace-bundle.js') }}"
+  data-task-workbench-bundle-url="{{ asset_url('js/build/task-workbench-bundle.js') }}"
+  data-conversation-list-bundle-url="{{ asset_url('js/build/conversation-list-bundle.js') }}"
+  data-fs-context-menu-bundle-url="{{ asset_url('js/build/fs-context-menu-bundle.js') }}"
+  data-capability-panel-bundle-url="{{ asset_url('js/build/capability-panel-bundle.js') }}"
+></script>

@@ -14,6 +14,10 @@ on:
         required: false
         default: ''
 
+concurrency:
+  group: koto-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   quality-gate:
     name: Release Quality Gate
@@ -39,18 +43,43 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up Node.js 20
+      - name: Validate release version against source metadata
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            EXPECTED_VERSION="${REF_NAME#v}"
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            EXPECTED_VERSION="$INPUT_VERSION"
+          else
+            EXPECTED_VERSION="$(tr -d '\r\n' < VERSION)"
+          fi
+          python scripts/validate_release_version.py --expected-version "$EXPECTED_VERSION"
+
+      - name: Check source publication hygiene
+        run: python scripts/source_publish_hygiene.py --check
+
+      - name: Set up Node.js 22.19
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.19'
           cache: 'npm'
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            web/tiptap-editor/package-lock.json
+            web/univer-editor/package-lock.json
 
       - name: Install Python test dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r config/requirements.lock
           pip install pytest pytest-mock pytest-timeout pytest-playwright playwright pip-audit
+
+      - name: Check locked runtime dependency contracts
+        run: python scripts/check_dependency_contract.py --check-imports
 
       - name: Audit locked runtime dependencies
         run: pip-audit --requirement config/requirements.lock --desc
@@ -62,19 +91,38 @@ jobs:
         run: |
           npm ci --prefix web
           npm audit --prefix web --audit-level=high
+          npm ci --prefix web/tiptap-editor
+          npm audit --prefix web/tiptap-editor --audit-level=high
           npm ci --prefix web/univer-editor
           npm audit --prefix web/univer-editor --audit-level=high
           npm run lint --prefix web
           npm run typecheck --prefix web
+          npm test --prefix web
           npm run build --prefix web
+          npm run build --prefix web/tiptap-editor
           npm run build --prefix web/univer-editor
 
       - name: Run release source regressions
         env:
           PYTHONPATH: .
         run: |
-          python -m pytest tests/unit/test_release_packaging_guards.py tests/unit/test_architecture_guardrails.py tests/unit/test_frontend_quality_config.py -q --tb=short
+          python -m pytest \
+            tests/unit/test_release_packaging_guards.py \
+            tests/unit/test_release_startup_runtime.py \
+            tests/unit/test_release_version_contract.py \
+            tests/unit/test_release_manifest.py \
+            tests/unit/test_verify_release_candidate.py \
+            tests/unit/test_model_install_compatibility.py \
+            tests/unit/test_architecture_guardrails.py \
+            tests/unit/test_audit_code_baseline.py \
+            tests/unit/test_frontend_quality_config.py \
+            tests/unit/test_runtime_capabilities.py \
+            tests/unit/test_startup_reliability_contract.py \
+            tests/unit/test_source_snapshot_plan.py \
+            tests/unit/test_health_endpoint.py \
+            -q --tb=short
           python scripts/run_ai_assistant_flow_tests.py release -q --tb=short
+          python scripts/ui_visual_regression.py --mode smoke
 
   # ══════════════════════════════════════════════════════════════════════════
   # Job 1: Windows 桌面版构建（PyInstaller + Inno Setup）
@@ -85,6 +133,10 @@ jobs:
     needs: quality-gate
     permissions:
       contents: write
+      actions: read
+    outputs:
+      version: ${{ steps.release-version.outputs.version }}
+      signer_thumbprint: ${{ steps.code-signing.outputs.thumbprint }}
 
     steps:
       - name: Checkout repository
@@ -97,16 +149,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 22.19
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.19'
           cache: 'npm'
           cache-dependency-path: |
             web/package-lock.json
+            web/tiptap-editor/package-lock.json
             web/univer-editor/package-lock.json
 
       - name: Determine version
+        id: release-version
         shell: pwsh
         run: |
           if ("${{ github.event_name }}" -eq "push") {
@@ -115,9 +169,10 @@ jobs:
             $v = "${{ github.event.inputs.version }}"
           } else {
             $v = (Get-Content VERSION -Raw -ErrorAction SilentlyContinue).Trim()
-            if (-not $v) { $v = Get-Date -Format "yyyy.MM.dd" }
+            if (-not $v) { Write-Host "::error::VERSION is missing or empty"; exit 1 }
           }
           "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Building Koto version: $v"
 
       - name: Cache pip
@@ -127,12 +182,55 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('config/requirements.lock') }}
           restore-keys: ${{ runner.os }}-pip-
 
+      - name: Restore startup performance history
+        uses: actions/cache@v5
+        with:
+          path: logs/startup_performance_history.jsonl
+          key: koto-startup-history-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            koto-startup-history-${{ runner.os }}-
+
+      - name: Restore history from previous successful release artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Path logs -Force | Out-Null
+          $response = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/release.yml/runs?status=success&per_page=20"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Could not query previous release runs; trend history will use cache or start fresh"
+            exit 0
+          }
+          $previous = ($response | ConvertFrom-Json).workflow_runs |
+            Where-Object { [string]$_.id -ne [string]$env:GITHUB_RUN_ID } |
+            Select-Object -First 1
+          if ($null -eq $previous) {
+            Write-Host "No previous successful release run; starting a new trend history"
+            exit 0
+          }
+          $restoreDir = Join-Path $env:RUNNER_TEMP "koto-startup-history"
+          gh run download $previous.id `
+            --repo $env:GITHUB_REPOSITORY `
+            --name koto-startup-performance-history `
+            --dir $restoreDir
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Previous release has no startup history artifact; continuing without it"
+            exit 0
+          }
+          $history = Get-ChildItem -Path $restoreDir -Recurse `
+            -Filter startup_performance_history.jsonl | Select-Object -First 1
+          if ($null -ne $history) {
+            Copy-Item -LiteralPath $history.FullName `
+              -Destination logs\startup_performance_history.jsonl -Force
+            Write-Host "Restored startup history from release run $($previous.id)"
+          }
+
       - name: Install dependencies
         shell: pwsh
         run: |
           python -m venv .venv
           .\.venv\Scripts\pip install --upgrade pip wheel
-          .\.venv\Scripts\pip install pyinstaller
+          .\.venv\Scripts\pip install -r config\build-requirements.lock
 
           # Use lockfile for reproducible builds; excludes voice/gunicorn for packaging
           $lockContent = Get-Content config\requirements.lock
@@ -154,156 +252,7 @@ jobs:
           .\.venv\Scripts\pip install -r .venv\core_reqs.txt
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::pip install failed"; exit 1 }
 
-          .\.venv\Scripts\pip install PyAudio
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::warning::PyAudio install failed, voice will degrade at runtime"
-          }
           Write-Host "Dependencies installed"
-
-      - name: Install frontend dependencies
-        shell: pwsh
-        run: |
-          npm ci --prefix web
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend npm ci failed"; exit 1 }
-          npm ci --prefix web/univer-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend npm ci failed"; exit 1 }
-
-      - name: Build frontend assets
-        shell: pwsh
-        run: |
-          npm run build --prefix web
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend build failed"; exit 1 }
-          npm run build --prefix web/univer-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend build failed"; exit 1 }
-
-      - name: Build with PyInstaller
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path logs | Out-Null
-          $cmd = if ($env:ComSpec) { $env:ComSpec } else { "cmd.exe" }
-          $pyinstaller = Join-Path $PWD ".venv\Scripts\pyinstaller.exe"
-          $cmdLine = '"{0}" koto.spec --clean -y > "logs\build_latest.log" 2>&1' -f $pyinstaller
-          & $cmd /d /c $cmdLine
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::PyInstaller build failed. Last 60 lines:"
-            Get-Content logs\build_latest.log -Tail 60
-            exit 1
-          }
-          $exeMB = [math]::Round((Get-Item dist\Koto\Koto.exe).Length / 1MB, 1)
-          Write-Host "Build OK -> dist\Koto\Koto.exe ($exeMB MB)"
-
-      - name: Smoke-test built EXE (file existence check)
-        shell: pwsh
-        run: |
-          $internal = "dist\Koto\_internal"
-          $staticRoot = Join-Path $internal "web\static"
-          $configRoot = Join-Path $internal "config"
-          $requiredConfigDirs = @("context", "divination_data", "skills", "skill_packs", "tools", "workflows")
-          foreach ($dirName in $requiredConfigDirs) {
-            $dirPath = Join-Path $configRoot $dirName
-            if (-not (Test-Path $dirPath)) {
-              New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
-              Write-Host "  NOTE: normalized empty config dir: $dirPath"
-            }
-          }
-          $runtimeDefaults = @(
-            @{ Name = "macro_suggestions.json"; Content = "{`"suggestions`": [], `"seen_fingerprints`": []}" },
-            @{ Name = "personality_matrix.json"; Content = "{`"cognitive`": {`"exploratory`": 0.5, `"executor`": 0.5, `"analytical`": 0.5, `"creative`": 0.5}, `"expertise`": {}, `"goals`": [], `"recent_themes`": [], `"values`": {`"efficiency`": 0.5, `"depth`": 0.5, `"formality`": 0.5}, `"last_updated`": null}" }
-          )
-          foreach ($default in $runtimeDefaults) {
-            $path = Join-Path $configRoot $default.Name
-            if (-not (Test-Path $path)) {
-              Set-Content -Path $path -Value $default.Content -Encoding UTF8
-              Write-Host "  NOTE: seeded runtime default: $($default.Name)"
-            }
-          }
-          $checks = @(
-            "dist\Koto\Koto.exe",
-            "$internal\base_library.zip",
-            "$internal\psutil",
-            "$internal\app",
-            "$internal\web",
-            "$internal\config",
-            "$staticRoot\js\build\workspace-bundle.js",
-            "$staticRoot\jszip.min.js",
-            "$staticRoot\univer-dist\assets\sheets-main.js",
-            "$staticRoot\univer-dist\assets\sheets-main.css",
-            "$configRoot\.builtin_key",
-            "$configRoot\deepseek_config.env.example",
-            "$configRoot\macro_suggestions.json",
-            "$configRoot\personality_matrix.json",
-            "$configRoot\skill_affinity.json",
-            "$configRoot\skill_bindings.json",
-            "$configRoot\skill_ratings.json",
-            "$configRoot\triggers.json",
-            "$configRoot\context",
-            "$configRoot\divination_data",
-            "$configRoot\skills",
-            "$configRoot\skill_packs",
-            "$configRoot\tools",
-            "$configRoot\workflows"
-          )
-          $failed = @()
-          foreach ($p in $checks) {
-            if (Test-Path $p) { Write-Host "  OK: $p" }
-            else              { $failed += $p; Write-Host "::error::MISSING: $p" }
-          }
-          # Also verify psutil .pyd is present (the C extension that was missing in v1.0.2)
-          $pyd = Get-ChildItem "$internal\psutil" -Filter "_psutil_windows*.pyd" -ErrorAction SilentlyContinue
-          if ($pyd) { Write-Host "  OK: psutil C extension: $($pyd.Name)" }
-          else       { $failed += "psutil/_psutil_windows.pyd"; Write-Host "::error::MISSING: psutil C extension .pyd" }
-
-          $legacyIndex = Join-Path $staticRoot "univer-dist\index.html"
-          if (Test-Path $legacyIndex) {
-            $failed += $legacyIndex
-            Write-Host "::error::UNEXPECTED legacy Univer index: $legacyIndex"
-          }
-
-          if ($failed.Count -gt 0) {
-            Write-Host "::error::Smoke test failed: $($failed.Count) item(s) missing"
-            exit 1
-          }
-          Write-Host "Smoke test passed: all critical bundle files present"
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: logs\build_latest.log
-          retention-days: 7
-
-      - name: Build LocalModelInstaller
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path logs | Out-Null
-          $cmd = if ($env:ComSpec) { $env:ComSpec } else { "cmd.exe" }
-          $pyinstaller = Join-Path $PWD ".venv\Scripts\pyinstaller.exe"
-          $cmdLine = '"{0}" local_model_installer.spec --clean -y > "logs\local_model_installer_build_latest.log" 2>&1' -f $pyinstaller
-          & $cmd /d /c $cmdLine
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::LocalModelInstaller build failed. Last 30 lines:"
-            Get-Content logs\local_model_installer_build_latest.log -Tail 30
-            exit 1
-          }
-          Write-Host "LocalModelInstaller OK -> dist\LocalModelInstaller.exe"
-
-      - name: Upload LocalModelInstaller build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: local-model-installer-build-log
-          path: logs\local_model_installer_build_latest.log
-          retention-days: 7
-
-      - name: Assemble portable bundle
-        shell: pwsh
-        env:
-          PYTHONIOENCODING: utf-8
-        run: |
-          .\.venv\Scripts\python.exe src\deploy_portable.py
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::deploy_portable.py failed"; exit 1 }
-          Write-Host "Portable bundle ready -> dist\Koto_Portable\"
 
       - name: Install Inno Setup (if missing)
         shell: pwsh
@@ -314,47 +263,125 @@ jobs:
             if ($LASTEXITCODE -ne 0) { choco install innosetup -y --no-progress }
           }
 
-      - name: Build installer (Inno Setup)
+      - name: Run source desktop startup lifecycle matrix
         shell: pwsh
         run: |
-          $iscc = (& .\scripts\resolve_inno_setup.ps1 -Quiet) | Select-Object -First 1
-          if (-not $iscc -or -not (Test-Path $iscc)) { Write-Host "::error::Inno Setup 6 not found"; exit 1 }
-          & $iscc /DAppVersion=$env:VERSION koto_installer.iss
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Inno Setup build failed"; exit 1 }
-          $setupName = "Koto_v$($env:VERSION)_Setup.exe"
-          "SETUP_NAME=$setupName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          $sizeMB = [math]::Round((Get-Item "dist\$setupName").Length / 1MB, 1)
-          Write-Host "Installer: $setupName ($sizeMB MB)"
+          .\tests\windows\test_source_startup_matrix.ps1
+          .\.venv\Scripts\python.exe scripts\summarize_startup_events.py `
+            --budget config\startup_performance_budget.json `
+            --report logs\startup_performance_report.json `
+            --markdown logs\startup_performance_summary.md `
+            --history logs\startup_performance_history.jsonl `
+            --revision $env:GITHUB_SHA `
+            --run-id $env:GITHUB_RUN_ID `
+            logs\startup_matrix\normal.jsonl `
+            logs\startup_matrix\slow.jsonl `
+            logs\startup_matrix\port_conflict.jsonl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content logs\startup_performance_summary.md | Out-File `
+            -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-      - name: Compress portable to zip
+      - name: Import Windows code-signing certificate
+        id: code-signing
         shell: pwsh
+        env:
+          KOTO_CODE_SIGNING_PFX_BASE64: ${{ secrets.KOTO_CODE_SIGNING_PFX_BASE64 }}
+          KOTO_CODE_SIGNING_PFX_PASSWORD: ${{ secrets.KOTO_CODE_SIGNING_PFX_PASSWORD }}
         run: |
-          $zipName = "Koto_v$($env:VERSION)_Windows.zip"
-          Compress-Archive -Path "dist\Koto_Portable\*" -DestinationPath "dist\$zipName" -CompressionLevel Optimal
-          "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          $sizeMB = [math]::Round((Get-Item "dist\$zipName").Length / 1MB, 1)
-          Write-Host "Zip: $zipName ($sizeMB MB)"
+          if ([string]::IsNullOrWhiteSpace($env:KOTO_CODE_SIGNING_PFX_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:KOTO_CODE_SIGNING_PFX_PASSWORD)) {
+            Write-Host "::error::Formal Windows releases require the KOTO code-signing secrets"
+            exit 1
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "koto-code-signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes(
+              $pfxPath,
+              [Convert]::FromBase64String($env:KOTO_CODE_SIGNING_PFX_BASE64)
+            )
+            $password = ConvertTo-SecureString `
+              $env:KOTO_CODE_SIGNING_PFX_PASSWORD -AsPlainText -Force
+            $imported = @(Import-PfxCertificate `
+              -FilePath $pfxPath `
+              -CertStoreLocation Cert:\CurrentUser\My `
+              -Password $password)
+            $certificate = $imported |
+              Where-Object {
+                $_.HasPrivateKey -and
+                @($_.EnhancedKeyUsageList | Where-Object {
+                  $_.ObjectId.Value -eq '1.3.6.1.5.5.7.3.3'
+                }).Count -gt 0
+              } |
+              Select-Object -First 1
+            if (-not $certificate) {
+              Write-Host "::error::PFX did not contain a code-signing certificate with a private key"
+              exit 1
+            }
+            "KOTO_CODE_SIGNING_THUMBPRINT=$($certificate.Thumbprint)" |
+              Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "thumbprint=$($certificate.Thumbprint)" |
+              Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+          finally {
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+          }
 
-      - name: Generate release manifest and SHA-256 checksums
+      - name: Build Windows artifacts through canonical pipeline
         shell: pwsh
         run: |
-          .\.venv\Scripts\python.exe scripts\write_release_manifest.py `
-            --version $env:VERSION `
-            --output "dist\Koto_v$($env:VERSION)_release-manifest.json" `
-            --hash-output "dist\Koto_v$($env:VERSION)_SHA256SUMS.txt" `
-            "dist\Koto_v$($env:VERSION)_Setup.exe" `
-            "dist\Koto_v$($env:VERSION)_Windows.zip"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Release manifest generation failed"; exit 1 }
+          .\Build_Release.ps1 -Version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Canonical Windows release build failed"; exit 1 }
+
+      - name: Remove imported code-signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:KOTO_CODE_SIGNING_THUMBPRINT) {
+            Remove-Item `
+              -Path "Cert:\CurrentUser\My\$env:KOTO_CODE_SIGNING_THUMBPRINT" `
+              -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Verify exact release candidate
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe scripts\verify_release_candidate.py --version $env:VERSION --dist-dir dist --expected-git-revision $env:GITHUB_SHA --source-root .
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Release candidate verification failed"; exit 1 }
+
+      - name: Upload release build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koto-windows-release-logs
+          path: |
+            logs/*.log
+            logs/startup_events.jsonl
+            logs/startup_matrix/*.jsonl
+            logs/startup_performance_report.json
+            logs/startup_performance_summary.md
+            logs/startup_performance_history.jsonl
+          retention-days: 7
+
+      - name: Upload startup performance history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koto-startup-performance-history
+          path: |
+            logs/startup_performance_history.jsonl
+            logs/startup_performance_report.json
+            logs/startup_performance_summary.md
+          retention-days: 90
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: koto-windows
           path: |
-            dist/Koto_v*_Setup.exe
-            dist/Koto_v*_Windows.zip
-            dist/Koto_v*_release-manifest.json
-            dist/Koto_v*_SHA256SUMS.txt
+            dist/Koto_v${{ steps.release-version.outputs.version }}_Setup.exe
+            dist/Koto_v${{ steps.release-version.outputs.version }}_Windows.zip
+            dist/Koto_v${{ steps.release-version.outputs.version }}_release-manifest.json
+            dist/Koto_v${{ steps.release-version.outputs.version }}_SHA256SUMS.txt
           retention-days: 7
 
   # ══════════════════════════════════════════════════════════════════════════
@@ -366,10 +393,62 @@ jobs:
     needs: build-windows
     permissions:
       contents: read
+      actions: read
+    env:
+      VERSION: ${{ needs.build-windows.outputs.version }}
+      KOTO_CODE_SIGNING_THUMBPRINT: ${{ needs.build-windows.outputs.signer_thumbprint }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore packaged startup performance history
+        uses: actions/cache@v5
+        with:
+          path: logs/packaged_startup_performance_history.jsonl
+          key: koto-packaged-startup-history-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            koto-packaged-startup-history-${{ runner.os }}-
+
+      - name: Restore packaged history from previous successful release artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Path logs -Force | Out-Null
+          $response = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/release.yml/runs?status=success&per_page=20"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Could not query previous release runs; packaged trend history will use cache or start fresh"
+            exit 0
+          }
+          $previous = ($response | ConvertFrom-Json).workflow_runs |
+            Where-Object { [string]$_.id -ne [string]$env:GITHUB_RUN_ID } |
+            Select-Object -First 1
+          if ($null -eq $previous) {
+            Write-Host "No previous successful release run; starting packaged trend history"
+            exit 0
+          }
+          $restoreDir = Join-Path $env:RUNNER_TEMP "koto-packaged-startup-history"
+          gh run download $previous.id `
+            --repo $env:GITHUB_REPOSITORY `
+            --name koto-packaged-startup-performance-history `
+            --dir $restoreDir
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Previous release has no packaged startup history; continuing without it"
+            exit 0
+          }
+          $history = Get-ChildItem -Path $restoreDir -Recurse `
+            -Filter packaged_startup_performance_history.jsonl | Select-Object -First 1
+          if ($null -ne $history) {
+            Copy-Item -LiteralPath $history.FullName `
+              -Destination logs\packaged_startup_performance_history.jsonl -Force
+            Write-Host "Restored packaged startup history from release run $($previous.id)"
+          }
 
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
@@ -377,44 +456,97 @@ jobs:
           name: koto-windows
           path: dist
 
+      - name: Re-verify downloaded release candidate
+        shell: pwsh
+        run: |
+          python scripts\verify_release_candidate.py --version $env:VERSION --dist-dir dist --expected-git-revision $env:GITHUB_SHA --source-root .
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Downloaded release candidate verification failed"; exit 1 }
+
       - name: Run installer E2E test
         shell: pwsh
-        env:
-          KOTO_SERVER_ONLY: "1"
         run: |
-          $setup = Get-Item "dist\Koto_v*_Setup.exe" | Select-Object -First 1
-          if (-not $setup) { Write-Host "::error::Setup EXE not found in dist\"; exit 1 }
+          $setupPath = "dist\Koto_v$($env:VERSION)_Setup.exe"
+          if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) { Write-Host "::error::Setup EXE not found: $setupPath"; exit 1 }
+          $setup = Get-Item -LiteralPath $setupPath
           $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
           $listener.Start()
           $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
           $listener.Stop()
           Write-Host "Testing installer: $($setup.FullName)"
           Write-Host "Using available loopback port: $port"
+          $startupEvidenceDir = Join-Path $env:GITHUB_WORKSPACE "logs\packaged_startup_matrix"
+          New-Item -ItemType Directory -Path $startupEvidenceDir -Force | Out-Null
           & tests\installer\test_installer_e2e.ps1 `
             -SetupExe $setup.FullName `
             -TestInstallDir "$env:LOCALAPPDATA\KotoCI_E2E" `
             -Port $port `
-            -HealthTimeoutSec 120
+            -HealthTimeoutSec 120 `
+            -StartupEvidenceDir $startupEvidenceDir `
+            -RequireAuthenticodeSignatures `
+            -ExpectedSignerThumbprint $env:KOTO_CODE_SIGNING_THUMBPRINT
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Run portable E2E test
         shell: pwsh
-        env:
-          KOTO_SERVER_ONLY: "1"
         run: |
-          $zip = Get-Item "dist\Koto_v*_Windows.zip" | Select-Object -First 1
-          if (-not $zip) { Write-Host "::error::ZIP not found; portable E2E is required for release"; exit 1 }
+          $zipPath = "dist\Koto_v$($env:VERSION)_Windows.zip"
+          if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) { Write-Host "::error::ZIP not found: $zipPath"; exit 1 }
+          $zip = Get-Item -LiteralPath $zipPath
           $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
           $listener.Start()
           $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
           $listener.Stop()
           Write-Host "Testing portable: $($zip.FullName)"
           Write-Host "Using available loopback port: $port"
+          $startupEvidenceDir = Join-Path $env:GITHUB_WORKSPACE "logs\packaged_startup_matrix"
+          New-Item -ItemType Directory -Path $startupEvidenceDir -Force | Out-Null
           & tests\installer\test_portable_e2e.ps1 `
             -ZipFile $zip.FullName `
             -Port $port `
-            -HealthTimeoutSec 120
+            -HealthTimeoutSec 120 `
+            -StartupEvidenceDir $startupEvidenceDir `
+            -RequireAuthenticodeSignatures `
+            -ExpectedSignerThumbprint $env:KOTO_CODE_SIGNING_THUMBPRINT
           if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Enforce packaged desktop startup performance budget
+        shell: pwsh
+        run: |
+          python scripts\summarize_startup_events.py `
+            --budget config\packaged_startup_performance_budget.json `
+            --report logs\packaged_startup_performance_report.json `
+            --markdown logs\packaged_startup_performance_summary.md `
+            --history logs\packaged_startup_performance_history.jsonl `
+            --revision $env:GITHUB_SHA `
+            --run-id $env:GITHUB_RUN_ID `
+            logs\packaged_startup_matrix\installer.jsonl `
+            logs\packaged_startup_matrix\portable.jsonl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content logs\packaged_startup_performance_summary.md | Out-File `
+            -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload packaged startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koto-packaged-startup-diagnostics
+          path: |
+            logs/packaged_startup_matrix/*.jsonl
+            logs/packaged_startup_performance_report.json
+            logs/packaged_startup_performance_summary.md
+            logs/packaged_startup_performance_history.jsonl
+          retention-days: 7
+
+      - name: Upload packaged startup performance history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koto-packaged-startup-performance-history
+          path: |
+            logs/packaged_startup_performance_history.jsonl
+            logs/packaged_startup_performance_report.json
+            logs/packaged_startup_performance_summary.md
+          retention-days: 90
 
   # ══════════════════════════════════════════════════════════════════════════
   # Job 3: Docker 镜像构建（推送到 GitHub Container Registry）
@@ -422,6 +554,8 @@ jobs:
   build-docker:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
+    needs: [quality-gate, build-windows, test-installer]
+    if: github.event_name == 'push'
     permissions:
       contents: read
       packages: write
@@ -450,16 +584,68 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha
 
-      - name: Build and push Docker image
+      - name: Build Docker release candidate
         uses: docker/build-push-action@v7
         with:
           context: .
           file: config/deploy/Dockerfile
-          push: true
+          load: true
+          push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify exact Docker candidate starts healthy
+        shell: bash
+        env:
+          RELEASE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="$(printf '%s\n' "$RELEASE_TAGS" | sed '/^$/d' | head -n 1)"
+          test -n "$IMAGE_TAG"
+          cleanup() {
+            docker logs koto-release-smoke > docker-startup.log 2>&1 || true
+            docker rm -f koto-release-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d --name koto-release-smoke -p 127.0.0.1::5000 "$IMAGE_TAG"
+          HOST_PORT="$(docker port koto-release-smoke 5000/tcp | sed 's/.*://')"
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent --show-error \
+              "http://127.0.0.1:${HOST_PORT}/api/health" > docker-health.json; then
+              python -c 'import json; p=json.load(open("docker-health.json", encoding="utf-8")); s=str(p.get("status") or "").lower(); assert p.get("success") is True or s in {"ok", "healthy", "degraded"}, f"unhealthy Docker response: {p}"'
+              exit 0
+            fi
+            if ! docker inspect -f '{{.State.Running}}' koto-release-smoke | grep -qx true; then
+              echo "::error::Docker release candidate exited before becoming healthy"
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "::error::Docker release candidate did not become healthy within 90 seconds"
+          exit 1
+
+      - name: Upload Docker startup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koto-docker-startup-${{ github.run_id }}
+          path: |
+            docker-startup.log
+            docker-health.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Push verified Docker image tags
+        shell: bash
+        env:
+          RELEASE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] || docker push "$tag"
+          done <<< "$RELEASE_TAGS"
 
   # ══════════════════════════════════════════════════════════════════════════
   # Job 4: 创建 GitHub Release（tag 推送时才运行）
@@ -467,35 +653,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-windows, test-installer]
-    if: github.event_name == 'push'
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: koto-windows
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          name: Koto ${{ github.ref_name }}
-          generate_release_notes: true
-          files: |
-            Koto_v*_Setup.exe
-            Koto_v*_Windows.zip
-            Koto_v*_release-manifest.json
-            Koto_v*_SHA256SUMS.txt
-
-  # ══════════════════════════════════════════════════════════════════════════
-  # Job 5: Sync VERSION file to match released tag
-  # ══════════════════════════════════════════════════════════════════════════
-  sync-version:
-    name: Sync VERSION file
-    runs-on: ubuntu-latest
-    needs: create-release
+    needs: [build-windows, test-installer, build-docker]
     if: github.event_name == 'push'
     permissions:
       contents: write
@@ -503,26 +661,27 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
-          ref: main
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          python-version: '3.11'
 
-      - name: Update VERSION file and website fallback version, then commit
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          echo "$VERSION" > VERSION
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: koto-windows
 
-          # Update fallback version strings in docs/index.html so even without
-          # the GitHub API fetch the latest version is displayed.
-          if [ -f docs/index.html ]; then
-            sed -i -E 's|(<span id="version-text">)v[0-9]+\.[0-9]+\.[0-9]+|\\1v'"$VERSION"'|' docs/index.html
-            sed -i -E 's|(© 2026 Koto · )v[0-9]+\.[0-9]+\.[0-9]+|\\1v'"$VERSION"'|' docs/index.html
-          fi
+      - name: Verify candidate before publishing release
+        run: python scripts/verify_release_candidate.py --version "${{ needs.build-windows.outputs.version }}" --dist-dir . --expected-git-revision "${{ github.sha }}" --source-root .
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add VERSION docs/index.html
-          git diff --cached --quiet || git commit -m "chore: sync VERSION to $VERSION [skip ci]"
-          git push origin main
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Koto ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            Koto_v${{ needs.build-windows.outputs.version }}_Setup.exe
+            Koto_v${{ needs.build-windows.outputs.version }}_Windows.zip
+            Koto_v${{ needs.build-windows.outputs.version }}_release-manifest.json
+            Koto_v${{ needs.build-windows.outputs.version }}_SHA256SUMS.txt

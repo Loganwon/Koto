@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Koto · 办公助手</title><link rel="stylesheet" href="workflow.css?v=20261025.1">
+<script src="task-flow.js" defer></script><script src="workflow.js" defer></script>
+</head><body data-files-open="false" data-view="workflow">
+<header class="topbar"><span class="brand-mark" aria-hidden="true">言</span><strong>Koto</strong><span class="product-label">办公助手</span><span class="spacer"></span><button id="history-toggle" aria-label="最近任务" aria-expanded="false">历史</button><button id="settings-toggle" aria-label="设置与新任务">···</button></header>
+<p id="connection-notice" class="notice" role="status" hidden></p>
+<p id="recovery-notice" class="notice" role="status" hidden></p>
+<section id="history-pane" hidden aria-label="最近任务">
+<div class="history-heading"><input id="history-query" type="search" placeholder="查找任务" aria-label="查找历史任务"><button id="history-close" aria-label="收起最近任务">×</button></div>
+<div id="history-list"></div><button id="history-more" hidden>更早的任务</button><p id="history-error" role="alert" hidden></p>
+</section>
+<div class="workspace">
+<aside id="files-pane" hidden aria-label="工作文件列表">
+<div class="folder-heading"><button id="choose-folder">打开文件夹…</button><button id="refresh-files" aria-label="刷新文件列表">↻</button><button id="files-close" aria-label="收起文件列表">‹</button></div>
+<input id="file-filter" type="search" placeholder="查找文件" aria-label="查找工作文件">
+<div id="tree-name"></div><div id="file-tree" role="tree" aria-label="工作文件夹"></div><p id="files-error" role="alert" hidden></p>
+</aside>
+<div class="assistant">
+<section class="document-context" aria-label="当前宿主文档">
+<div class="document-heading"><span id="host-name" class="host-label">文档</span><span id="target-scope">当前选区</span></div>
+<strong id="target-name">正在连接文档…</strong>
+<p id="binding-notice" class="notice" role="status" hidden></p>
+</section>
+<main id="content">
+<section id="welcome" class="pane-welcome"><h1>选中文字，告诉我怎么改</h1><p>直接处理当前选区或光标所在段落。<br>修改会回到原文，执行过程在这里可见。</p><div class="quick-actions" aria-label="常用办公任务"><button type="button" data-instruction="请润色当前选区或光标所在段落，表达简洁直接，保留事实、数字和原意。">润色文字</button><button type="button" data-instruction="请检查当前选区或光标所在段落的错别字、语病和表述问题，先指出具体问题。">检查表述</button><button type="button" data-instruction="请总结当前选区或光标所在段落的核心要点，保留关键数字，不修改原文。">总结要点</button></div></section>
+<div class="task-tools"><button id="files-toggle" aria-controls="files-pane" aria-expanded="false">＋ 参考资料</button><button id="task-summary" aria-expanded="false" aria-controls="task-map"><span id="summary-inputs">0个文件</span><span aria-hidden="true"> · </span><span id="summary-outputs">任务详情</span><span aria-hidden="true">⌄</span></button></div>
+<section id="task-map" hidden aria-label="任务导图">
+<div class="map-heading"><span>本次任务与参考资料</span><button id="map-close" aria-label="收起任务导图">收起 ⌃</button></div>
+<div id="graph" class="drop-zone" aria-label="文件处理图，可拖入工作区文件"></div>
+<div id="node-detail" hidden aria-label="当前节点详情"></div>
+</section>
+<p id="plan-notice" class="notice" role="status" hidden></p>
+<section id="activity" class="activity" hidden aria-label="执行过程"><div class="activity-heading"><strong>执行过程</strong><span id="activity-status" role="status"></span></div><ol id="activity-list"></ol><button id="activity-toggle" aria-expanded="false" hidden>查看全部记录</button></section>
+<section id="latest-result" aria-label="当前回复" hidden><div id="answer"></div><button id="answer-expand" hidden>展开回答</button></section>
+<section id="review" hidden aria-label="原文修改对比"><div class="review-heading"><span id="review-title"></span><button id="locate">定位原文 ↗</button></div><details id="change-preview" open><summary>这处改动 · 已写回原文</summary><div class="diff-before"><small>修改前</small><p id="before"></p></div><div class="diff-after"><small>修改后</small><p id="after"></p></div></details></section>
+<p id="error" role="alert" hidden></p>
+</main>
+<section class="composer" aria-label="任务要求与反馈">
+<p id="message" role="status" aria-live="polite"></p>
+<p id="selection-preview" hidden></p>
+<div class="input-box"><label class="sr-only" for="instruction">任务要求或反馈</label><textarea id="instruction" rows="2" placeholder="希望这段怎么改？也可以直接提问…"></textarea><div class="input-bottom"><button id="selection-toggle" aria-expanded="false" aria-controls="selection-preview"><span id="selection-hint">正在读取选区…</span></button><span class="spacer"></span><button id="start" class="primary" disabled>发送</button></div></div><p class="composer-hint">在原文中查看修改，随时输入反馈。</p>
+</section>
+</div></div>
+<dialog id="settings-dialog"><div class="dialog-heading"><strong>设置</strong><button id="close-settings" aria-label="关闭设置">×</button></div><button id="new-task">新任务 · 使用当前选区</button><p id="connection-summary"></p><label for="base-url">API地址</label><input id="base-url" type="url" autocomplete="off"><label for="model">模型名称</label><input id="model" autocomplete="off"><label for="api-key">API密钥</label><input id="api-key" type="password" autocomplete="off" placeholder="留空沿用当前密钥"><button id="save-settings" class="primary">保存设置</button><p id="settings-error" role="alert" hidden></p><small>密钥仅保存在本机运行进程。界面 20261025.1</small><button id="reload-interface">重新加载界面</button></dialog>
+</body></html>

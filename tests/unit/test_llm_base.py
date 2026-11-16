@@ -168,16 +168,15 @@ class TestLLMProviderUsageTracking:
 
         assert usage == {"prompt_tokens": 12, "completion_tokens": 34}
 
-    def test_track_usage_calls_record_usage_with_skill(self):
+    def test_track_usage_calls_record_usage_with_session(self):
         provider = _make_provider()
 
         with patch(
-            "app.core.analytics.token_tracker.record_usage_with_skill"
+            "app.core.analytics.token_tracker.record_usage_with_session"
         ) as mock_record:
             provider._track_usage(
                 "gemini-2.5-flash",
                 {"prompt_tokens": 5, "completion_tokens": 7},
-                skill_id="translator",
                 session_id="sess-1",
             )
 
@@ -185,6 +184,5 @@ class TestLLMProviderUsageTracking:
             model="gemini-2.5-flash",
             prompt_tokens=5,
             completion_tokens=7,
-            skill_id="translator",
             session_id="sess-1",
         )

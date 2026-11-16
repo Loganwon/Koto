@@ -14,8 +14,8 @@ from typing import Any
 
 from flask import jsonify
 
-from web.file_processor import FileProcessor
-from web.runtime_context import get_brain, get_model_map, get_session_manager, get_workspace_dir
+from web.files.file_processor import FileProcessor
+from web.runtime_context import service_registry
 from web.utils.filenames import secure_filename as _secure_filename
 
 
@@ -33,7 +33,7 @@ def _secure_name(app_module: Any, filename: str) -> str:
 
 
 def _uploads_dir(app_module: Any) -> str:
-    workspace = get_workspace_dir() or _module_attr(app_module, "WORKSPACE_DIR") or os.getcwd()
+    workspace = service_registry.workspace_dir or os.getcwd()
     upload_dir = os.path.join(workspace, "uploads")
     os.makedirs(upload_dir, exist_ok=True)
     return upload_dir
@@ -57,14 +57,14 @@ def _format_context(path: str, user_input: str) -> tuple[str, dict[str, Any]]:
 
 def _chat(app_module: Any, session_name: str, user_input: str, prompt: str, file_data: dict[str, Any], locked_model: str):
     try:
-        brain = get_brain()
+        brain = service_registry.brain
     except RuntimeError:
         brain = _module_attr(app_module, "brain")
     if brain is None:
         return jsonify({"error": "Chat brain is not initialized"}), 500
 
     try:
-        session_manager = get_session_manager()
+        session_manager = service_registry.session_manager
     except RuntimeError:
         session_manager = _module_attr(app_module, "session_manager")
     history = []
@@ -75,7 +75,7 @@ def _chat(app_module: Any, session_name: str, user_input: str, prompt: str, file
             history = []
 
     model = None
-    model_map = get_model_map() or _module_attr(app_module, "MODEL_MAP", {}) or {}
+    model_map = service_registry.model_map or _module_attr(app_module, "MODEL_MAP", {}) or {}
     if locked_model and locked_model != "auto":
         model = locked_model
     else:

@@ -534,7 +534,7 @@ class IntelligentDocumentAnalyzer:
         Yields:
             进度事件字典
         """
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         yield {"stage": "reading", "progress": 10, "message": "📖 正在读取文档结构..."}
 

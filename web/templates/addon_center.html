@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined else '' }}">
+  <title>Koto Addon 接入中心</title>
+  <link rel="stylesheet" href="/static/css/addon_center.css?v=20260719-2">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span>言</span>Koto Addon</a>
+    <nav><a href="/">返回工作台</a></nav>
+  </header>
+  <main>
+    <section class="hero">
+      <div><p class="eyebrow">KOTO ADDON RUNTIME</p><h1>Addon 接入中心</h1><p>Addon 是 Agent 的受控外部能力层，负责工具、RAG、数据库和 API；它不读取、不包装、也不依赖旧 Skill。</p></div>
+      <strong id="runtime-state">正在读取运行时…</strong>
+    </section>
+    <section class="boundary">
+      <article><b>Agent 底座</b><p>负责任务分解、工具选择、执行循环、验证与失败恢复。</p></article>
+      <span>＋</span>
+      <article><b>Addon</b><p>经过协议准入后，按任务、意图、文件类型和能力声明参与执行。</p></article>
+      <span>≠</span>
+    </section>
+    <section class="metrics">
+      <div><span>协议版本</span><strong id="protocol-version">—</strong></div>
+      <div><span>运行模式</span><strong id="runtime-mode">—</strong></div>
+      <div><span>已准入 Addon</span><strong id="addon-count">—</strong></div>
+      <div><span>贡献类型</span><strong id="contribution-kinds">—</strong></div>
+    </section>
+    <section class="workbench">
+      <article class="manifest">
+        <div class="section-title"><div><h2>Manifest 接入预检</h2><p>校验结构、权限、数据策略、贡献能力和资源上限；校验不会安装代码。</p></div><button id="example-button">载入示例</button></div>
+        <label for="addon-admin-token">管理授权（云端部署）</label>
+        <input id="addon-admin-token" class="admin-token" type="password" autocomplete="off" placeholder="KOTO_ADMIN_TOKEN；仅保存在当前浏览器会话" />
+        <label for="manifest-input">1. Manifest</label>
+        <textarea id="manifest-input" spellcheck="false" placeholder="粘贴 Addon manifest JSON…"></textarea>
+        <footer><span id="manifest-size">0 B · 尚未校验</span><button id="validate-button" class="primary">检查接入条件</button></footer>
+        <label for="registration-input">2. 宿主接入配置</label>
+        <p class="field-help">声明任务绑定、授予权限、非敏感配置和密钥引用；密钥值不会写入这里。</p>
+        <textarea id="registration-input" class="registration-input" spellcheck="false" placeholder='{"bindings": [...], "granted_permissions": [...], "config": {}, "secret_bindings": {}}'></textarea>
+        <footer><span>登记后默认停用，启用时才进行运行时准入。</span><button id="register-button" disabled>登记 Addon</button></footer>
+      </article>
+      <aside id="validation-result"><div class="placeholder"><strong>等待 Manifest</strong><p>只有通过宿主准入的贡献，才会进入 Agent 的 Addon 工具面。</p></div></aside>
+    </section>
+    <section class="catalog"><h2>已准入 Addon</h2><div id="addon-catalog" class="addon-empty"><strong>正在读取…</strong></div></section>
+  </main>
+  <script src="/static/js/build/addon-center-bundle.js?v=20260719-2"></script>
+</body>
+</html>

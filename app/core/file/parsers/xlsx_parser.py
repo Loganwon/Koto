@@ -4,20 +4,23 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from typing import Any
 
 _UNIVER_TYPE_STRING = 1
 _UNIVER_TYPE_NUMBER = 2
 _UNIVER_TYPE_BOOLEAN = 3
+_CACHED_VALUE_MISSING = object()
 
 _ALIGN_H_MAP = {
     "general": 0,
     "left": 1,
     "center": 2,
     "right": 3,
-    "justify": 6,
-    "distributed": 7,
+    "justify": 4,
+    "centerContinuous": 5,
+    "distributed": 6,
 }
 
 _ALIGN_V_MAP = {
@@ -51,21 +54,75 @@ def xlsx_contains_formula_fast(path: str) -> bool:
     return False
 
 
-def openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
-    v = cell.value
-    if v is None:
-        return None
+def _value_to_univer(value: Any) -> tuple[Any, int]:
+    if isinstance(value, bool):
+        return int(value), _UNIVER_TYPE_BOOLEAN
+    if isinstance(value, (int, float)):
+        return value, _UNIVER_TYPE_NUMBER
+    return str(value), _UNIVER_TYPE_STRING
 
+
+def _quote_sheet_references(formula: str, sheet_names: list[str]) -> str:
+    """Quote same-workbook sheet references for Univer's formula parser."""
+    normalized = formula
+    for sheet_name in sorted(sheet_names, key=len, reverse=True):
+        quoted = "'" + sheet_name.replace("'", "''") + "'"
+        normalized = re.sub(
+            rf"(?<!['\w]){re.escape(sheet_name)}(?=!)",
+            lambda _match, replacement=quoted: replacement,
+            normalized,
+        )
+    return normalized
+
+
+def _formula_requires_cached_fallback(formula: str) -> bool:
+    """Return whether Univer cannot safely evaluate this Excel formula."""
+    upper = formula.upper()
+    return (
+        "!" in formula
+        or "[" in formula
+        or "GETPIVOTDATA(" in upper
+        or "_XLFN." in upper
+    )
+
+
+def openpyxl_cell_to_univer(
+    cell: Any,
+    *,
+    cached_value: Any = _CACHED_VALUE_MISSING,
+    sheet_names: list[str] | None = None,
+) -> dict[str, Any] | None:
+    v = cell.value
+    if v is None and getattr(cell, "has_style", False) is not True:
+        return None
     cell_data: dict[str, Any] = {}
-    if isinstance(v, bool):
-        cell_data["v"] = int(v)
-        cell_data["t"] = _UNIVER_TYPE_BOOLEAN
-    elif isinstance(v, (int, float)):
-        cell_data["v"] = v
-        cell_data["t"] = _UNIVER_TYPE_NUMBER
+    if v is None:
+        pass
+    elif getattr(cell, "data_type", None) == "f":
+        formula = str(v)
+        formula = formula if formula.startswith("=") else f"={formula}"
+        normalized_formula = _quote_sheet_references(formula, sheet_names or [])
+        has_cached_value = (
+            cached_value is not _CACHED_VALUE_MISSING and cached_value is not None
+        )
+        custom: dict[str, Any] = {"kotoOriginalFormula": formula}
+        if has_cached_value:
+            cached_v, cached_t = _value_to_univer(cached_value)
+            custom["kotoCachedValue"] = cached_v
+            cell_data["v"] = cached_v
+            cell_data["t"] = cached_t
+        else:
+            cell_data["t"] = _UNIVER_TYPE_NUMBER
+
+        # Cross-sheet references, Excel-only functions, and external workbook
+        # references can replace a valid cached result with #NAME? in Univer.
+        # Display the cached result while retaining the original formula in
+        # custom metadata for export.
+        if not (_formula_requires_cached_fallback(formula) and has_cached_value):
+            cell_data["f"] = normalized_formula
+        cell_data["custom"] = custom
     else:
-        cell_data["v"] = str(v)
-        cell_data["t"] = _UNIVER_TYPE_STRING
+        cell_data["v"], cell_data["t"] = _value_to_univer(v)
 
     style: dict[str, Any] = {}
     try:
@@ -100,12 +157,21 @@ def openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
                 style["ht"] = _ALIGN_H_MAP[alignment.horizontal]
             if alignment.vertical and alignment.vertical in _ALIGN_V_MAP:
                 style["vt"] = _ALIGN_V_MAP[alignment.vertical]
+            if alignment.wrap_text is True:
+                style["tb"] = 3
+        number_format = cell.number_format
+        if (
+            isinstance(number_format, str)
+            and number_format
+            and number_format != "General"
+        ):
+            style["n"] = {"pattern": number_format}
     except Exception:
         pass
 
     if style:
         cell_data["s"] = style
-    return cell_data
+    return cell_data or None
 
 
 def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, Any]:
@@ -117,11 +183,16 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
     warnings: list[str] = []
     if xlsx_contains_formula_fast(file_path):
         warnings.append(
-            "此表格包含公式（如 =SUM(...)）。Koto 目前以「静态值」模式读取 Excel，"
-            "公式已转换为计算结果，保存导出后公式将永久丢失。如需保留公式，请下载原始文件。"
+            "此表格包含公式（如 =SUM(...)）。Koto 会保留并重新计算常用公式；"
+            "外部链接、宏与部分 Excel 专有函数仍可能需要在 Excel 中刷新。"
         )
 
-    wb = openpyxl.load_workbook(file_path, data_only=True)
+    # Keep formulas editable, but load Excel's last calculated values alongside
+    # them. These values prevent unsupported Excel-only formulas from turning
+    # into #NAME? while their original formulas remain available for export.
+    wb = openpyxl.load_workbook(file_path, data_only=False)
+    cached_wb = openpyxl.load_workbook(file_path, data_only=True)
+    sheet_names = list(wb.sheetnames)
 
     workbook_id = str(uuid.uuid4())
     if original_name:
@@ -144,13 +215,18 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
         return style_hash_to_id[style_hash]
 
     for idx, ws in enumerate(wb.worksheets):
+        cached_ws = cached_wb[ws.title]
         sheet_id = f"sheet{idx + 1}"
         sheet_order.append(sheet_id)
 
         cell_data: dict[int, dict[int, Any]] = {}
         for row in ws.iter_rows():
             for cell in row:
-                converted = openpyxl_cell_to_univer(cell)
+                converted = openpyxl_cell_to_univer(
+                    cell,
+                    cached_value=cached_ws.cell(cell.row, cell.column).value,
+                    sheet_names=sheet_names,
+                )
                 if converted is None:
                     continue
                 if "s" in converted and isinstance(converted["s"], dict):
@@ -193,6 +269,7 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
         }
 
     wb.close()
+    cached_wb.close()
 
     return {
         "id": workbook_id,
@@ -207,4 +284,8 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
     }
 
 
-__all__ = ["openpyxl_cell_to_univer", "parse_xlsx", "xlsx_contains_formula_fast"]
+__all__ = [
+    "openpyxl_cell_to_univer",
+    "parse_xlsx",
+    "xlsx_contains_formula_fast",
+]

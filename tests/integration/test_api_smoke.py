@@ -71,23 +71,6 @@ class TestMemorySmoke:
 # ── Macro endpoints ──────────────────────────────────────────────────────────
 
 
-@pytest.mark.integration
-class TestMacroSmoke:
-    """Smoke tests for /api/macro/* endpoints."""
-
-    def test_macro_pending(self, full_client):
-        _smoke(full_client.get("/api/macro/pending"))
-
-    def test_macro_history(self, full_client):
-        _smoke(full_client.get("/api/macro/history"))
-
-    def test_macro_dismiss_nonexistent(self, full_client):
-        _smoke(full_client.post("/api/macro/dismiss/nonexistent-id"))
-
-    def test_macro_confirm_nonexistent(self, full_client):
-        _smoke(full_client.post("/api/macro/confirm/nonexistent-id"))
-
-
 # ── Setup / Config endpoints ─────────────────────────────────────────────────
 
 
@@ -136,23 +119,6 @@ class TestMiniChatSmoke:
         _smoke(full_client.post("/api/mini/chat", json={}))
 
 
-# ── Notebook endpoints ───────────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestNotebookSmoke:
-    """Smoke tests for /api/notebook/* endpoints."""
-
-    def test_notebook_overview(self, full_client):
-        _smoke(full_client.post("/api/notebook/overview", json={}))
-
-    def test_notebook_qa(self, full_client):
-        _smoke(full_client.post("/api/notebook/qa", json={"question": "test"}))
-
-    def test_notebook_study_guide(self, full_client):
-        _smoke(full_client.post("/api/notebook/study_guide", json={}))
-
-
 # ── Voice endpoints ──────────────────────────────────────────────────────────
 
 
@@ -169,18 +135,18 @@ class TestVoiceSmoke:
 
 @pytest.mark.integration
 class TestDocumentSmoke:
-    """Smoke tests for /api/document/* endpoints."""
+    """The retired programmatic document pipeline stays unavailable."""
 
     def test_document_analyze(self, full_client):
-        _smoke(full_client.post("/api/document/analyze", json={"text": "test"}))
+        response = full_client.post("/api/document/analyze", json={"text": "test"})
+        assert response.status_code == 404
 
     def test_document_smart_process(self, full_client):
-        _smoke(
-            full_client.post(
-                "/api/document/smart-process",
-                json={"text": "test"},
-            )
+        response = full_client.post(
+            "/api/document/smart-process",
+            json={"text": "test"},
         )
+        assert response.status_code == 404
 
 
 # ── Operations endpoints ─────────────────────────────────────────────────────
@@ -203,20 +169,3 @@ class TestOpsSmoke:
 
     def test_ops_incidents(self, full_client):
         _smoke(full_client.get("/api/ops/incidents"))
-
-
-# ── Shadow watcher endpoints ─────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestShadowSmoke:
-    """Smoke tests for /api/shadow/* endpoints."""
-
-    def test_shadow_status(self, full_client):
-        _smoke(full_client.get("/api/shadow/status"))
-
-    def test_shadow_patterns(self, full_client):
-        _smoke(full_client.get("/api/shadow/patterns"))
-
-    def test_shadow_insights(self, full_client):
-        _smoke(full_client.get("/api/shadow/insights"))

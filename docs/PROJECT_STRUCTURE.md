@@ -1,15 +1,15 @@
 # Koto 项目结构说明
 
-Koto 是一个桌面端 AI 文件助手。当前产品形态已经合并为单一工作台：文件展示、AI 对话、历史会话、Skills、设置和白盒任务流程都从统一前端 `/` 进入。
+Koto 是一个桌面端 AI 文件助手。当前产品形态已经合并为单一工作台：文件展示、AI 对话、历史会话、Add-on 能力、设置和白盒任务流程都从统一前端 `/` 进入。
 
 ## 核心目录
 
 ```text
 Koto/
-├── app/                 # Agent、路由、LLM、技能和文件任务运行时
+├── app/                 # Agent、路由、LLM、Add-on 和文件任务运行时
 ├── web/                 # Flask 应用、模板、静态前端和工作台 BFF
 ├── src/                 # 桌面启动壳，src/koto_app.py 是桌面入口
-├── config/              # 用户设置、模型和技能配置
+├── config/              # 用户设置、模型、工具和工作流配置
 ├── workspace/           # 用户工作区文件
 ├── chats/               # AI 对话历史
 ├── logs/                # 启动和运行日志
@@ -43,9 +43,9 @@ Koto_Start.vbs / Koto_Start.bat
 | 路径 | 说明 |
 |------|------|
 | `app/core/agent/` | 后台 Agent、文件任务、ReAct 执行、审批和并行子任务 |
-| `app/core/routing/` | SmartDispatcher 与任务分类 |
+| `app/core/routing/` | 显式本地模型选择、白名单系统动作与工具边界；不做自由文本任务分类 |
 | `app/core/llm/` | Gemini、DeepSeek、本地模型和容错链 |
-| `app/core/skills/` | Skills 注册与执行 |
+| `app/core/agent/addons/` | Add-on 发现、准入、规划与受控执行 |
 | `web/blueprints/workspace_assistant.py` | 文件工作台 BFF 和文件 API |
 | `web/templates/index.html` | 统一前端页面 |
 | `web/src/` | TypeScript 前端模块源码 |

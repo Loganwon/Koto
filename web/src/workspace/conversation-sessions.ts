@@ -1,3 +1,4 @@
+import { getFeatureRegistry } from '../shared/feature-registry';
 /**
  * Workspace AI session data helpers and API calls.
  * Keeps conversation-list focused on rendering and interaction.
@@ -27,7 +28,7 @@ export function normalizeSessionId(value: unknown): string {
 }
 
 export function displaySessionName(sessionId: string): string {
-  const bridgeName = (window as any).toSessionDisplayName;
+  const bridgeName = getFeatureRegistry().toSessionDisplayName;
   if (typeof bridgeName === 'function') {
     try {
       const label = String(bridgeName(sessionId) || '').trim();
@@ -41,6 +42,8 @@ export function sessionTitle(session: AiSessionPreview | null, fallbackSessionId
   const taskTitle = String(session && session.latest_task_title || '').trim();
   if (taskTitle) return taskTitle;
   const title = String(session && session.title || '').trim();
+  if (session && !session.message_count && !session.has_task_flow && /^对话_\d/.test(session.id)
+    && (!title || title === session.id)) return '新任务';
   if (title && title !== session?.id) return title;
   const id = session ? session.id : fallbackSessionId;
   return displaySessionName(id);
@@ -94,7 +97,7 @@ export function normalizeSession(raw: unknown): AiSessionPreview | null {
 function generatedSessionName(): string {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, '0');
-  return `对话_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+  return `对话_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}_${String(now.getMilliseconds()).padStart(3, '0')}`;
 }
 
 export async function fetchAiSessionPreviews(): Promise<AiSessionPreview[]> {

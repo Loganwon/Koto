@@ -14,7 +14,7 @@ ConversationTracker — 多轮对话语义上下文跟踪器
 用途：
   1. /chat 路由将 get_context_injection() 注入到 system_instruction，
      使模型感知当前对话的语境。
-  2. IntentAnalyzer 可查询 tracker 来解析 "上面第3点"、"那个方案" 等指代。
+  2. Agent 可查询 tracker 来解析 "上面第3点"、"那个方案" 等指代。
   3. 对话历史压缩时提供 topic anchor，确保摘要保留核心实体。
 """
 
@@ -195,7 +195,7 @@ class ConversationTracker:
         return "\n".join(lines)
 
     def get_last_response_summary(self) -> str:
-        """Compact summary of last response for IntentAnalyzer reference resolution."""
+        """Compact summary of the last response for Agent reference resolution."""
         points = self.state.get("last_response_key_points") or []
         if not points:
             return ""

@@ -13,12 +13,10 @@ def handle_painter(
     effective_input,
     session_name,
     start_time,
-    context_info,
     client,
     session_manager,
     settings_manager,
     Utils,
-    WORKSPACE_DIR,
     _app_logger,
     interrupted,
 ):

@@ -14,6 +14,14 @@ function _roundLayoutWidth(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+function _readLogicalWidth(element) {
+  const snapshot = window.KotoRenderSurface?.getSnapshot?.(element);
+  if (snapshot?.logicalSize) return _roundLayoutWidth(snapshot.logicalSize.width);
+  const rectWidth = Number(element?.getBoundingClientRect?.().width) || 0;
+  const paintScale = window.KotoUiScale?.getElementPaintScale?.(element)?.x || 1;
+  return _roundLayoutWidth(rectWidth / paintScale);
+}
+
 export function createDocxPaginationScheduler({
   view,
   measure,
@@ -25,7 +33,7 @@ export function createDocxPaginationScheduler({
   let timer = null;
   let frame = null;
   let mediaResizeObserver = null;
-  let layoutResizeObserver = null;
+  let renderSurfaceController = null;
   let observedLayoutRoot = null;
   let lastObservedLayoutWidth = null;
   const watchedMedia = new Map();
@@ -84,45 +92,37 @@ export function createDocxPaginationScheduler({
     });
   };
 
-  const watchLayoutWidth = (currentView = view) => {
+  const watchLayoutSurface = (currentView = view) => {
     const pmDom = currentView?.dom;
-    if (!pmDom || typeof ResizeObserver === 'undefined') return;
-    if (observedLayoutRoot === pmDom && layoutResizeObserver) return;
-    try { layoutResizeObserver?.disconnect(); } catch (_) {}
+    if (!pmDom || !window.KotoRenderSurface?.createController) return;
+    if (observedLayoutRoot === pmDom && renderSurfaceController) return;
+    try { renderSurfaceController?.dispose(); } catch (_) {}
     observedLayoutRoot = pmDom;
-    lastObservedLayoutWidth = _roundLayoutWidth(pmDom.getBoundingClientRect?.().width);
-    layoutResizeObserver = new ResizeObserver((entries) => {
-      const entry = entries.find((candidate) => candidate.target === observedLayoutRoot);
-      const observedWidth = _roundLayoutWidth(entry?.contentRect?.width);
-      if (!Number.isFinite(observedWidth) || observedWidth === lastObservedLayoutWidth) return;
+    lastObservedLayoutWidth = _readLogicalWidth(pmDom);
+    renderSurfaceController = window.KotoRenderSurface.createController(pmDom, (_snapshot, reasons) => {
+      const observedWidth = _readLogicalWidth(pmDom);
+      const widthChanged = Number.isFinite(observedWidth) && observedWidth !== lastObservedLayoutWidth;
+      const uiScaleChanged = reasons?.has?.('ui-scale');
+      if (!widthChanged && !uiScaleChanged) return;
       lastObservedLayoutWidth = observedWidth;
-      schedule('editor-width', 40);
+      schedule(widthChanged ? 'editor-width' : 'ui-scale', 40);
     });
-    try {
-      layoutResizeObserver.observe(pmDom);
-    } catch (_) {
-      try { layoutResizeObserver.disconnect(); } catch (_) {}
-      layoutResizeObserver = null;
-      observedLayoutRoot = null;
-    }
   };
 
   const onHeaderFooterChanged = () => schedule('header-footer', 40);
-  const onWindowResize = () => schedule('window-width', 40);
 
   return {
     start() {
       watchMedia(view);
-      watchLayoutWidth(view);
+      watchLayoutSurface(view);
       window.addEventListener('koto-hdrftr-changed', onHeaderFooterChanged);
-      window.addEventListener('resize', onWindowResize, { passive: true });
       try { document.fonts?.ready?.then(() => schedule('fonts', 40)); } catch (_) {}
       schedule('initial', initialDelayMs);
     },
 
     onDocumentChanged(currentView = view) {
       watchMedia(currentView);
-      watchLayoutWidth(currentView);
+      watchLayoutSurface(currentView);
       schedule('document');
     },
 
@@ -131,11 +131,10 @@ export function createDocxPaginationScheduler({
       if (timer) window.clearTimeout(timer);
       if (frame) window.cancelAnimationFrame(frame);
       window.removeEventListener('koto-hdrftr-changed', onHeaderFooterChanged);
-      window.removeEventListener('resize', onWindowResize);
       try { mediaResizeObserver?.disconnect(); } catch (_) {}
-      try { layoutResizeObserver?.disconnect(); } catch (_) {}
+      try { renderSurfaceController?.dispose(); } catch (_) {}
       mediaResizeObserver = null;
-      layoutResizeObserver = null;
+      renderSurfaceController = null;
       observedLayoutRoot = null;
       watchedMedia.forEach((onSettled, node) => unwatchMedia(node, onSettled));
       watchedMedia.clear();

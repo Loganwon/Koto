@@ -55,14 +55,15 @@ def _bundle(tmp_path_factory):
 
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
 
     _orig_tmp = _wa._TMP_DIR
-    _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    _orig_ws = get_workspace_root()
     _orig_settings_path = os.environ.get("KOTO_USER_SETTINGS_PATH")
     os.environ["KOTO_USER_SETTINGS_PATH"] = str(settings_path)
     _wa._TMP_DIR = tmp_dir
     _shared.clear_user_settings_cache()
-    _shared.WORKSPACE_DIR = str(workspace_dir)
+    set_workspace_root(str(workspace_dir))
 
     from flask import Flask
 
@@ -77,8 +78,7 @@ def _bundle(tmp_path_factory):
 
     _wa._TMP_DIR = _orig_tmp
     _shared.clear_user_settings_cache()
-    if _orig_ws is not None:
-        _shared.WORKSPACE_DIR = _orig_ws
+    set_workspace_root(_orig_ws)
     if _orig_settings_path is None:
         os.environ.pop("KOTO_USER_SETTINGS_PATH", None)
     else:
@@ -258,9 +258,9 @@ class TestSetWorkspaceDir:
         assert resp.status_code == 200
         assert new_dir.exists()
 
-    def test_persists_to_shared_workspace_dir(self, _bundle, tmp_path):
-        """After setting, web.shared.WORKSPACE_DIR should reflect the new path."""
-        import web.shared as _shared
+    def test_updates_core_workspace_runtime(self, _bundle, tmp_path):
+        """After setting, the Core runtime should expose the new path."""
+        from app.core.config.workspace_runtime import get_workspace_root
 
         client, _, _ = _bundle
         new_dir = tmp_path / "live_switch_ws"
@@ -269,7 +269,7 @@ class TestSetWorkspaceDir:
             "/api/v1/workspace/set_workspace_dir",
             json={"path": str(new_dir)},
         )
-        assert Path(_shared.WORKSPACE_DIR).resolve() == new_dir.resolve()
+        assert Path(get_workspace_root()).resolve() == new_dir.resolve()
 
     def test_persists_to_settings_json(self, _bundle, tmp_path):
         """set_workspace_dir must write the path to user_settings.json."""
@@ -294,7 +294,7 @@ class TestSetWorkspaceDir:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PATCH /api/v1/workspace/rename — file branch (additional coverage)
-# Uses its own fixture so set_workspace_dir tests don't pollute WORKSPACE_DIR.
+# Uses its own fixture so set_workspace_dir tests don't pollute the Core runtime.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -310,12 +310,12 @@ def _rename_bundle(tmp_path_factory):
     workspace_dir.mkdir(parents=True)
 
     import web.blueprints.workspace_assistant as _wa
-    import web.shared as _shared
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
 
     _orig_tmp = _wa._TMP_DIR
-    _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    _orig_ws = get_workspace_root()
     _wa._TMP_DIR = tmp_dir
-    _shared.WORKSPACE_DIR = str(workspace_dir)
+    set_workspace_root(str(workspace_dir))
 
     from flask import Flask
 
@@ -329,8 +329,7 @@ def _rename_bundle(tmp_path_factory):
         yield client, tmp_dir, workspace_dir
 
     _wa._TMP_DIR = _orig_tmp
-    if _orig_ws is not None:
-        _shared.WORKSPACE_DIR = _orig_ws
+    set_workspace_root(_orig_ws)
 
 
 @pytest.mark.integration
@@ -483,12 +482,13 @@ def _ws_client(monkeypatch, tmp_path):
 
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
 
     _orig_tmp = _wa._TMP_DIR
-    _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    _orig_ws = get_workspace_root()
     _wa._TMP_DIR = tmp_dir
     _shared.clear_user_settings_cache()
-    _shared.WORKSPACE_DIR = str(workspace_dir)
+    set_workspace_root(str(workspace_dir))
 
     from flask import Flask
 
@@ -503,8 +503,7 @@ def _ws_client(monkeypatch, tmp_path):
 
     _wa._TMP_DIR = _orig_tmp
     _shared.clear_user_settings_cache()
-    if _orig_ws is not None:
-        _shared.WORKSPACE_DIR = _orig_ws
+    set_workspace_root(_orig_ws)
 
 
 @pytest.mark.integration

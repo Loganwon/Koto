@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.file_task_runtime_utils import _preview
-from app.core.agent.file_task_tool_catalog import is_file_task_tool, is_write_tool
+from app.core.agent.toolkits.foundation.catalog import is_file_task_tool, is_write_tool
 
 
 def build_supervisor_step_verification_payload(

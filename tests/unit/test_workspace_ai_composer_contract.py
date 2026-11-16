@@ -33,8 +33,14 @@ def test_workspace_ai_composer_has_one_final_style_owner() -> None:
     workspace_css = _read("web/static/css/workspace.css")
     css = _read("web/static/css/workspace-ai-panel.css")
 
-    assert html.index("css/workspace.css") < html.index("css/workspace-ai-panel.css")
-    assert 'id="wa-session-list-composer-host" class="wa-composer-host"' in html
+    assert (
+        html.index("css/workspace.css")
+        < html.index("css/workspace-task-flow.css")
+        < html.index("css/workspace-task-results.css")
+        < html.index("css/workspace-ai-panel.css")
+        < html.index("css/workspace-shell.css")
+    )
+    assert 'id="wa-session-list-composer-host"' not in html
     assert 'id="wa-chat-composer-host" class="wa-composer-host"' in html
     assert html.count('id="wa-ai-input-area"') == 1
     assert html.count('id="wa-user-input"') == 1
@@ -47,7 +53,8 @@ def test_workspace_ai_composer_has_one_final_style_owner() -> None:
     assert "max-height: min(360px, 42vh);" in css[css.index("#wa-user-input {") :]
     assert "flex: 1 1 240px;" in css
     assert "flex: 0 0 auto;" in css[css.index(".wa-ctx-drop-hint svg") :]
-    assert "@media (max-width: 860px)" in css
+    assert "body.koto-layout-max-860 .wa-footer-meta" in css
+    assert "body.koto-layout-max-860 .wa-footer-actions" in css
     assert "flex: 1 1 auto;" in css[css.index("#wa-ai-messages {") :]
     assert "display: flex;" in css[css.index("#wa-ai-messages {") :]
     assert "flex-direction: column;" in css[css.index("#wa-ai-messages {") :]
@@ -59,7 +66,6 @@ def test_workspace_ai_composer_has_one_final_style_owner() -> None:
     assert ".wa-session-list-input" not in css
     assert "border-radius: 0;" in css
     for selector in (
-        ".wa-ai-session-list-composer",
         ".wa-composer-host",
         ".wa-input-box",
         "#wa-user-input",
@@ -139,9 +145,12 @@ def test_workspace_ai_panel_does_not_embed_legacy_skill_workflow_systems() -> No
     for selector in legacy_selectors:
         assert selector not in workspace_css
 
-    assert 'id="navSkillsBtn"' in html
-    assert 'id="skillsPanel"' in html
-    assert "window.KotoSkillsLoader={load:load}" in html
+    sidebar = _read("web/templates/_workspace_sidebar.html")
+    assert "{% include '_workspace_sidebar.html' %}" in html
+    assert 'id="navCapabilityBtn"' in sidebar
+    assert 'id="capabilityPanel"' in html
+    template_runtime = _read("web/src/app/template-runtime.ts")
+    assert "registerFeatures({ loadCapabilityPanelBundle: load })" in template_runtime
 
 
 def test_workspace_ai_panel_css_selectors_do_not_overlap_workspace_css() -> None:
@@ -175,14 +184,21 @@ def test_workspace_ai_composer_behavior_is_shared_between_entrypoints() -> None:
     assert "export function workspaceAiComposerMode" in composer
     assert "export function setWorkspaceAiComposerValue" in composer
     assert "export function syncWorkspaceAiComposerSendState" in composer
-    assert "mountWorkspaceAiComposer('sessionList')" in conversation_list
+    assert "export type WorkspaceAiComposerKind = 'chat';" in composer
+    assert "mountWorkspaceAiComposer('sessionList')" not in conversation_list
     assert "mountWorkspaceAiComposer('chat')" in conversation_list
+    show_chat_view = conversation_list.split("function _showChatView(): void", 1)[1]
+    show_chat_view = show_chat_view.split("export async function refreshAiSessions", 1)[
+        0
+    ]
+    assert "mountWorkspaceAiComposer('chat')" in show_chat_view
     assert "submitUnifiedAiComposer" in conversation_list
-    assert "setWorkspaceAiComposerValue('chat', text" in conversation_list
+    assert "getWorkspaceAiComposerInput()" in conversation_list
+    assert "workspaceApi.sendMessage()" in conversation_list
     assert "setWorkspaceAiComposerValue('chat', text" in ai_review
     assert "wa-session-list-input" not in conversation_list
     assert "wa-chat-composer-host" in bundle
-    assert "wa-session-list-composer-host" in bundle
+    assert "wa-session-list-composer-host" not in bundle
     assert "submitUnifiedAiComposer" in bundle
     assert "import '../workspace/primary-composer';" in bundle_entry
     assert "data-koto-suggestion" in _read("web/templates/index.html")
@@ -192,7 +208,8 @@ def test_workspace_ai_composer_behavior_is_shared_between_entrypoints() -> None:
 def test_workspace_ai_session_api_is_split_from_list_rendering() -> None:
     sessions = _read("web/src/workspace/conversation-sessions.ts")
     conversation_list = _read("web/src/workspace/conversation-list.ts")
-    bundle = _read("web/static/js/build/workspace-bundle.js")
+    bundle = _read("web/static/js/build/conversation-list-bundle.js")
+    workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
     assert "export async function fetchAiSessionPreviews" in sessions
     assert "export async function createAiSessionRecord" in sessions
@@ -203,3 +220,4 @@ def test_workspace_ai_session_api_is_split_from_list_rendering() -> None:
     assert "deleteAiSessionRecord(normalized)" in conversation_list
     assert "fetch('/api/sessions?preview=1'" not in conversation_list
     assert "/api/sessions?preview=1" in bundle
+    assert "/api/sessions?preview=1" not in workspace_bundle

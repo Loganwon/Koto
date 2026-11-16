@@ -10,7 +10,6 @@ from app.core.agent.file_task_contract import (
     FileTaskIntentPlan,
     FileTaskRequest,
 )
-from app.core.agent.file_task_recipes import select_task_recipe
 
 
 def _preview(value: Any, limit: int = 180) -> str:
@@ -51,9 +50,6 @@ class FileTaskIntentPlanner:
         output_mode = (
             str(classification.output_mode or "answer").strip().lower() or "answer"
         )
-        recipe_match = select_task_recipe(
-            request, files, write_intent=bool(classification.write_intent)
-        )
         requires_confirmation = (
             output_mode == "hybrid" and _requires_explicit_confirmation(request)
         )
@@ -85,17 +81,17 @@ class FileTaskIntentPlanner:
             ),
             output_mode=output_mode,
             confidence=float(classification.confidence or 0.0),
-            write_intent=bool(classification.write_intent),
+            write_authorized=bool(classification.write_authorized),
+            write_required=bool(classification.write_required),
             can_apply=can_apply,
             requires_confirmation=requires_confirmation,
             recommended_strategy=recommended_strategy,
             dynamic_steps=self._dynamic_steps(
                 request,
                 files,
-                write_intent=bool(classification.write_intent),
+                write_intent=bool(classification.write_required),
                 output_mode=output_mode,
                 known_tool_gap=known_tool_gap,
-                recipe_match=recipe_match,
             ),
             reason_codes=reason_codes,
         )
@@ -167,14 +163,7 @@ class FileTaskIntentPlanner:
         write_intent: bool,
         output_mode: str,
         known_tool_gap: Optional[Dict[str, Any]],
-        recipe_match: Any = None,
     ) -> List[Dict[str, Any]]:
-        if (
-            recipe_match
-            and getattr(recipe_match, "recipe", None)
-            and recipe_match.recipe.plan_steps
-        ):
-            return [dict(step) for step in recipe_match.recipe.plan_steps]
         context_parts: List[str] = []
         if files:
             context_parts.append(f"{len(files)} 个文件")

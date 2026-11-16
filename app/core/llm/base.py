@@ -126,7 +126,6 @@ class LLMProvider(ABC):
         model: str,
         usage: Any,
         *,
-        skill_id: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> None:
         normalized = self._normalize_usage(usage)
@@ -136,12 +135,11 @@ class LLMProvider(ABC):
         try:
             import app.core.analytics.token_tracker as token_tracker
 
-            if skill_id or session_id:
-                token_tracker.record_usage_with_skill(
+            if session_id:
+                token_tracker.record_usage_with_session(
                     model=model,
                     prompt_tokens=normalized["prompt_tokens"],
                     completion_tokens=normalized["completion_tokens"],
-                    skill_id=skill_id,
                     session_id=session_id,
                 )
             else:

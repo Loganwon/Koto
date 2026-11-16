@@ -102,10 +102,13 @@ def _has_verifier_artifact_creation_intent(task_text: str) -> bool:
     )
 
 
-def _explicit_output_file_paths(task_description: str) -> List[str]:
+def _explicit_output_file_paths(
+    task_description: str, target_path: str = ""
+) -> List[str]:
     return explicit_output_paths_from_task(
         task_description,
         has_artifact_creation_intent=_has_verifier_artifact_creation_intent,
+        known_target_path=target_path,
     )
 
 
@@ -254,10 +257,6 @@ def _verification_summary_from_changes(
                 details.append(f"图片：{image_name}")
             if caption:
                 details.append(f"说明：{caption}")
-        elif operation == "annotate_file":
-            annotations = int(change.get("annotations_added") or 0)
-            if annotations:
-                details.append(f"已添加 {annotations} 条批注")
         elif operation in {"compare_docx_and_annotate", "write_docx_comments"}:
             differences = int(change.get("differences_detected") or 0)
             annotations = int(change.get("annotations_added") or 0)
@@ -416,7 +415,7 @@ def verify_task_completion(
             ensure_ascii=False,
         )
 
-    expected_outputs = _explicit_output_file_paths(task_description)
+    expected_outputs = _explicit_output_file_paths(task_description, target_path)
     missing_outputs = _missing_explicit_outputs(expected_outputs, states, changes)
     if missing_outputs:
         missing_names = [

@@ -35,20 +35,21 @@ def _import_cleanup_and_handler():
     fake_web_app = types.ModuleType("web.app")
     fake_web_app.app = MagicMock()
 
-    fake_web_settings = types.ModuleType("web.settings")
-    fake_web_settings.SettingsManager = MagicMock()
+    fake_user_settings = types.ModuleType("app.core.config.user_settings")
+    fake_user_settings.SettingsManager = MagicMock()
 
     fake_langsmith = types.ModuleType("app.core.monitoring.langsmith_tracer")
     fake_langsmith.init_langsmith = MagicMock()
 
     stubs = {
         "app.core.logging_setup": fake_app_core_logging,
+        "app.core.config": types.ModuleType("app.core.config"),
+        "app.core.config.user_settings": fake_user_settings,
         "app.core": types.ModuleType("app.core"),
         "app": types.ModuleType("app"),
         "src.config_validator": fake_config_validator,
         "web.app": fake_web_app,
         "web": types.ModuleType("web"),
-        "web.settings": fake_web_settings,
         "app.core.monitoring": types.ModuleType("app.core.monitoring"),
         "app.core.monitoring.langsmith_tracer": fake_langsmith,
     }
@@ -82,7 +83,7 @@ class TestCleanupCallsFlush:
 
         with patch.dict(
             "sys.modules",
-            {"web.settings": MagicMock(SettingsManager=mock_sm)},
+            {"app.core.config.user_settings": MagicMock(SettingsManager=mock_sm)},
         ):
             _cleanup()
 
@@ -94,7 +95,7 @@ class TestCleanupCallsFlush:
 
         with patch.dict(
             "sys.modules",
-            {"web.settings": MagicMock(SettingsManager=mock_sm)},
+            {"app.core.config.user_settings": MagicMock(SettingsManager=mock_sm)},
         ):
             _cleanup()
 
@@ -106,15 +107,15 @@ class TestCleanupHandlesMissingSettings:
     """_cleanup must not crash when SettingsManager is unavailable."""
 
     def test_import_error(self):
-        """Simulate web.settings not importable."""
-        with patch.dict("sys.modules", {"web.settings": None}):
+        """Simulate the Core settings owner not being importable."""
+        with patch.dict("sys.modules", {"app.core.config.user_settings": None}):
             # Should swallow the ImportError / ModuleNotFoundError
             _cleanup()  # no exception
 
     def test_settings_manager_attr_missing(self):
         """SettingsManager exists but has no _instance attribute."""
         mod = MagicMock(spec=[])  # empty spec → no attributes
-        with patch.dict("sys.modules", {"web.settings": mod}):
+        with patch.dict("sys.modules", {"app.core.config.user_settings": mod}):
             _cleanup()  # no exception
 
 
@@ -130,7 +131,7 @@ class TestCleanupHandlesFlushException:
 
         with patch.dict(
             "sys.modules",
-            {"web.settings": MagicMock(SettingsManager=mock_sm)},
+            {"app.core.config.user_settings": MagicMock(SettingsManager=mock_sm)},
         ):
             _cleanup()  # must not propagate
 
@@ -142,7 +143,7 @@ class TestCleanupHandlesFlushException:
 
         with patch.dict(
             "sys.modules",
-            {"web.settings": MagicMock(SettingsManager=mock_sm)},
+            {"app.core.config.user_settings": MagicMock(SettingsManager=mock_sm)},
         ):
             _cleanup()  # must not propagate
 

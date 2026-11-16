@@ -83,7 +83,7 @@ def _cleanup():
     """Clean up resources on shutdown."""
     logger.info("Running cleanup...")
     try:
-        from web.settings import SettingsManager
+        from app.core.config.user_settings import SettingsManager
 
         if SettingsManager._instance:
             SettingsManager._instance.flush()

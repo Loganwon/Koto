@@ -15,7 +15,23 @@ ROOT = os.path.abspath('.')
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from build_config import protected_dir_paths
+from build_config import (
+    CYTHON_CREDENTIAL_SOURCE_FILES,
+    CYTHON_PYTHON_FACADE_FILES,
+    CYTHON_PYTHON_SOURCE_FILES,
+    PROTECTED_DIRS,
+    cython_build_root,
+    has_staged_cython_extension,
+    is_app_runtime_state_path,
+    protected_dir_paths,
+    staged_cython_extensions,
+    validate_staged_cython_provenance,
+)
+from scripts.packaging_privacy import (
+    SAFE_ENV_EXAMPLE,
+    SAFE_ENV_EXAMPLE_CONTENT,
+    safe_config_files,
+)
 
 # ═══════════════════════════════════════════════
 # 数据文件（资源 + Python 源码）
@@ -23,23 +39,59 @@ from build_config import protected_dir_paths
 
 datas = []
 
-# ── Protected 模式：检测是否存在 Cython 编译产物 ──────────────────────────────
-# 当 build_cython.py --inplace 已运行时，核心模块的 .pyd 与 .py 并存，
-# 此时将受保护目录的文件逐个过滤：有 .pyd 的跳过 .py，只复制 .pyd。
+# ── Protected 模式：从隔离目录收集 Cython 编译产物 ───────────────────────────
+# build_cython.py 将扩展写入 build/cython_lib。源码树不再出现 .pyd，避免
+# 开发和测试进程在失败构建后意外加载旧二进制模块。
 _PROTECTED_DIRS = protected_dir_paths(ROOT)
+_CYTHON_BUILD_ROOT = os.path.abspath(
+    os.environ.get('KOTO_STAGED_CYTHON_ROOT', str(cython_build_root(ROOT)))
+)
+_STAGED_APP_ROOT = os.path.join(_CYTHON_BUILD_ROOT, 'app')
+_STAGED_PROVENANCE_VALID, _STAGED_PROVENANCE_REASON = validate_staged_cython_provenance(
+    ROOT, _CYTHON_BUILD_ROOT
+)
+_STAGED_APP_READY = _STAGED_PROVENANCE_VALID and os.path.isfile(
+    os.path.join(_STAGED_APP_ROOT, '__init__.py')
+)
+if os.environ.get('KOTO_REQUIRE_STAGED_CYTHON') == '1' and not _STAGED_APP_READY:
+    raise RuntimeError('Formal release requires verified current Cython artifacts: ' + _STAGED_PROVENANCE_REASON)
+# Embedded credential modules must never fall back to raw source or PYZ bytecode.
+# An unverified cache is preserved for investigation, but cannot authorize a package.
+if not _STAGED_APP_READY and any(
+    Path(ROOT, relative_path).is_file() for relative_path in CYTHON_CREDENTIAL_SOURCE_FILES
+):
+    raise RuntimeError(
+        'Credential-bearing source requires a verified current Cython overlay; '
+        'run a fresh protected build before packaging.'
+    )
+_PYTHON_ONLY_FILES = CYTHON_PYTHON_FACADE_FILES + CYTHON_PYTHON_SOURCE_FILES
+_PYTHON_FACADE_PATHS = {
+    os.path.normcase(os.path.abspath(os.path.join(ROOT, relative_path)))
+    for relative_path in _PYTHON_ONLY_FILES
+}
+_STAGED_PYTHON_FACADE_PATHS = {
+    os.path.normcase(os.path.abspath(os.path.join(_CYTHON_BUILD_ROOT, relative_path)))
+    for relative_path in _PYTHON_ONLY_FILES
+}
 _ARCHIVED_RUNTIME_FILES = {
     os.path.normcase(os.path.abspath(os.path.join(ROOT, 'app', 'core', 'llm', name)))
     for name in ('gemini.py', 'gemini_config.py')
 }
 
 def _protected_pyd_exists(py_path):
-    """检查对应的 .pyd / .so 是否已编译"""
-    stem = os.path.splitext(py_path)[0]
-    d = os.path.dirname(py_path)
-    for f in os.listdir(d) if os.path.isdir(d) else []:
-        if f.startswith(os.path.basename(stem)) and (f.endswith('.pyd') or f.endswith('.so')):
-            return True
-    return False
+    """检查隔离目录中是否存在对应的 .pyd / .so。"""
+    return _STAGED_APP_READY and has_staged_cython_extension(ROOT, py_path, _CYTHON_BUILD_ROOT)
+
+
+def _analysis_paths_with_verified_overlay(paths):
+    """Keep the verified overlay ahead of the entry script's source root."""
+    if not _STAGED_APP_READY:
+        return paths
+    normalized_overlay = os.path.normcase(os.path.abspath(_CYTHON_BUILD_ROOT))
+    return [_CYTHON_BUILD_ROOT] + [
+        path for path in paths
+        if os.path.normcase(os.path.abspath(path)) != normalized_overlay
+    ]
 
 def _add(src, dst):
     """安全添加数据文件/目录，仅在存在时加入"""
@@ -58,16 +110,43 @@ def _add_dir_filtered(src_dir, dst_dir):
     """
     if not os.path.isdir(src_dir):
         return
-    is_protected = src_dir in _PROTECTED_DIRS
+    try:
+        relative_path = Path(src_dir).resolve().relative_to(
+            Path(_STAGED_APP_ROOT if _STAGED_APP_READY else os.path.join(ROOT, 'app')).resolve().parent
+        )
+    except ValueError:
+        relative_path = None
+    if relative_path is not None and is_app_runtime_state_path(relative_path):
+        return
+    is_protected = relative_path is not None and any(
+        relative_path.as_posix() == protected
+        or relative_path.as_posix().startswith(protected + '/')
+        for protected in PROTECTED_DIRS
+    )
     for fname in os.listdir(src_dir):
         fpath = os.path.join(src_dir, fname)
         if os.path.isdir(fpath):
             # 递归子目录
             _add_dir_filtered(fpath, os.path.join(dst_dir, fname))
         else:
+            try:
+                relative_file = Path(fpath).resolve().relative_to(
+                    Path(_STAGED_APP_ROOT if _STAGED_APP_READY else os.path.join(ROOT, 'app')).resolve().parent
+                )
+            except ValueError:
+                relative_file = None
+            if relative_file is not None and is_app_runtime_state_path(relative_file):
+                continue
             if os.path.normcase(os.path.abspath(fpath)) in _ARCHIVED_RUNTIME_FILES:
                 continue
+            if is_protected and not _STAGED_APP_READY and fname.endswith(('.pyd', '.so')):
+                continue  # 源码目录中的旧编译残留永不进入发布包
             if is_protected and fname.endswith('.py') and fname != '__init__.py':
+                normalized_path = os.path.normcase(os.path.abspath(fpath))
+                if normalized_path in (_PYTHON_FACADE_PATHS | _STAGED_PYTHON_FACADE_PATHS):
+                    # Facades must remain importable for Analysis, but belong in
+                    # PyInstaller's bytecode archive rather than plain-text data.
+                    continue
                 if _protected_pyd_exists(fpath):
                     continue  # 有 .pyd，跳过 .py
             datas.append((fpath, dst_dir))
@@ -79,8 +158,49 @@ _add(os.path.join(ROOT, 'web', 'static'),                     os.path.join('web'
 _add(os.path.join(ROOT, 'web', 'uploads', '.gitkeep'),        os.path.join('web', 'uploads'))
 
 # ── Python 包 ──
-# 使用 _add_dir_filtered 而非简单的 _add(dir)，以便在 Protected 模式下过滤 .py 源码
-_add_dir_filtered(os.path.join(ROOT, 'app'),      'app')
+# 有隔离 overlay 时，分析和数据收集都使用同一棵 app 树。该树不包含受保护
+# 模块的 .py，因此 PyInstaller 不会把旧源码再次编入 PYZ。
+_PACKAGE_APP_ROOT = _STAGED_APP_ROOT if _STAGED_APP_READY else os.path.join(ROOT, 'app')
+_add_dir_filtered(_PACKAGE_APP_ROOT, 'app')
+
+
+def _add_staged_cython_extensions():
+    """Copy only compiled protected modules from the isolated build tree."""
+    if not _STAGED_APP_READY:
+        return 0
+    artifacts = staged_cython_extensions(ROOT, _CYTHON_BUILD_ROOT)
+    return len(artifacts)
+
+
+_STAGED_CYTHON_COUNT = _add_staged_cython_extensions()
+_STAGED_PROTECTED_SOURCES = [
+    source_file
+    for relative_dir in PROTECTED_DIRS
+    for source_file in (Path(_CYTHON_BUILD_ROOT) / relative_dir).rglob('*.py')
+    if source_file.name != '__init__.py'
+]
+_EXPECTED_STAGED_FACADES = {
+    Path(_CYTHON_BUILD_ROOT, relative_path).resolve()
+    for relative_path in _PYTHON_ONLY_FILES
+}
+_UNEXPECTED_STAGED_PROTECTED_SOURCES = {
+    source_file.resolve()
+    for source_file in _STAGED_PROTECTED_SOURCES
+} - _EXPECTED_STAGED_FACADES
+_MISSING_STAGED_FACADES = {
+    source_file for source_file in _EXPECTED_STAGED_FACADES if not source_file.is_file()
+}
+if os.environ.get('KOTO_REQUIRE_STAGED_CYTHON') == '1' and (
+    _STAGED_CYTHON_COUNT == 0
+    or not _STAGED_APP_READY
+    or _UNEXPECTED_STAGED_PROTECTED_SOURCES
+    or _MISSING_STAGED_FACADES
+):
+    raise RuntimeError(
+        'Formal release requires a complete Cython app overlay in build/cython_lib; '
+        'run build_cython.py build_ext first.'
+    )
+print(f'[koto.spec] Verified staged Cython extensions: {_STAGED_CYTHON_COUNT}')
 
 
 # ── 图标资源 ──
@@ -89,78 +209,30 @@ _add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.png'), os.path.join('assets'
 _add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.svg'), os.path.join('assets', 'koto_icon.svg'))
 
 # ── 默认配置模板 ──
-_CONFIG_EXCLUDED_DIRS = {
-    '__pycache__',
-    'deploy',
-    'file_rag_index',
-    'memory_rag_index',
-    'rag_index',
-    'skill_cache',
-    'task_skills',
-    'tests',
-    'training_data',
-}
-_CONFIG_EXCLUDED_FILES = {
-    'DS_KEY',
-    'DS_KEY.txt',
-    'deepseek_config.env',
-    'email_accounts.json',
-    'gemini_config.env.example',
-    'jwt_secret.txt',
-    'memory.json',
-    'memory_summaries.json',
-    'memory_vectors.json',
-    'model_setup_done.json',
-    'proactive_queue.json',
-    'requirements.lock',
-    'requirements.txt',
-    'requirements_training.txt',
-    'shadow_observations.json',
-    'token_usage.json',
-    'user_profile.json',
-    'user_settings.json',
-}
-_CONFIG_EXCLUDED_SUFFIXES = (
-    '.db',
-    '.sqlite',
-    '.sqlite-shm',
-    '.sqlite-wal',
-)
-
-
 def _add_runtime_config(src_dir):
-    """Include shipped config defaults while excluding local state and caches."""
-    if not os.path.isdir(src_dir):
-        return
-
-    for dirpath, dirnames, filenames in os.walk(src_dir):
-        dirnames[:] = [
-            d for d in dirnames
-            if d not in _CONFIG_EXCLUDED_DIRS
-        ]
-
-        rel_dir = os.path.relpath(dirpath, src_dir)
-        dst_dir = 'config' if rel_dir == '.' else os.path.join('config', rel_dir)
-
-        # PyInstaller does not infer empty config directories from file-based walks.
-        # Include them explicitly so runtime-created defaults still have a packaged home.
-        if rel_dir != '.' and not dirnames and not filenames:
-            _add(dirpath, dst_dir)
-
-        for filename in filenames:
-            if filename in _CONFIG_EXCLUDED_FILES:
-                continue
-            if filename.startswith('test_'):
-                continue
-            if filename.endswith(_CONFIG_EXCLUDED_SUFFIXES):
-                continue
-            _add(os.path.join(dirpath, filename), dst_dir)
+    """Copy named product defaults, never the builder's runtime configuration."""
+    for path in safe_config_files(src_dir):
+        _add(str(path), 'config')
+    # Generate a known placeholder; even a locally edited example is not copied.
+    example = Path(ROOT, 'build', 'package_defaults', 'config', SAFE_ENV_EXAMPLE)
+    example.parent.mkdir(parents=True, exist_ok=True)
+    example.write_bytes(SAFE_ENV_EXAMPLE_CONTENT)
+    _add(str(example), 'config')
 
 
 _add_runtime_config(os.path.join(ROOT, 'config'))
 
 # ── src/ 入口脚本（作为数据一同打包，供 runpy 兜底使用）──
-for _script in ['koto_app.py', 'model_downloader.py', 'koto_setup.py', 'server.py']:
+for _script in [
+    'koto_app.py',
+    'model_downloader.py',
+    'koto_setup.py',
+    'runtime_bootstrap.py',
+    'server.py',
+    'startup_diagnostics.py',
+    'startup_recovery.py',
+    'webview2_runtime.py',
+]:
     _add(os.path.join(ROOT, 'src', _script), '.')
 
 # ── web/*.py 全部作为数据文件（动态 import 兜底，含子包 blueprints/ routes/）──
@@ -183,10 +255,8 @@ _add(os.path.join(ROOT, 'README.md'), '.')
 # ═══════════════════════════════════════════════
 # 隐式导入
 # ═══════════════════════════════════════════════
-# NOTE: 此列表与下方 _discover_hidden_imports() 自动发现存在大量重叠。
-# 后续清理时可删除已被 auto-discovery 覆盖的条目（预计可缩减 200+ 行）。
-# 标准库模块（subprocess, socket, threading 等）通常无需手动列举。
-# 保留期：2026-Q3 — 待通过完整构建验证后安全移除。
+# 这里只保留第三方库、少量懒加载标准库和 src/ 动态入口。app/ 与 web/
+# 的内部模块由下方 _discover_hidden_imports() 单源发现，避免手写清单长期漂移。
 
 hiddenimports = [
     # ── 标准库 tkinter（模型下载器 GUI）──
@@ -252,7 +322,6 @@ hiddenimports = [
     'pywintypes', 'pythoncom',
 
     # ── 上传音频 STT（Whisper）──
-    'edge_tts',
     'wave', 'audioop',
     'win32com', 'win32com.client',
 
@@ -264,165 +333,14 @@ hiddenimports = [
     # transformers / peft / trl / accelerate / datasets 属于 LoRA 训练依赖，
     # 全部在函数体内懒加载，不打包进发行版（节省数 GB 体积）。
 
-    # ── App 路由模块 ──
-    'app', 'app.core', 'app.api',
-    'app.core.routing',
-    'app.core.routing.smart_dispatcher',
-    'app.core.routing.local_model_router',
-    'app.core.routing.ai_router',
-    'app.core.routing.intent_analyzer',
-    'app.core.agent', 'app.core.agent.factory',
-    'app.core.agent.base', 'app.core.agent.types',
-    'app.core.agent.unified_agent',
-    'app.core.agent.langgraph_agent',
-    'app.core.agent.multi_agent',
-    'app.core.agent.koto_supervision',
-    'app.core.agent.mcp_adapter',
-    'app.core.agent.mcp_manager',
-    'app.core.agent.tool_registry',
-    'app.core.agent.checkpoint_manager',
-    'app.core.agent.plugins',
-    'app.core.agent.plugins.basic_tools_plugin',
-    'app.core.agent.plugins.file_editor_plugin',
-    'app.core.agent.plugins.search_plugin',
-    'app.core.agent.plugins.system_tools_plugin',
-    'app.core.agent.plugins.data_process_plugin',
-    'app.core.agent.plugins.image_process_plugin',
-    'app.core.agent.plugins.network_plugin',
-    'app.core.agent.plugins.performance_analysis_plugin',
-    'app.core.agent.plugins.trend_analysis_plugin',
-    'app.core.agent.plugins.configuration_plugin',
-    'app.core.agent.plugins.alerting_plugin',
-    'app.core.agent.plugins.auto_remediation_plugin',
-    'app.core.agent.plugins.system_event_monitoring_plugin',
-    'app.core.agent.plugins.system_info_plugin',
-    'app.core.agent.plugins.annotation_plugin',
-    'app.core.agent.plugins.chart_vision_plugin',
-    'app.core.agent.plugins.file_converter_plugin',
-    'app.core.agent.plugins.memory_tools_plugin',
-    'app.core.agent.plugins.ppt_plugin',
-    'app.core.agent.plugins.productivity_plugin',
-    'app.core.agent.plugins.skill_tools_plugin',
-    'app.core.agent.plugins.template_fill_plugin',
-    'app.core.analytics', 'app.core.analytics.trend_analyzer',
-    'app.core.config', 'app.core.config.configuration_manager',
-    'app.core.learning', 'app.core.learning.distill_manager',
-    'app.core.learning.lora_pipeline',
-    'app.core.learning.shadow_tracer',
-    'app.core.learning.training_data_builder',
-    'app.core.llm', 'app.core.llm.base',
-    'app.core.llm.langchain_adapter',
-    'app.core.llm.openai_provider',
-    'app.core.llm.deepseek_config',
-    'app.core.llm.deepseek_provider',
-    'app.core.llm.model_selection',
-    'app.core.llm.ollama_provider',
-    'app.core.monitoring',
-    'app.core.monitoring.alert_manager',
-    'app.core.monitoring.event_database',
-    'app.core.monitoring.system_event_monitor',
-    'app.core.remediation', 'app.core.remediation.remediation_manager',
-    'app.core.security',
-    'app.core.security.output_validator',
-    'app.core.security.pii_filter',
-    'app.core.services',
-    'app.core.services.file_service',
-    'app.core.services.rag_service',
-    'app.core.services.search_service',
-    'app.core.skills',
-    'app.core.skills.skill_manager',
-    'app.core.skills.skill_auto_builder',
-    'app.core.skills.skill_recorder',
-    'app.core.skills.skill_schema',
-    'app.core.workflow',
-    'app.core.workflow.langgraph_workflow',
-    'app.core.workflows',
-    'app.core.workflows.action_item_extractor',
-    'app.core.workflows.cross_format_extractor',
-    'app.core.workflows.data_format_cleaner',
-    'app.core.workflows.doc_deep_compare',
-    'app.core.workflows.questionnaire_filler',
-    'app.api.agent_routes',
-    'app.api.skill_routes',
-    'app.api.skill_marketplace_routes',
-    'app.api.task_routes',
-    'app.api.job_routes',
-    'app.api.goal_routes',
-    'app.api.file_hub_routes',
-    'app.api.ops_routes',
-    'app.api.shadow_routes',
-    'app.api.macro_routes',
-    'app.api.mcp_routes',
-    'app.api.telegram_bot_routes',
-    'app.api.distill_routes',
-    'app.api.bg_agent_routes',
-
-    # ── web/blueprints/ 分层蓝图（动态 import_module，PyInstaller 不自动发现）──
-    'web.blueprints',
-    'web.blueprints.chat',
-    'web.blueprints.voice',
-    'web.blueprints.pages',
-    'web.blueprints.sessions',
-    'web.blueprints.settings',
-    'web.blueprints.workspace',
-    'web.blueprints.document',
-    'web.blueprints.knowledge',
-    'web.blueprints.misc_api',
-    'web.blueprints.analytics',
-    'web.blueprints.proactive',
-    'web.blueprints.execution',
-    'web.blueprints.file_editor',
-    'web.blueprints.file_organize',
-    'web.blueprints.dev',
-    'web.blueprints.editor_ai',
-    'web.blueprints.pptx_editor',
-    'web.blueprints.parallel_api',
-    'web.blueprints.memory_api',
-    'web.blueprints.workflow_api',
-    'web.blueprints.workspace_assistant',
-
-    # ── web/routes/ ──
-    'web.routes',
-    'web.routes.health',
-
+    # app/ and web/ internal packages are discovered from the source tree below.
     # ── 模型下载器 ──
     'model_downloader',
+    'src.koto_app', 'src.runtime_bootstrap', 'src.single_instance', 'src.external_open',
+    'src.startup_events',
+    'src.startup_diagnostics', 'src.startup_recovery', 'src.webview2_runtime',
 
-        # ── web/ 全部模块 ──
-    'web', 'web.app', 'web.audio_overview', 'web.audit_logger',
-    'web.auth_manager', 'web.auto_catalog_scheduler',
-    'web.auto_execution', 'web.batch_file_ops', 'web.batch_processor',
-    'web.behavior_monitor', 'web.calendar_manager',
-    'web.clipboard_ocr_assistant', 'web.code_generator',
-    'web.concept_extractor', 'web.consistency_checker', 'web.context_awareness',
-    'web.context_injector', 'web.data_pipeline', 'web.doc_converter',
-    'web.doc_annotation', 'web.doc_planner', 'web.document_batch_annotator',
-    'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
-    'web.document_feedback', 'web.document_generator', 'web.document_reader',
-    'web.document_validator',
-    'web.enhanced_memory_manager',
-    'web.file_analyzer', 'web.file_converter',
-    'web.file_editor', 'web.file_fields_extractor', 'web.file_indexer',
-    'web.file_organizer', 'web.file_parser', 'web.file_processor',
-    'web.file_qa', 'web.file_quality_checker', 'web.file_scanner',
-    'web.file_watcher', 'web.folder_catalog_organizer', 'web.image_generator',
-    'web.image_manager', 'web.insight_reporter', 
-    'web.knowledge_graph', 'web.local_executor',
-    'web.memory_integration', 'web.memory_manager', 'web.note_manager',
-    'web.operation_history', 'web.organize_cleanup',
-    'web.parallel_executor', 'web.ppt_api_routes',
-    
-    'web.ppt_session_manager', 
-    'web.proactive_dialogue', 'web.proactive_trigger',
-    'web.processed_file_network', 'web.prompt_adapter', 
-    'web.reminder_manager', 'web.settings',
-    'web.shared', 'web.smart_feedback', 'web.suggestion_annotator',
-    'web.suggestion_engine', 'web.system_info',
-    'web.task_dispatcher', 'web.task_scheduler', 'web.template_library',
-    'web.track_changes_editor',
-    'web.web_searcher', 'web.windows_notifier', 'web.work_file_library',
-    
-    'web.pdf_annotator',
+    # Do not duplicate auto-discovered app/web modules here.
 ]
 
 # ═══════════════════════════════════════════════
@@ -503,6 +421,12 @@ datas = _filter_datas(datas)
 
 
 # ── Dynamic Auto-discovery for hiddenimports ──
+_INTERNAL_DISCOVERY_EXCLUDES = {
+    'app.core.llm.gemini',
+    'app.core.llm.gemini_config',
+}
+
+
 def _discover_hidden_imports(base_dir, base_pkg):
     import os
     imports = []
@@ -515,7 +439,9 @@ def _discover_hidden_imports(base_dir, base_pkg):
                 if rel_path != '.':
                     pkg = f"{base_pkg}.{rel_path.replace(os.sep, '.')}"
                 mod = f[:-3]
-                imports.append(f"{pkg}.{mod}")
+                module_name = f"{pkg}.{mod}"
+                if module_name not in _INTERNAL_DISCOVERY_EXCLUDES:
+                    imports.append(module_name)
             elif f == '__init__.py':
                 rel_path = os.path.relpath(root, base_dir)
                 pkg = base_pkg
@@ -539,15 +465,24 @@ hiddenimports.extend(_discover_hidden_imports(os.path.join(ROOT, 'app'), 'app'))
 hiddenimports.extend(_discover_hidden_imports(os.path.join(ROOT, 'web'), 'web'))
 hiddenimports = _dedupe_hiddenimports(hiddenimports)
 
-a = Analysis(
+class _VerifiedOverlayAnalysis(Analysis):
+    def _extend_pathex(self, spec_pathex, scripts):
+        # PyInstaller 6.20 prepends the entry package's ROOT even when pathex
+        # requests the overlay first. Reorder after that standard expansion so
+        # protected sources cannot silently replace the verified native modules.
+        paths = super()._extend_pathex(spec_pathex, scripts)
+        return _analysis_paths_with_verified_overlay(paths)
+
+
+a = _VerifiedOverlayAnalysis(
     ['src/koto_setup.py'],       # ← 新入口（含下载器向导）
-    pathex=[ROOT],
+    pathex=[_CYTHON_BUILD_ROOT, ROOT] if _STAGED_APP_READY else [ROOT],
     binaries=_all_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[os.path.join(ROOT, 'src', 'rth_voice_fallback.py')],
+    runtime_hooks=[],
     excludes=[
         'tkinter.test', 'unittest', 'test', 'tests',
         'setuptools', 'pip',
@@ -564,6 +499,19 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+_CREDENTIAL_MODULE_NAMES = {
+    Path(relative_path).with_suffix('').as_posix().replace('/', '.')
+    for relative_path in CYTHON_CREDENTIAL_SOURCE_FILES
+}
+if any(entry[0] in _CREDENTIAL_MODULE_NAMES for entry in a.pure):
+    raise RuntimeError('A credential-bearing module entered the Python bytecode archive')
+_NATIVE_MODULE_NAMES = {
+    '.'.join((*artifact.relative_to(_CYTHON_BUILD_ROOT).parent.parts, artifact.name.split('.')[0]))
+    for artifact in staged_cython_extensions(ROOT, _CYTHON_BUILD_ROOT)
+} if _STAGED_APP_READY else set()
+if any(entry[0] in _NATIVE_MODULE_NAMES for entry in a.pure):
+    raise RuntimeError('A protected native module was replaced by Python source during Analysis')
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

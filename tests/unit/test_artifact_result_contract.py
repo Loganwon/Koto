@@ -6,36 +6,6 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
-
-
-def test_background_artifact_result_extracts_files_and_changes():
-    from app.core.agent.background_agent import PlanStep, StepStatus
-    from app.core.artifacts import build_background_artifact_result
-
-    step = PlanStep(
-        step_id="s1",
-        title="生成报告",
-        description="写入 workspace/reports/summary.docx",
-        tool_hint="write_file",
-        result="已保存到 workspace/reports/summary.docx",
-        status=StepStatus.DONE,
-    )
-
-    result = build_background_artifact_result(
-        task_id="task-1",
-        goal="整理材料",
-        phase="done",
-        final_report="报告已完成：workspace/reports/summary.docx",
-        steps=[step],
-    )
-
-    data = result.to_dict()
-    assert data["status"] == "completed"
-    assert data["artifacts"][0]["path"] == "workspace/reports/summary.docx"
-    assert data["artifacts"][0]["type"] == "docx"
-    assert data["changes"][0]["kind"] == "update"
-    assert "open" in data["actions"]
 
 
 def test_file_task_artifact_result_maps_changes_and_sources():
@@ -50,7 +20,7 @@ def test_file_task_artifact_result_maps_changes_and_sources():
         file_changes=[
             {
                 "path": "workspace/contracts/reviewed.docx",
-                "operation": "annotate_file",
+                "operation": "write_docx_comments",
                 "summary": "已添加 3 条审阅批注。",
                 "annotations_added": 3,
                 "source_path": "workspace/contracts/source.pdf",
@@ -125,7 +95,9 @@ def test_file_task_artifact_result_deduplicates_workspace_path_variants():
 
 
 def test_stream_merge_deduplicates_workspace_path_variants():
-    from web.file_task_stream import _merge_file_changes_into_artifact_result
+    from app.core.services.file_task_stream import (
+        _merge_file_changes_into_artifact_result,
+    )
 
     merged = _merge_file_changes_into_artifact_result(
         {
@@ -151,7 +123,7 @@ def test_stream_merge_deduplicates_workspace_path_variants():
 
 def test_file_task_stream_attaches_artifact_result_to_finished_event():
     from app.core.agent.file_task_contract import FileTaskEvent
-    from web.file_task_stream import _iter_file_task_stream_events
+    from app.core.services.file_task_stream import _iter_file_task_stream_events
 
     request_payload = SimpleNamespace(
         task="把总结写入当前文件",
@@ -225,7 +197,7 @@ def test_file_task_stream_attaches_artifact_result_to_finished_event():
 
 def test_file_task_stream_preserves_artifact_result_artifacts_as_changes():
     from app.core.agent.file_task_contract import FileTaskEvent
-    from web.file_task_stream import _iter_file_task_stream_events
+    from app.core.services.file_task_stream import _iter_file_task_stream_events
 
     request_payload = SimpleNamespace(
         task="生成运营报告和补货表",
@@ -297,13 +269,113 @@ def test_file_task_stream_preserves_artifact_result_artifacts_as_changes():
     ]
 
 
+def test_file_task_stream_discards_artifact_result_from_a_previous_run():
+    from app.core.agent.file_task_contract import FileTaskEvent
+    from app.core.services.file_task_stream import _iter_file_task_stream_events
+
+    request_payload = SimpleNamespace(
+        task="生成当前报告",
+        run_id="run-current",
+        task_id="task-current",
+        session_id="session-1",
+        target_path="current-report.docx",
+        files=[],
+        current_file=None,
+        selection_source="",
+    )
+    events = [
+        FileTaskEvent(
+            type="run.finished",
+            run_id="run-current",
+            seq=1,
+            payload={
+                "summary": "当前报告已完成",
+                "completed_task": True,
+                "artifact_result": {
+                    "task_id": "task-previous",
+                    "status": "completed",
+                    "summary": "旧任务结果",
+                    "metadata": {
+                        "run_id": "run-previous",
+                        "target_path": "previous-report.docx",
+                    },
+                    "artifacts": [{"path": "previous-report.docx"}],
+                    "changes": [{"file": "previous-report.docx"}],
+                },
+                "file_changes": [
+                    {
+                        "path": "current-report.docx",
+                        "operation": "write_docx_content",
+                        "summary": "已写入当前报告",
+                    }
+                ],
+            },
+        )
+    ]
+
+    chunks = list(
+        _iter_file_task_stream_events(
+            request_payload,
+            events,
+            save_task_summary_fn=lambda **_: None,
+            normalize_event_fn=lambda _: None,
+            persist_progress_fn=lambda *_: None,
+        )
+    )
+    parsed = [
+        json.loads(chunk.strip()[6:])
+        for chunk in chunks
+        if chunk.strip().startswith("data: ")
+    ]
+    result = parsed[-1]["payload"]["artifact_result"]
+
+    assert result["task_id"] == "task-current"
+    assert result["metadata"]["run_id"] == "run-current"
+    assert result["metadata"]["target_path"] == "current-report.docx"
+    assert [item["path"] for item in result["artifacts"]] == ["current-report.docx"]
+    assert all("previous-report.docx" not in str(item) for item in result["artifacts"])
+
+
+def test_file_task_stream_normalizes_matching_artifact_result_identity():
+    from app.core.services.file_task_stream import _attach_file_task_artifact_result
+
+    request_payload = SimpleNamespace(
+        task="生成报告",
+        run_id="run-current",
+        task_id="task-current",
+        target_path="reports/current.docx",
+    )
+    event = {
+        "type": "run.finished",
+        "run_id": "run-current",
+        "payload": {
+            "completed_task": True,
+            "artifact_result": {
+                "task_id": "task-current",
+                "status": "completed",
+                "artifacts": [{"path": "reports/current.docx"}],
+                "metadata": {},
+            },
+        },
+    }
+
+    result = _attach_file_task_artifact_result(request_payload, event, [])
+    artifact_result = result["payload"]["artifact_result"]
+
+    assert artifact_result["task_id"] == "task-current"
+    assert artifact_result["metadata"] == {
+        "run_id": "run-current",
+        "target_path": "reports/current.docx",
+    }
+
+
 def test_file_task_artifact_status_preserves_attention_diagnostics():
-    from web.file_task_stream import _file_task_artifact_status
+    from app.core.services.file_task_stream import _file_task_artifact_status
 
     for status in [
         "context_summary_fallback",
         "blocked",
-        "no_file_change",
+        "write_not_performed",
         "model_unavailable",
         "quality_gate_failed",
     ]:
@@ -317,6 +389,58 @@ def test_file_task_artifact_status_preserves_attention_diagnostics():
             )
             == status
         )
+
+
+def test_file_task_artifact_result_maps_review_and_failure_terminal_states():
+    from app.core.artifacts import build_file_task_artifact_result
+
+    review = build_file_task_artifact_result(
+        task_id="task-review",
+        task="总结文件",
+        status="context_summary_fallback",
+        summary="临时摘要",
+    ).to_dict()
+    failed = build_file_task_artifact_result(
+        task_id="task-failed",
+        task="写入文件",
+        status="quality_gate_failed",
+        summary="质量检查未通过",
+    ).to_dict()
+
+    assert review["status"] == "needs_review"
+    assert review["metadata"]["terminal_status"] == "context_summary_fallback"
+    assert failed["status"] == "failed"
+    assert failed["metadata"]["terminal_status"] == "quality_gate_failed"
+
+
+def test_file_task_stream_maps_context_fallback_to_waiting_ledger_state():
+    from app.core.services.file_task_stream import _file_task_terminal_status
+
+    assert (
+        _file_task_terminal_status(
+            "run.finished",
+            {
+                "completed_task": False,
+                "runtime": {"terminal_status": "context_summary_fallback"},
+            },
+        )
+        == "waiting"
+    )
+
+
+def test_file_task_artifact_status_translates_retired_no_file_change_status():
+    from app.core.services.file_task_stream import _file_task_artifact_status
+
+    assert (
+        _file_task_artifact_status(
+            "run.finished",
+            {
+                "completed_task": False,
+                "runtime": {"terminal_status": "no_file_change"},
+            },
+        )
+        == "write_not_performed"
+    )
 
 
 def test_task_route_serializer_extracts_artifact_result_from_metadata():
@@ -353,52 +477,3 @@ def test_task_route_serializer_extracts_artifact_result_from_metadata():
     data = _serialize_task(task)
     assert data["artifact_result"]["task_id"] == "task-route-1"
     assert data["artifact_result"]["status"] == "completed"
-
-
-def test_background_agent_status_always_has_artifact_result():
-    from app.core.agent.background_agent import BackgroundAgent
-
-    agent = BackgroundAgent(session_id="artifact-test")
-    with patch.object(agent, "_run_task", return_value=None):
-        task_id = agent.submit("处理 workspace/input.pdf 并输出摘要")
-
-    status = agent.get_status(task_id)
-    assert status.artifact_result is not None
-    data = status.artifact_result.to_dict()
-    assert data["task_id"] == task_id
-    assert data["status"] == "running"
-
-
-def test_bg_agent_status_serializer_includes_artifact_result():
-    from app.api.bg_agent_routes import _serialize_status
-    from app.core.agent.background_agent import BackgroundAgent
-
-    agent = BackgroundAgent(session_id="serializer-test")
-    with patch.object(agent, "_run_task", return_value=None):
-        task_id = agent.submit("生成 workspace/output.md")
-
-    serialized = _serialize_status(agent.get_status(task_id))
-    assert serialized["artifact_result"]["task_id"] == task_id
-    assert (
-        serialized["artifact_result"]["artifacts"][0]["path"] == "workspace/output.md"
-    )
-
-
-def test_approve_plan_updates_artifact_result_status():
-    from app.core.agent.background_agent import BackgroundAgent, ExecutionPlan, PlanStep
-
-    agent = BackgroundAgent(session_id="approve-artifact-test")
-    with patch.object(agent, "_run_task", return_value=None):
-        task_id = agent.submit("处理文档", human_review_before_execute=True)
-
-    status = agent.get_status(task_id)
-    status.plan = ExecutionPlan(
-        plan_id="plan-1",
-        goal="处理文档",
-        steps=[PlanStep(step_id="s1", title="读取", description="读取文档")],
-    )
-    agent.approve_plan(task_id)
-
-    data = agent.get_status(task_id).artifact_result.to_dict()
-    assert data["status"] == "running"
-    assert data["metadata"]["phase"] == "executing"

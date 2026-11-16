@@ -1,5 +1,5 @@
 """
-Unit tests for web/blueprints/pptx_editor.py
+Unit tests for the Core-owned PPTX editor implementation.
 
 Tests the parsing, editing, and export functions in isolation using
 an in-memory PPTX file built with python-pptx.
@@ -44,14 +44,14 @@ def _make_pptx(slides: list[list[str]]) -> bytes:
 
 class TestParseSlides:
     def test_slide_count(self):
-        from web.blueprints.pptx_editor import _parse_slides
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["Title 1", "Body 1"], ["Title 2"]])
         result = _parse_slides(raw)
         assert len(result["slides"]) == 2
 
     def test_returns_width_height(self):
-        from web.blueprints.pptx_editor import _parse_slides
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["Hello"]])
         result = _parse_slides(raw)
@@ -59,7 +59,7 @@ class TestParseSlides:
         assert result["slide_height_emu"] > 0
 
     def test_shapes_have_required_keys(self):
-        from web.blueprints.pptx_editor import _parse_slides
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["Title", "Body"]])
         result = _parse_slides(raw)
@@ -81,7 +81,7 @@ class TestParseSlides:
                 assert key in shape, f"missing key {key!r} in shape"
 
     def test_text_extracted(self):
-        from web.blueprints.pptx_editor import _parse_slides
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["My Title"]])
         result = _parse_slides(raw)
@@ -95,7 +95,7 @@ class TestParseSlides:
     def test_empty_pptx(self):
         from pptx import Presentation
 
-        from web.blueprints.pptx_editor import _parse_slides
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         prs = Presentation()
         buf = io.BytesIO()
@@ -104,7 +104,7 @@ class TestParseSlides:
         assert result["slides"] == []
 
     def test_invalid_bytes_raises(self):
-        from web.blueprints.pptx_editor import _parse_slides
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         with pytest.raises(Exception):
             _parse_slides(b"not a pptx file")
@@ -117,7 +117,8 @@ class TestApplyEdits:
     def test_text_is_updated(self):
         from pptx import Presentation
 
-        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
+        from app.core.file.pptx_editor import apply_edits as _apply_edits
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["Original Title"]])
         parsed = _parse_slides(raw)
@@ -142,7 +143,8 @@ class TestApplyEdits:
         assert any("Updated Title" in t for t in texts)
 
     def test_original_not_mutated(self):
-        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
+        from app.core.file.pptx_editor import apply_edits as _apply_edits
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["Stable"]])
         parsed = _parse_slides(raw)
@@ -160,7 +162,8 @@ class TestApplyEdits:
 
     def test_missing_shape_id_is_skipped(self):
         """Edits referencing a non-existent shape_id must not crash."""
-        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
+        from app.core.file.pptx_editor import apply_edits as _apply_edits
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["Text"]])
         parsed = _parse_slides(raw)
@@ -171,7 +174,8 @@ class TestApplyEdits:
         _apply_edits(raw, parsed["slides"])
 
     def test_returns_bytes(self):
-        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
+        from app.core.file.pptx_editor import apply_edits as _apply_edits
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["Hello"]])
         parsed = _parse_slides(raw)
@@ -182,7 +186,8 @@ class TestApplyEdits:
     def test_multiple_slides_edited_independently(self):
         from pptx import Presentation
 
-        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
+        from app.core.file.pptx_editor import apply_edits as _apply_edits
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["Slide One"], ["Slide Two"]])
         parsed = _parse_slides(raw)
@@ -211,7 +216,8 @@ class TestApplyEdits:
         from pptx import Presentation
         from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
+        from app.core.file.pptx_editor import apply_edits as _apply_edits
+        from app.core.file.pptx_editor import parse_slides as _parse_slides
 
         raw = _make_pptx([["Image Slide"]])
         parsed = _parse_slides(raw)

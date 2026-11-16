@@ -1,36 +1,36 @@
 # Worktree inventory and freeze
 
-Inventory cutoff: 2026-07-12. This document covers the requested **221-path snapshot** only; files created by parallel work after the cutoff are deliberately not folded into it. No file in the snapshot was deleted or moved.
+Inventory cutoff: 2026-07-12; architecture-cleanup revision: 2026-08-05. This document covers the **217 retained paths** from that snapshot after obsolete runtime and annotation adapters were removed. Files created after the cutoff are deliberately not folded into it.
 
 | Classification | Paths | Release disposition |
 | --- | ---: | --- |
-| Source and release documentation | 50 | Review and commit with their owning change set |
+| Source and release documentation | 46 | Review and commit with their owning change set |
 | Runtime data | 158 | Preserve locally; ignore |
 | Temporary artifacts | 13 | Preserve now; ignore; remove only after owner approval |
-| **Total** | **221** | **Frozen by this inventory** |
+| **Total** | **217** | **Frozen by this inventory** |
 
-## Source and release documentation — 50
+## Source and release documentation — 46
 
-The following 47 Python files are implementation, compatibility, release-tool, or regression-test work. They are not ignored and should be reviewed and committed with their dependent tracked changes.
+The following 43 Python files are implementation, release-tool, or regression-test work. They are not ignored and should be reviewed and committed with their dependent tracked changes.
 
 ```text
 app/api/response_routes.py
 app/core/agent/file_task_context_read.py
-app/core/agent/file_task_execution_loop.py
+app/core/agent/file_task_kernel_adapter.py
 app/core/agent/file_task_finalization.py
 app/core/agent/file_task_plan_presentation.py
 app/core/agent/file_task_planning.py
 app/core/agent/pipeline_hooks.py
 app/core/agent/response_formatter.py
-app/core/agent/task_tools_conversion.py
-app/core/agent/task_tools_docx_template.py
-app/core/agent/task_tools_office_create.py
-app/core/agent/task_tools_registry.py
-app/core/agent/task_tools_xlsx.py
+app/core/agent/toolkits/foundation/conversion.py
+app/core/agent/toolkits/foundation/docx_template.py
+app/core/agent/toolkits/foundation/office_create.py
+app/core/agent/toolkits/foundation/registry.py
+app/core/agent/toolkits/foundation/xlsx.py
 app/core/brain.py
 app/core/file/parsers/docx_parser_review.py
 app/core/file/parsers/docx_rich_renderer.py
-app/core/llm/llm_client_compat.py
+app/core/llm/runtime_gateway.py
 app/core/llm/provider_boundary.py
 app/core/llm/provider_compat.py
 app/core/routing/local_dispatcher.py
@@ -45,7 +45,7 @@ tests/unit/test_frontend_runtime_symbol_guards.py
 tests/unit/test_gemini_archive_boundary.py
 tests/unit/test_god_file_refactor_guardrails.py
 tests/unit/test_launcher_entry.py
-tests/unit/test_llm_client_compat.py
+tests/unit/test_llm_runtime_gateway.py
 tests/unit/test_release_manifest.py
 tests/unit/test_search_backend.py
 tests/unit/test_startup_diagnostics.py
@@ -53,14 +53,9 @@ tests/unit/test_startup_import_contract.py
 tests/unit/test_startup_risk_cleanup.py
 tests/unit/test_voice_provider_contract.py
 web/app_entrypoint.py
-web/chat_runtime_services.py
-web/doc_annotation.py
-web/llm_client_compat.py
-web/search_backend.py
+web/knowledge/search_backend.py
 web/services/chat_stream/error_messages.py
 web/services/chat_stream/generate/_provider_helpers.py
-web/settings_runtime_bootstrap.py
-web/settings_runtime_services.py
 ```
 
 The three untracked documents are also source/release documentation and should be committed:

@@ -234,135 +234,36 @@ class FileTaskRequest:
 
 
 @dataclass
-class FileTaskExecutionBrief:
-    title: str = "任务分析"
-    summary: str = ""
-    objective: str = ""
-    steps: List[Dict[str, Any]] = field(default_factory=list)
-    planned_tools: List[str] = field(default_factory=list)
-    read_targets: List[str] = field(default_factory=list)
-    write_targets: List[str] = field(default_factory=list)
-    verification: str = ""
-    note: str = ""
-    estimated: bool = True
-
-    @classmethod
-    def from_mapping(cls, data: Mapping[str, Any]) -> "FileTaskExecutionBrief":
-        raw_steps = data.get("steps") or data.get("plan") or []
-        steps: List[Dict[str, Any]] = []
-        if isinstance(raw_steps, list):
-            for index, item in enumerate(raw_steps[:8], start=1):
-                if not isinstance(item, Mapping):
-                    continue
-                title = _clean_str(
-                    item.get("title")
-                    or item.get("step")
-                    or item.get("tool_name")
-                    or item.get("name"),
-                    160,
-                )
-                description = _clean_str(
-                    item.get("description") or item.get("detail"), 400
-                )
-                tool_name = _clean_str(item.get("tool_name") or item.get("name"), 120)
-                step_payload: Dict[str, Any] = {
-                    "id": _clean_str(item.get("id") or f"brief_step_{index}", 64)
-                    or f"brief_step_{index}",
-                }
-                if title:
-                    step_payload["title"] = title
-                if description:
-                    step_payload["description"] = description
-                if tool_name:
-                    step_payload["tool_name"] = tool_name
-                if len(step_payload) > 1:
-                    steps.append(step_payload)
-
-        summary = _clean_str(
-            data.get("summary") or data.get("brief") or data.get("status"), 600
-        )
-        objective = _clean_str(
-            data.get("objective") or data.get("goal") or data.get("outcome"), 800
-        )
-        if not summary and objective:
-            summary = objective
-
-        return cls(
-            title=_clean_str(data.get("title") or "任务分析", 80) or "任务分析",
-            summary=summary,
-            objective=objective,
-            steps=steps,
-            planned_tools=_clean_str_list(
-                data.get("planned_tools") or data.get("tools"), item_limit=120
-            ),
-            read_targets=_clean_str_list(
-                data.get("read_targets") or data.get("inputs"), item_limit=240
-            ),
-            write_targets=_clean_str_list(
-                data.get("write_targets") or data.get("targets"), item_limit=240
-            ),
-            verification=_clean_str(
-                data.get("verification")
-                or data.get("verify")
-                or data.get("success_check"),
-                400,
-            ),
-            note=_clean_str(data.get("note") or data.get("notes"), 400),
-            estimated=bool(data.get("estimated", True)),
-        )
-
-    def public_dict(self) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
-            "title": self.title or "任务分析",
-            "summary": self.summary or self.objective or "AI 已完成任务分析。",
-            "estimated": bool(self.estimated),
-        }
-        if self.steps:
-            payload["steps"] = [dict(step) for step in self.steps]
-        if self.objective:
-            payload["objective"] = self.objective
-        if self.planned_tools:
-            payload["planned_tools"] = list(self.planned_tools)
-        if self.read_targets:
-            payload["read_targets"] = list(self.read_targets)
-        if self.write_targets:
-            payload["write_targets"] = list(self.write_targets)
-        if self.verification:
-            payload["verification"] = self.verification
-        if self.note:
-            payload["note"] = self.note
-        return payload
-
-
-@dataclass
 class FileTaskClassification:
     request_kind: str = "new_task"
     task_family: str = "analyze"
     operation_kind: str = "read"
     execution_mode: str = "generic_tool_loop"
     output_mode: str = "answer"
-    write_intent: bool = False
+    write_authorized: bool = False
+    write_required: bool = False
     diagnostic_request: bool = False
-    docx_annotation_request: bool = False
     planner_policy: str = ""
     planner_reason: str = ""
     planner_backend: str = ""
     target_file_type: str = ""
     known_native_tool_gap: str = ""
     file_types: List[str] = field(default_factory=list)
-    matched_capabilities: List[str] = field(default_factory=list)
     reason_codes: List[str] = field(default_factory=list)
     selected_recipe: str = ""
     recipe_candidates: List[Dict[str, Any]] = field(default_factory=list)
     decision_trace: List[Dict[str, Any]] = field(default_factory=list)
     confidence: float = 1.0
 
+    def __post_init__(self) -> None:
+        if self.write_required:
+            self.write_authorized = True
+        elif str(self.output_mode or "").strip().lower() == "hybrid":
+            self.write_authorized = True
+
     def public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["file_types"] = [item for item in self.file_types if item]
-        data["matched_capabilities"] = [
-            item for item in self.matched_capabilities if item
-        ]
         data["reason_codes"] = [item for item in self.reason_codes if item]
         data["recipe_candidates"] = [
             dict(item) for item in self.recipe_candidates if isinstance(item, dict)
@@ -379,12 +280,19 @@ class FileTaskIntentPlan:
     goal_statement: str = ""
     output_mode: str = "answer"
     confidence: float = 1.0
-    write_intent: bool = False
+    write_authorized: bool = False
+    write_required: bool = False
     can_apply: bool = False
     requires_confirmation: bool = False
     recommended_strategy: str = "answer_only"
     dynamic_steps: List[Dict[str, Any]] = field(default_factory=list)
     reason_codes: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.write_required:
+            self.write_authorized = True
+        elif str(self.output_mode or "").strip().lower() == "hybrid":
+            self.write_authorized = True
 
     def public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -400,11 +308,16 @@ class FileTaskRequirementSet:
     requested_operation: str = "read"
     target_path: str = ""
     target_file_type: str = ""
+    write_authorized: bool = False
     write_required: bool = False
     required_capabilities: List[str] = field(default_factory=list)
     forbidden_capabilities: List[str] = field(default_factory=list)
     acceptance_criteria: List[str] = field(default_factory=list)
     reason_codes: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.write_required:
+            self.write_authorized = True
 
     def public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -468,6 +381,7 @@ class FileTaskCompletionContract:
     objective: str = ""
     decomposition_strategy: str = "single_pass"
     complexity: str = "simple"
+    write_authorized: bool = False
     write_required: bool = False
     output_mode: str = "answer"
     target_path: str = ""
@@ -480,6 +394,10 @@ class FileTaskCompletionContract:
     checkpoints: List[Dict[str, Any]] = field(default_factory=list)
     repair_policy: str = "repair_until_budget_exhausted"
     reason_codes: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.write_required:
+            self.write_authorized = True
 
     def public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -516,6 +434,10 @@ class FileTaskCompletionContract:
             if self.required_operations:
                 operations = "、".join(self.required_operations[:6])
                 criteria.append(f"必须完成这些可核验操作：{operations}")
+        elif self.write_authorized:
+            optional_write = "允许按需使用写入工具；文件变更不是任务完成的必要条件"
+            if optional_write not in criteria:
+                criteria.append(optional_write)
         else:
             if "不应误触发写入工具" not in criteria:
                 criteria.append("不应误触发写入工具")
@@ -541,8 +463,12 @@ class FileTaskExecutionContext:
     simple_quick_action: bool = False
 
     @property
-    def write_intent(self) -> bool:
-        return bool(self.classification.write_intent)
+    def write_authorized(self) -> bool:
+        return bool(self.classification.write_authorized)
+
+    @property
+    def write_required(self) -> bool:
+        return bool(self.classification.write_required)
 
     def public_dict(self) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -552,7 +478,8 @@ class FileTaskExecutionContext:
             "plan_check": self.plan_check.public_dict(),
             "quick_action_mode": self.quick_action_mode,
             "simple_quick_action": bool(self.simple_quick_action),
-            "write_intent": bool(self.write_intent),
+            "write_authorized": self.write_authorized,
+            "write_required": self.write_required,
         }
         if isinstance(self.known_tool_gap, dict) and self.known_tool_gap:
             data["known_tool_gap"] = dict(self.known_tool_gap)

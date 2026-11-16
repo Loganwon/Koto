@@ -10,7 +10,7 @@ class _FakeLocalExecutor:
 def test_workspace_route_intent_maps_system_actions_to_direct_response(monkeypatch):
     from web.blueprints import editor_ai
 
-    monkeypatch.setattr(editor_ai, "get_local_executor", lambda: _FakeLocalExecutor)
+    monkeypatch.setattr(editor_ai, "LocalExecutor", _FakeLocalExecutor)
 
     decision = editor_ai._deterministic_workspace_route({"text": "打开微信"})
 

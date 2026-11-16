@@ -6,7 +6,7 @@ Integration tests for two PPTX fixes:
    placeholder shapes instead of an empty presentation with zero slides.
 
 2. **Ctrl+S auto_save crash**: The `auto_save` endpoint for PPTX now uses
-   `_apply_edits` (from `pptx_editor.py`) when it receives the rich geometry
+   canonical `apply_edits` function when it receives the rich geometry
    canvas format `{slides: [{shapes: [{paragraphs: [...]}]}]}`, matching
    the `save_file` / download path.  Previously it called the old file-parser
    PPTX exporter which
@@ -37,6 +37,27 @@ def _make_pptx_with_text(text: str = "Hello World") -> bytes:
     # Title placeholder
     title = slide.placeholders[0]
     title.text = text
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
+def _make_pptx_with_rich_text() -> bytes:
+    """Create one text box with two paragraphs and multiple formatted runs."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    shape = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(6), Inches(2))
+    first = shape.text_frame.paragraphs[0]
+    run = first.add_run()
+    run.text = "Keep "
+    run.font.bold = True
+    run.font.size = Pt(20)
+    first.add_run().text = "DELETE"
+    second = shape.text_frame.add_paragraph()
+    second.add_run().text = "Remove this paragraph"
     buf = io.BytesIO()
     prs.save(buf)
     return buf.getvalue()
@@ -84,32 +105,115 @@ def wa_client(tmp_path_factory):
     workspace_dir.mkdir(parents=True)
 
     import web.blueprints.workspace_assistant as _wa
-    import web.shared as _shared
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
 
     original_tmp = _wa._TMP_DIR
-    original_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    original_ws = get_workspace_root()
     _wa._TMP_DIR = tmp_dir
-    _shared.WORKSPACE_DIR = str(workspace_dir)
+    set_workspace_root(str(workspace_dir))
 
     from flask import Flask
 
-    from web.blueprints.pptx_editor import pptx_editor_bp
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
     app.register_blueprint(workspace_assistant_bp)
-    app.register_blueprint(pptx_editor_bp)
     app.config["TESTING"] = True
 
     with app.test_client() as client:
         yield client, tmp_dir, workspace_dir
 
     _wa._TMP_DIR = original_tmp
-    if original_ws is not None:
-        _shared.WORKSPACE_DIR = original_ws
+    set_workspace_root(original_ws)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestPptxTextDeletionExport:
+    """Deleted paragraphs and runs must not come back after PPTX export."""
+
+    def _edited_payload(self) -> tuple[bytes, dict, dict]:
+        raw = _make_pptx_with_rich_text()
+        data = _parse_pptx_geometry_data(raw)
+        shape = next(
+            shape
+            for shape in data["slides"][0]["shapes"]
+            if shape.get("has_text")
+            and "DELETE"
+            in "".join(
+                str(run.get("text", ""))
+                for paragraph in shape.get("paragraphs", [])
+                for run in paragraph.get("runs", [])
+            )
+        )
+        return raw, data, shape
+
+    def test_deleting_complete_run_and_paragraph_is_exact(self):
+        from pptx import Presentation
+        from pptx.enum.text import PP_ALIGN
+
+        from app.core.file.pptx_editor import apply_edits
+
+        raw, data, shape = self._edited_payload()
+        kept_run = dict(shape["paragraphs"][0]["runs"][0])
+        kept_run["text"] = "Only this remains"
+        shape["paragraphs"] = [{"align": "RIGHT", "runs": [kept_run]}]
+
+        exported = apply_edits(raw, data["slides"])
+        prs = Presentation(io.BytesIO(exported))
+        text_shape = next(item for item in prs.slides[0].shapes if item.has_text_frame)
+
+        assert text_shape.text == "Only this remains"
+        assert len(text_shape.text_frame.paragraphs) == 1
+        assert len(text_shape.text_frame.paragraphs[0].runs) == 1
+        assert text_shape.text_frame.paragraphs[0].alignment == PP_ALIGN.RIGHT
+        assert text_shape.text_frame.paragraphs[0].runs[0].font.bold is True
+
+    def test_deleting_all_text_produces_an_empty_text_frame(self):
+        from pptx import Presentation
+
+        from app.core.file.pptx_editor import apply_edits
+
+        raw, data, shape = self._edited_payload()
+        shape["paragraphs"] = []
+
+        exported = apply_edits(raw, data["slides"])
+        prs = Presentation(io.BytesIO(exported))
+        text_shape = next(item for item in prs.slides[0].shapes if item.has_text_frame)
+
+        assert text_shape.text == ""
+        assert len(text_shape.text_frame.paragraphs) == 1
+
+    def test_new_runs_are_added_instead_of_silently_dropped(self):
+        from pptx import Presentation
+
+        from app.core.file.pptx_editor import apply_edits
+
+        raw, data, shape = self._edited_payload()
+        template = dict(shape["paragraphs"][0]["runs"][0])
+        shape["paragraphs"] = [
+            {
+                "align": "LEFT",
+                "runs": [
+                    {**template, "text": "A"},
+                    {**template, "text": "B", "bold": False},
+                    {**template, "text": "C"},
+                ],
+            }
+        ]
+
+        exported = apply_edits(raw, data["slides"])
+        prs = Presentation(io.BytesIO(exported))
+        text_shape = next(item for item in prs.slides[0].shapes if item.has_text_frame)
+
+        assert [run.text for run in text_shape.text_frame.paragraphs[0].runs] == [
+            "A",
+            "B",
+            "C",
+        ]
+
+
 # A. Blank PPTX seed fix
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -225,7 +329,7 @@ class TestPptxAutoSaveRichFormat:
 
     Previously, the old file-parser PPTX exporter only looked for shape_entry.get("text", ""),
     which returned "" because the frontend sends paragraphs with runs.
-    Now auto_save uses _apply_edits for the rich format.
+    Auto-save uses the canonical apply_edits function for the rich format.
     """
 
     def _upload_and_get_id(self, client) -> tuple[str, dict]:

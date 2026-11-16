@@ -1,21 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Batch 8 – Unit tests for 12 web modules at 0% coverage.
+Batch 8 – Regression tests for active web modules.
 
 Modules covered:
-  1. app.core.services.feedback_loop
-  2. web.proactive_dialogue
+  2. web.proactive.proactive_dialogue
   3. web.context_awareness
-  4. web.context_injector
-  5. web.concept_extractor
-  6. app.core.services.clipboard_manager
-  7. web.insight_reporter
-  8. web.prompt_adapter
-  9. web.memory_integration
- 10. web.doc_planner
- 11. web.doc_converter
- 12. web.data_pipeline
+  4. web.knowledge.concept_extractor
+  5. app.core.services.clipboard_manager
+  6. web.knowledge.insight_reporter
+  7. web.prompt_adapter
+  8. EnhancedMemoryManager regression
+  9. web.documents.doc_planner
+ 10. web.documents.doc_converter
+ 11. web.files.data_pipeline
 """
 
 import json
@@ -30,142 +28,16 @@ from unittest.mock import AsyncMock, MagicMock, Mock, mock_open, patch
 import pytest
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 1. FeedbackLoopManager
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-class TestFeedbackLoopManager:
-    """Tests for app.core.services.feedback_loop.FeedbackLoopManager"""
-
-    def _make_manager(self):
-        from app.core.services.feedback_loop import FeedbackLoopManager
-
-        client = MagicMock()
-        mgr = FeedbackLoopManager(get_client_func=lambda: client)
-        return mgr, client
-
-    def test_init_attributes(self):
-        mgr, _ = self._make_manager()
-        assert mgr.improvement_iterations == 0
-        assert mgr.max_iterations == 2
-
-    def test_improve_document_no_improvement_needed(self):
-        mgr, _ = self._make_manager()
-        evaluation = {"needs_improvement": False, "overall_score": 90}
-        cb = MagicMock()
-        result = mgr.improve_document_content(
-            "content", evaluation, "title", progress_callback=cb
-        )
-        assert result["iterations"] == 0
-        assert result["improved_content"] == "content"
-        cb.assert_called_once()
-
-    def test_improve_document_no_improvement_needed_no_callback(self):
-        mgr, _ = self._make_manager()
-        evaluation = {"needs_improvement": False, "overall_score": 85}
-        result = mgr.improve_document_content("content", evaluation, "title")
-        assert result["message"] == "文档已达到质量标准"
-
-    def test_improve_document_gemini_returns_none(self):
-        mgr, client = self._make_manager()
-        client.models.generate_content.return_value = MagicMock(text=None)
-        evaluation = {
-            "needs_improvement": True,
-            "overall_score": 40,
-            "improvement_priority": ["a"],
-        }
-        result = mgr.improve_document_content("content", evaluation, "title")
-        assert result["iterations"] == 1
-        assert any(not h["success"] for h in result["improvement_history"])
-
-    def test_improve_document_gemini_exception(self):
-        """When _call_gemini_for_improvement catches an internal error and returns None,
-        the outer loop records success=False."""
-        mgr, client = self._make_manager()
-        # _call_gemini_for_improvement catches exceptions internally → returns None
-        client.models.generate_content.side_effect = RuntimeError("API error")
-        evaluation = {
-            "needs_improvement": True,
-            "overall_score": 30,
-            "improvement_priority": [],
-            "issues": [],
-            "suggestions": [],
-        }
-        cb = MagicMock()
-        result = mgr.improve_document_content(
-            "content", evaluation, "title", progress_callback=cb
-        )
-        assert result["improvement_history"][0]["success"] is False
-
-    def test_improve_ppt_outline_no_improvement_needed(self):
-        mgr, _ = self._make_manager()
-        evaluation = {"needs_improvement": False, "overall_score": 95}
-        result = mgr.improve_ppt_outline([], evaluation, "PPT title")
-        assert result["iterations"] == 0
-
-    def test_improve_ppt_outline_json_decode_error(self):
-        mgr, client = self._make_manager()
-        resp = MagicMock()
-        resp.text = "not valid json"
-        client.models.generate_content.return_value = resp
-        evaluation = {
-            "needs_improvement": True,
-            "overall_score": 30,
-            "improvement_priority": [],
-        }
-        result = mgr.improve_ppt_outline([{"slide": 1}], evaluation, "PPT title")
-        assert any(not h["success"] for h in result["improvement_history"])
-
-    def test_improve_ppt_outline_success(self):
-        mgr, client = self._make_manager()
-        new_outline = [{"slide": 1, "title": "Improved"}]
-        resp = MagicMock()
-        resp.text = json.dumps(new_outline)
-        client.models.generate_content.return_value = resp
-        evaluation = {
-            "needs_improvement": True,
-            "overall_score": 50,
-            "improvement_priority": ["structure"],
-        }
-        cb = MagicMock()
-        result = mgr.improve_ppt_outline(
-            [{"slide": 1}], evaluation, "PPT title", progress_callback=cb
-        )
-        assert result["improved_outline"] == new_outline
-
-    def test_build_improvement_prompt(self):
-        mgr, _ = self._make_manager()
-        evaluation = {
-            "overall_score": 50,
-            "issues": ["too short"],
-            "suggestions": ["add details"],
-        }
-        prompt = mgr._build_improvement_prompt("content", evaluation, "Title", 1)
-        assert "too short" in prompt
-        assert "add details" in prompt
-        assert "Title" in prompt
-
-    def test_create_feedback_manager_factory(self):
-        from app.core.services.feedback_loop import create_feedback_manager
-
-        mgr = create_feedback_manager(lambda: MagicMock())
-        from app.core.services.feedback_loop import FeedbackLoopManager
-
-        assert isinstance(mgr, FeedbackLoopManager)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
 # 2. ProactiveDialogueEngine
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
 class TestProactiveDialogueEngine:
-    """Tests for web.proactive_dialogue.ProactiveDialogueEngine"""
+    """Tests for web.proactive.proactive_dialogue.ProactiveDialogueEngine"""
 
     def _make_engine(self, tmp_path):
-        from web.proactive_dialogue import ProactiveDialogueEngine
+        from web.proactive.proactive_dialogue import ProactiveDialogueEngine
 
         db_path = str(tmp_path / "dialogue.db")
         engine = ProactiveDialogueEngine(db_path=db_path)
@@ -300,107 +172,16 @@ class TestContextAwarenessSystem:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4. ContextInjector
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-class TestContextInjector:
-    """Tests for web.context_injector (QuestionClassifier, ContextSelector, ContextInjector)"""
-
-    def test_question_classifier_empty(self):
-        from web.context_injector import QuestionClassifier, TaskType
-
-        c = QuestionClassifier()
-        task, conf = c.classify("")
-        assert task == TaskType.GENERAL
-        assert conf == 0.0
-
-    def test_question_classifier_code(self):
-        from web.context_injector import QuestionClassifier, TaskType
-
-        c = QuestionClassifier()
-        task, conf = c.classify("运行 Python 脚本并安装 pip 包")
-        assert task == TaskType.CODE_EXECUTION
-        assert conf > 0
-
-    def test_question_classifier_file(self):
-        from web.context_injector import QuestionClassifier, TaskType
-
-        c = QuestionClassifier()
-        task, conf = c.classify("找到最大的文件并删除")
-        assert task == TaskType.FILE_OPERATION
-
-    def test_question_classifier_system_diagnosis(self):
-        from web.context_injector import QuestionClassifier, TaskType
-
-        c = QuestionClassifier()
-        task, conf = c.classify("电脑很卡 CPU 很高 内存满了")
-        assert task == TaskType.SYSTEM_DIAGNOSIS
-
-    def test_context_selector_code(self):
-        from web.context_injector import ContextSelector, ContextType, TaskType
-
-        s = ContextSelector()
-        ctxs = s.select_contexts(TaskType.CODE_EXECUTION)
-        assert ContextType.PYTHON_ENV in ctxs
-
-    def test_context_selector_general(self):
-        from web.context_injector import ContextSelector, TaskType
-
-        s = ContextSelector()
-        ctxs = s.select_contexts(TaskType.GENERAL)
-        assert len(ctxs) == 0
-
-    def test_context_builder_time(self):
-        from web.context_injector import ContextBuilder
-
-        result = ContextBuilder.build_time_context()
-        assert "当前时间" in result
-
-    def test_context_injector_general(self):
-        from web.context_injector import ContextInjector
-
-        injector = ContextInjector()
-        instruction = injector.get_injected_instruction()
-        assert "Koto" in instruction
-
-    def test_context_injector_with_question(self):
-        from web.context_injector import ContextInjector
-
-        injector = ContextInjector()
-        instruction = injector.get_injected_instruction("你好，今天天气怎么样？")
-        assert "Koto" in instruction
-
-    def test_classify_question_helper(self):
-        # Reset singleton
-        import web.context_injector as ci
-        from web.context_injector import TaskType, classify_question
-
-        ci._context_injector = None
-        task, conf = classify_question("运行脚本")
-        assert task == TaskType.CODE_EXECUTION
-
-    def test_get_dynamic_system_instruction(self):
-        import web.context_injector as ci
-        from web.context_injector import get_dynamic_system_instruction
-
-        ci._context_injector = None
-        result = get_dynamic_system_instruction()
-        assert isinstance(result, str)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 5. ConceptExtractor
+# 4. ConceptExtractor
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
 class TestConceptExtractor:
-    """Tests for web.concept_extractor.ConceptExtractor"""
+    """Tests for web.knowledge.concept_extractor.ConceptExtractor"""
 
     def _make_extractor(self, tmp_path):
-        from web.concept_extractor import ConceptExtractor
+        from web.knowledge.concept_extractor import ConceptExtractor
 
         db_path = str(tmp_path / "concepts.db")
         return ConceptExtractor(db_path=db_path)
@@ -550,7 +331,7 @@ class TestClipboardManager:
 
 @pytest.mark.unit
 class TestInsightReporter:
-    """Tests for web.insight_reporter.InsightReporter"""
+    """Tests for web.knowledge.insight_reporter.InsightReporter"""
 
     def _make_reporter(self, tmp_path):
         with patch.dict(
@@ -561,7 +342,7 @@ class TestInsightReporter:
                 "suggestion_engine": MagicMock(),
             },
         ):
-            from web.insight_reporter import InsightReporter
+            from web.knowledge.insight_reporter import InsightReporter
 
             bm = MagicMock()
             kg = MagicMock()
@@ -710,76 +491,18 @@ class TestPromptAdapter:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 9. MemoryIntegration
+# 9. EnhancedMemoryManager regression
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
-class TestMemoryIntegration:
-    """Tests for web.memory_integration.MemoryIntegration"""
-
-    def test_create_extraction_prompt(self):
-        from web.memory_integration import MemoryIntegration
-
-        prompt = MemoryIntegration.create_extraction_prompt("我喜欢 Python", "好的")
-        assert "Python" in prompt
-        assert "JSON" in prompt
-
-    def test_should_extract_short_msg(self):
-        from web.memory_integration import MemoryIntegration
-
-        assert MemoryIntegration.should_extract("hi", "") is False
-
-    def test_should_extract_greeting(self):
-        from web.memory_integration import MemoryIntegration
-
-        assert MemoryIntegration.should_extract("你好", "") is False
-        assert MemoryIntegration.should_extract("hello", "") is False
-
-    def test_should_extract_strong_signal(self):
-        from web.memory_integration import MemoryIntegration
-
-        assert MemoryIntegration.should_extract("我非常喜欢简洁的代码风格", "") is True
-        assert (
-            MemoryIntegration.should_extract("以后请记住不要再使用这种方式了", "")
-            is True
-        )
-
-    def test_should_extract_tech_content(self):
-        from web.memory_integration import MemoryIntegration
-
-        assert MemoryIntegration.should_extract("帮我写一个Python爬虫", "") is True
-
-    def test_should_extract_long_msg(self):
-        from web.memory_integration import MemoryIntegration
-
-        # len() > 40 triggers extraction for longer messages
-        long_msg = "这是一段比较长的消息，包含了一些有价值的信息，足够触发记忆提取的阈值，需要有超过四十个字符才能通过检测"
-        assert len(long_msg) > 40
-        assert MemoryIntegration.should_extract(long_msg, "") is True
-
-    def test_enhance_system_instruction(self):
-        from web.memory_integration import MemoryIntegration
-
-        result = MemoryIntegration.enhance_system_instruction(
-            "You are an assistant.", "Memory: user likes Python", "Profile: developer"
-        )
-        assert "Profile: developer" in result
-        assert "Memory: user likes Python" in result
-        assert "回复调整建议" in result
-
-    def test_enhance_system_instruction_empty(self):
-        from web.memory_integration import MemoryIntegration
-
-        result = MemoryIntegration.enhance_system_instruction(
-            "Base instruction.", "", ""
-        )
-        assert "Base instruction." in result
+class TestEnhancedMemoryManagerRegression:
+    """Regression coverage for normalized legacy memory files."""
 
     def test_enhanced_memory_manager_coerces_dict_memories_before_append(
         self, tmp_path
     ):
-        from web.enhanced_memory_manager import EnhancedMemoryManager
+        from app.core.services.memory_manager import EnhancedMemoryManager
 
         memory_path = tmp_path / "memory.json"
         profile_path = tmp_path / "profile.json"
@@ -813,10 +536,10 @@ class TestMemoryIntegration:
 
 @pytest.mark.unit
 class TestDocPlanner:
-    """Tests for web.doc_planner"""
+    """Tests for web.documents.doc_planner"""
 
     def test_section_plan_defaults(self):
-        from web.doc_planner import SectionPlan
+        from web.documents.doc_planner import SectionPlan
 
         s = SectionPlan()
         assert s.heading == ""
@@ -824,7 +547,7 @@ class TestDocPlanner:
         assert s.rough_length == "medium"
 
     def test_document_plan_to_context_str(self):
-        from web.doc_planner import DocumentPlan, SectionPlan
+        from web.documents.doc_planner import DocumentPlan, SectionPlan
 
         plan = DocumentPlan(
             title="Test Plan",
@@ -841,17 +564,17 @@ class TestDocPlanner:
         assert "col1" in ctx
 
     def test_document_planner_fallback(self):
-        from web.doc_planner import DocumentPlanner
+        from web.documents.doc_planner import DocumentPlanner
 
         client = MagicMock()
-        client.models.generate_content.side_effect = Exception("API down")
+        client.generate_content.side_effect = Exception("API down")
         planner = DocumentPlanner(ai_client=client)
         plan = planner.plan_sync("生成一份PPT报告")
         assert plan.success is False
         assert plan.doc_type == "ppt"
 
     def test_detect_doc_type(self):
-        from web.doc_planner import DocumentPlanner
+        from web.documents.doc_planner import DocumentPlanner
 
         planner = DocumentPlanner(ai_client=MagicMock())
         assert planner._detect_doc_type("做一个PPT") == "ppt"
@@ -860,7 +583,7 @@ class TestDocPlanner:
         assert planner._detect_doc_type("写一份报告") == "word"
 
     def test_extract_json_from_code_block(self):
-        from web.doc_planner import DocumentPlanner
+        from web.documents.doc_planner import DocumentPlanner
 
         planner = DocumentPlanner(ai_client=MagicMock())
         text = '```json\n{"doc_type": "word"}\n```'
@@ -869,7 +592,7 @@ class TestDocPlanner:
         assert "word" in result
 
     def test_extract_json_bare(self):
-        from web.doc_planner import DocumentPlanner
+        from web.documents.doc_planner import DocumentPlanner
 
         planner = DocumentPlanner(ai_client=MagicMock())
         text = 'Here is the plan: {"doc_type": "excel"}'
@@ -877,7 +600,7 @@ class TestDocPlanner:
         assert result is not None
 
     def test_parse_plan_success(self):
-        from web.doc_planner import DocumentPlanner
+        from web.documents.doc_planner import DocumentPlanner
 
         planner = DocumentPlanner(ai_client=MagicMock())
         raw = json.dumps(
@@ -906,7 +629,7 @@ class TestDocPlanner:
         assert len(plan.sections) == 1
 
     def test_build_generation_prompt_from_plan(self):
-        from web.doc_planner import (
+        from web.documents.doc_planner import (
             DocumentPlan,
             SectionPlan,
             build_generation_prompt_from_plan,
@@ -936,10 +659,10 @@ class TestDocPlanner:
 
 @pytest.mark.unit
 class TestDocConverter:
-    """Tests for web.doc_converter"""
+    """Tests for web.documents.doc_converter"""
 
     def test_needs_conversion(self):
-        from web.doc_converter import needs_conversion
+        from web.documents.doc_converter import needs_conversion
 
         assert needs_conversion(".pdf") is True
         assert needs_conversion(".doc") is True
@@ -949,7 +672,7 @@ class TestDocConverter:
         assert needs_conversion(".docx") is False
 
     def test_convert_to_docx_already_docx(self, tmp_path):
-        from web.doc_converter import convert_to_docx
+        from web.documents.doc_converter import convert_to_docx
 
         docx_file = tmp_path / "test.docx"
         docx_file.write_text("dummy", encoding="utf-8")
@@ -958,16 +681,16 @@ class TestDocConverter:
         assert path == str(docx_file)
 
     def test_convert_to_docx_unsupported_format(self, tmp_path):
-        from web.doc_converter import convert_to_docx
+        from web.documents.doc_converter import convert_to_docx
 
         file = tmp_path / "test.xyz"
         file.write_text("data", encoding="utf-8")
         with pytest.raises(ValueError, match="不支持的格式"):
             convert_to_docx(str(file))
 
-    @patch("web.doc_converter._build_docx_from_text")
+    @patch("web.documents.doc_converter._build_docx_from_text")
     def test_convert_txt(self, mock_build, tmp_path):
-        from web.doc_converter import convert_to_docx
+        from web.documents.doc_converter import convert_to_docx
 
         txt_file = tmp_path / "test.txt"
         txt_file.write_text("Hello world content", encoding="utf-8")
@@ -976,9 +699,9 @@ class TestDocConverter:
         mock_build.assert_called_once()
         assert warning == ""
 
-    @patch("web.doc_converter._build_docx_from_text")
+    @patch("web.documents.doc_converter._build_docx_from_text")
     def test_convert_md(self, mock_build, tmp_path):
-        from web.doc_converter import convert_to_docx
+        from web.documents.doc_converter import convert_to_docx
 
         md_file = tmp_path / "readme.md"
         md_file.write_text("# Title\nContent", encoding="utf-8")
@@ -987,14 +710,14 @@ class TestDocConverter:
         mock_build.assert_called_once()
 
     def test_supported_input_exts(self):
-        from web.doc_converter import SUPPORTED_INPUT_EXTS
+        from web.documents.doc_converter import SUPPORTED_INPUT_EXTS
 
         assert ".pdf" in SUPPORTED_INPUT_EXTS
         assert ".docx" in SUPPORTED_INPUT_EXTS
         assert ".odt" in SUPPORTED_INPUT_EXTS
 
     def test_accept_attr(self):
-        from web.doc_converter import ACCEPT_ATTR
+        from web.documents.doc_converter import ACCEPT_ATTR
 
         assert ".docx" in ACCEPT_ATTR
         assert ".pdf" in ACCEPT_ATTR
@@ -1007,10 +730,10 @@ class TestDocConverter:
 
 @pytest.mark.unit
 class TestDataPipeline:
-    """Tests for web.data_pipeline"""
+    """Tests for web.files.data_pipeline"""
 
     def test_wechat_extractor_extract_from_text(self):
-        from web.data_pipeline import WeChatContactExtractor
+        from web.files.data_pipeline import WeChatContactExtractor
 
         ext = WeChatContactExtractor()
         result = ext.extract_from_text("联系我 13812345678 邮箱 test@example.com")
@@ -1018,7 +741,7 @@ class TestDataPipeline:
         assert "test@example.com" in result["emails"]
 
     def test_wechat_extractor_no_matches(self):
-        from web.data_pipeline import WeChatContactExtractor
+        from web.files.data_pipeline import WeChatContactExtractor
 
         ext = WeChatContactExtractor()
         result = ext.extract_from_text("No contact info here")
@@ -1026,7 +749,7 @@ class TestDataPipeline:
         assert result["emails"] == []
 
     def test_wechat_extractor_from_chat(self):
-        from web.data_pipeline import WeChatContactExtractor
+        from web.files.data_pipeline import WeChatContactExtractor
 
         ext = WeChatContactExtractor()
         msgs = ["电话 13812345678", "邮箱 a@b.com", "普通消息"]
@@ -1034,7 +757,7 @@ class TestDataPipeline:
         assert len(contacts) == 2
 
     def test_data_transformer_to_json(self, tmp_path):
-        from web.data_pipeline import DataTransformer
+        from web.files.data_pipeline import DataTransformer
 
         output = str(tmp_path / "data.json")
         data = [{"name": "Alice", "age": 30}]
@@ -1045,7 +768,7 @@ class TestDataPipeline:
         assert loaded[0]["name"] == "Alice"
 
     def test_data_transformer_to_csv(self, tmp_path):
-        from web.data_pipeline import DataTransformer
+        from web.files.data_pipeline import DataTransformer
 
         output = str(tmp_path / "data.csv")
         data = [{"name": "Bob", "age": 25}]
@@ -1053,14 +776,14 @@ class TestDataPipeline:
         assert os.path.exists(result)
 
     def test_data_transformer_to_csv_empty(self, tmp_path):
-        from web.data_pipeline import DataTransformer
+        from web.files.data_pipeline import DataTransformer
 
         output = str(tmp_path / "empty.csv")
         result = DataTransformer.to_csv([], output)
         assert os.path.exists(result)
 
     def test_pipeline_wechat_to_json(self, tmp_path):
-        from web.data_pipeline import CrossAppDataPipeline
+        from web.files.data_pipeline import CrossAppDataPipeline
 
         pipeline = CrossAppDataPipeline()
         output = str(tmp_path / "contacts.json")
@@ -1074,7 +797,7 @@ class TestDataPipeline:
         assert result["record_count"] == 1
 
     def test_pipeline_unsupported_source(self, tmp_path):
-        from web.data_pipeline import CrossAppDataPipeline
+        from web.files.data_pipeline import CrossAppDataPipeline
 
         pipeline = CrossAppDataPipeline()
         result = pipeline.run_pipeline(
@@ -1086,7 +809,7 @@ class TestDataPipeline:
         assert result["success"] is False
 
     def test_pipeline_unsupported_format(self, tmp_path):
-        from web.data_pipeline import CrossAppDataPipeline
+        from web.files.data_pipeline import CrossAppDataPipeline
 
         pipeline = CrossAppDataPipeline()
         result = pipeline.run_pipeline(
@@ -1098,7 +821,7 @@ class TestDataPipeline:
         assert result["success"] is False
 
     def test_pipeline_wechat_chat_list_to_csv(self, tmp_path):
-        from web.data_pipeline import CrossAppDataPipeline
+        from web.files.data_pipeline import CrossAppDataPipeline
 
         pipeline = CrossAppDataPipeline()
         output = str(tmp_path / "contacts.csv")
@@ -1112,7 +835,7 @@ class TestDataPipeline:
         assert result["success"] is True
 
     def test_pipeline_unsupported_data_format(self, tmp_path):
-        from web.data_pipeline import CrossAppDataPipeline
+        from web.files.data_pipeline import CrossAppDataPipeline
 
         pipeline = CrossAppDataPipeline()
         result = pipeline.run_pipeline(

@@ -278,36 +278,6 @@ class ArtifactResult:
         }
 
 
-def _result_status_from_phase(phase: str, error: str = "") -> str:
-    if error:
-        return "failed"
-    phase_value = str(phase or "").lower()
-    if phase_value in {"done", "completed", "success"}:
-        return "completed"
-    if phase_value in {"review", "needs_review", "waiting"}:
-        return "needs_review"
-    if phase_value in {"failed", "error", "cancelled"}:
-        return "failed"
-    return "running"
-
-
-def _change_kind_from_step(step: Any) -> str:
-    hint = str(getattr(step, "tool_hint", "") or "").lower()
-    text = " ".join(
-        [
-            str(getattr(step, "title", "") or ""),
-            str(getattr(step, "description", "") or ""),
-        ]
-    ).lower()
-    if "convert" in hint or "转换" in text:
-        return "convert"
-    if "write" in hint or "save" in hint or "写" in text or "保存" in text:
-        return "update"
-    if "annotate" in hint or "批注" in text:
-        return "comment"
-    return "step"
-
-
 def _field_value(item: Any, *keys: str) -> Any:
     if isinstance(item, Mapping):
         for key in keys:
@@ -518,8 +488,8 @@ def _file_task_result_status(status: str) -> str:
     if value in {
         "waiting",
         "awaiting_confirmation",
+        "context_summary_fallback",
         "needs_review",
-        "needs_attention",
         "pending",
     }:
         return "needs_review"
@@ -530,6 +500,12 @@ def _file_task_result_status(status: str) -> str:
         "canceled",
         "write_blocked",
         "tool_gap",
+        "write_not_performed",
+        "model_unavailable",
+        "model_timeout",
+        "model_error",
+        "quality_gate_failed",
+        "blocked",
     }:
         return "failed"
     return "running"
@@ -796,83 +772,6 @@ def build_file_task_artifact_result(
             "target_path": _clean_path(target_path),
             "terminal_status": status,
         },
-    )
-    result.actions = result.default_actions()
-    return result
-
-
-def build_background_artifact_result(
-    *,
-    task_id: str,
-    goal: str,
-    phase: str,
-    final_report: str = "",
-    error: str = "",
-    steps: Optional[Iterable[Any]] = None,
-) -> ArtifactResult:
-    """Create an ArtifactResult view from a BackgroundAgent status."""
-    step_list = list(steps or [])
-    status = _result_status_from_phase(phase, error)
-    report = _clean_text(final_report or error, 2000)
-    summary = report or _clean_text(goal, 500)
-    texts = [goal, final_report, error]
-    texts.extend(str(getattr(step, "result", "") or "") for step in step_list)
-    paths = _iter_unique_paths(texts)
-    artifacts = [
-        Artifact(
-            type=_artifact_type_from_path(path),
-            title=PurePosixPath(path).name,
-            path=path,
-        )
-        for path in paths
-    ]
-    changes = []
-    for step in step_list:
-        step_result = str(getattr(step, "result", "") or "").strip()
-        if not step_result:
-            continue
-        step_paths = _iter_unique_paths(
-            [
-                str(getattr(step, "description", "") or ""),
-                step_result,
-            ]
-        )
-        for path in step_paths:
-            changes.append(
-                FileChange(
-                    file=path,
-                    kind=_change_kind_from_step(step),
-                    summary=str(getattr(step, "title", "") or "文件处理完成"),
-                    status="applied",
-                    after_preview=step_result[:1000],
-                )
-            )
-    logs = [
-        ExecutionLog(
-            level="error" if error else "info",
-            message=error or f"后台任务状态：{phase or 'running'}",
-        )
-    ]
-    for index, step in enumerate(step_list, start=1):
-        title = str(getattr(step, "title", "") or f"步骤 {index}")
-        step_status = getattr(step, "status", "")
-        status_value = getattr(step_status, "value", step_status)
-        logs.append(
-            ExecutionLog(
-                level="info" if str(status_value).lower() != "failed" else "error",
-                message=f"{index}. {title}：{status_value or 'pending'}",
-                metadata={"step_id": getattr(step, "step_id", "")},
-            )
-        )
-    result = ArtifactResult(
-        task_id=task_id,
-        title=_clean_text(goal, 200) or "后台任务",
-        status=status,
-        summary=summary,
-        artifacts=artifacts,
-        changes=changes,
-        logs=logs,
-        metadata={"phase": phase},
     )
     result.actions = result.default_actions()
     return result

@@ -1,0 +1,15 @@
+.wa-proposal-state,.wa-document-receipt-notice{display:block;font-size:12px;line-height:1.55;color:var(--text-secondary,#556477);margin:8px 0}
+.wa-proposal-card[data-status="failed"] .wa-proposal-state,.wa-ai-action-error{color:var(--error,#a63131)}
+.wa-proposal-card[data-status="unconfirmed"] .wa-proposal-state{color:#8c631b}
+.wa-proposal-card[data-status="applied"]{opacity:1;border-color:var(--border-color,#bbc9d9)}
+.wa-document-receipt{border:1px solid var(--border-color,#dce3eb);border-radius:8px;padding:10px 12px;margin:10px 0;background:var(--bg-secondary,#f8fafc);color:var(--text-primary,#182332)}
+.wa-document-receipt>summary{font-size:13px;font-weight:600;cursor:pointer;line-height:1.5}
+.wa-document-receipt-meta{font-size:11px;line-height:1.5;overflow-wrap:anywhere;color:var(--text-secondary,#556477);margin-top:5px}
+.wa-document-receipt pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto;padding:10px;background:var(--bg-primary,#fff);font:inherit;line-height:1.65}
+.wa-document-receipt-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.wa-document-receipt-actions button{border:1px solid var(--border-color,#cbd5e1);border-radius:5px;background:var(--bg-primary,#fff);color:inherit;padding:5px 9px;cursor:pointer}
+.wa-document-receipt-actions button:disabled{opacity:.55;cursor:wait}
+.wa-review-word-diff{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75;margin:10px 0;max-height:32rem;overflow:auto}
+.wa-review-word-diff del{background:rgba(190,45,45,.12);text-decoration:line-through;text-decoration-thickness:1.5px}
+.wa-review-word-diff ins{background:rgba(28,133,83,.13);text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:3px}
+.wa-proposal-card[data-status="applying"] .wa-proposal-actions{opacity:.65}

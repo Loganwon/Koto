@@ -136,14 +136,14 @@ AI 生成
 
 ### 解析文件
 ```python
-from web.file_parser import FileParser
+from app.core.file.file_parser import parse_file
 
 # 单个文件
-result = FileParser.parse_file('document.pdf')
+result = parse_file('document.pdf')
 
-# 多个文件
-results = FileParser.batch_parse(['file1.pdf', 'file2.docx'])
-merged = FileParser.merge_contents(results)
+# 多个文件由调用方显式迭代，解析器不再维护第二套批处理入口
+results = [parse_file(path) for path in ['file1.pdf', 'file2.docx']]
+merged = '\n\n'.join(item.get('content', '') for item in results if item.get('success'))
 ```
 
 ### 管理会话

@@ -7,7 +7,6 @@ export function createAliases(root = WEB_ROOT) {
   return {
     '@workspace': resolve(root, 'src/workspace'),
     '@chat': resolve(root, 'src/chat'),
-    '@skills': resolve(root, 'src/skills'),
     '@review': resolve(root, 'src/review'),
     '@shared': resolve(root, 'src/shared'),
   };

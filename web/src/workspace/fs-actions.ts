@@ -5,9 +5,9 @@
 
 import { _escHtml, showToast, _FOLDER_SVG, _FOLDER_OPEN_SVG, _DEFAULT_FILE_SVG } from './infrastructure';
 import { state } from './state';
-import { getWorkspaceApi } from '../shared/workspace-api';
+import { getFeatureRegistry } from '../shared/feature-registry';
 
-const workspaceApi = getWorkspaceApi();
+const workspaceApi = getFeatureRegistry();
 
 // ── Interfaces ──
 

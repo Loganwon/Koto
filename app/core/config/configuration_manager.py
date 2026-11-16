@@ -191,24 +191,20 @@ _config_lock = threading.Lock()
 
 
 def get_config_manager() -> ConfigurationManager:
-    """Get or create the singleton ConfigurationManager instance — 委托给 AppContext。"""
+    """Get or create the process-wide ConfigurationManager instance."""
     global _config_manager
 
     if _config_manager is None:
-        # 优先使用 AppContext 集中管理
-        try:
-            from app.core.app_context import ctx
-
-            _config_manager = ctx.get("config_manager")
-            return _config_manager
-        except Exception:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Silenced exception caught", exc_info=True
-            )
         with _config_lock:
             if _config_manager is None:
                 _config_manager = ConfigurationManager()
 
     return _config_manager
+
+
+def reset_config_manager_for_tests() -> None:
+    """Clear the cached manager without changing configuration files."""
+
+    global _config_manager
+    with _config_lock:
+        _config_manager = None

@@ -12,7 +12,7 @@ VIEWPORTS = {
     "tablet_landscape": {"width": 1024, "height": 768},
 }
 
-PAGES = ["/", "/skill-marketplace", "/mobile"]
+PAGES = ["/", "/addons", "/mini"]
 
 PAGE_TIMEOUT = 15_000  # ms
 

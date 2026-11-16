@@ -5,51 +5,7 @@ import os
 import sys
 import threading
 import time
-from typing import Any, Callable
-
-
-def _start_compat_background_services() -> None:
-    """Start services still owned by the executable compatibility path.
-
-    The normal runtime bootstrap owns jobs, triggers, and integrations.  These
-    services have not migrated yet, so keep their startup here but use their
-    canonical package paths and isolate each optional service.  A clipboard
-    issue must not prevent the task queue or the auto-catalog scheduler from
-    starting.
-    """
-    import logging
-
-    logger = logging.getLogger("koto.app_entrypoint")
-
-    try:
-        from app.core.services.clipboard_manager import get_clipboard_manager
-
-        get_clipboard_manager().start_monitoring()
-    except Exception as exc:
-        logger.warning("[Clipboard] compatibility startup failed: %s", exc)
-
-    try:
-        from web.task_scheduler import get_task_scheduler
-
-        get_task_scheduler().start()
-    except Exception as exc:
-        logger.warning("[TaskScheduler] compatibility startup failed: %s", exc)
-
-    try:
-        from web.task_queue import task_queue
-
-        task_queue.start()
-    except Exception as exc:
-        logger.warning("[TaskQueue] compatibility startup failed: %s", exc)
-
-    try:
-        from web.auto_catalog_scheduler import get_auto_catalog_scheduler
-
-        auto_catalog = get_auto_catalog_scheduler()
-        if auto_catalog.is_auto_catalog_enabled():
-            auto_catalog._register_scheduled_task()
-    except Exception as exc:
-        logger.warning("[AutoCatalog] compatibility startup failed: %s", exc)
+from typing import Any
 
 
 def run_web_server(
@@ -57,8 +13,6 @@ def run_web_server(
     app: Any,
     socketio: Any,
     local_dispatcher: Any,
-    parallel_system_enabled: bool,
-    stop_dispatcher: Callable[[], None],
     chat_dir: str,
     workspace_dir: str,
 ) -> None:
@@ -68,6 +22,17 @@ def run_web_server(
 
     debug_mode = os.environ.get("KOTO_DEBUG", "false").lower() == "true"
     port = int(os.environ.get("KOTO_PORT", "5000"))
+    deploy_mode = os.environ.get("KOTO_DEPLOY_MODE", "local").strip().lower()
+    default_host = (
+        "0.0.0.0"
+        if deploy_mode in {"cloud", "production", "prod"}
+        else "127.0.0.1"
+    )
+    bind_host = os.environ.get("KOTO_BIND_HOST", default_host).strip() or default_host
+
+    from src.runtime_bootstrap import validate_startup_config_or_raise
+
+    validate_startup_config_or_raise()
 
     print("\nKoto Web Server Starting...")
     print(f"Chat Directory: {os.path.abspath(chat_dir)}")
@@ -84,24 +49,13 @@ def run_web_server(
     print("Koto AI services are starting")
     print(f"\nOpen http://localhost:{port} in your browser\n")
 
-    def start_compat_background_services() -> None:
-        time.sleep(1)
-        _start_compat_background_services()
-
-    threading.Thread(target=start_compat_background_services, daemon=True).start()
-    try:
-        if socketio is not None:
-            socketio.run(
-                app,
-                debug=debug_mode,
-                host="0.0.0.0",
-                port=port,
-                allow_unsafe_werkzeug=True,
-            )
-        else:
-            app.run(debug=debug_mode, host="0.0.0.0", port=port, threaded=True)
-    finally:
-        if parallel_system_enabled:
-            print("[PARALLEL] Shutting down parallel execution system...")
-            stop_dispatcher()
-            print("[PARALLEL] Parallel execution system shut down")
+    if socketio is not None:
+        socketio.run(
+            app,
+            debug=debug_mode,
+            host=bind_host,
+            port=port,
+            allow_unsafe_werkzeug=True,
+        )
+    else:
+        app.run(debug=debug_mode, host=bind_host, port=port, threaded=True)

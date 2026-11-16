@@ -12,13 +12,17 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "visual:smoke": "python ../scripts/ui_visual_regression.py --mode smoke",
+    "visual:full": "python ../scripts/ui_visual_regression.py --mode full",
+    "visual:update": "python ../scripts/ui_visual_regression.py --mode full --update-baselines",
     "lint:staged": "eslint --fix",
     "precommit": "npm run lint && npm test && npm run typecheck",
-    "coverage:py": "python -m pytest tests/test_settings.py --cov=web --cov=app --cov-report=term --cov-report=html:../coverage_html -q",
+    "coverage:py": "python -m pytest ../tests/test_settings.py --cov=web --cov=app --cov-report=term --cov-report=html:../coverage_html -q",
     "coverage:js": "vitest run --coverage"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.61.1",
     "@typescript-eslint/parser": "^8.61.1",
     "esbuild": "^0.28.0",
     "eslint": "^10.5.0",
@@ -29,7 +33,9 @@
     "vitest": "^4.1.10"
   },
   "optionalDependencies": {
-    "@types/d3": "^7.4.0",
     "@types/marked": "^6.0.0"
+  },
+  "dependencies": {
+    "lit": "^3.3.3"
   }
 }

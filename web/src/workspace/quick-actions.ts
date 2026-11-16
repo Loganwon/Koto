@@ -1,5 +1,3 @@
-import { publishWorkspaceApi } from '../shared/workspace-api';
-
 export interface QuickActionDefinition {
   action: string;
   id?: string;
@@ -215,6 +213,27 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
     return text;
   }
 
+  function proposalToolCall(payload: QuickActionContext, originalText: string, proposedText: string): Record<string, any> | undefined {
+    const context = payload.selectionContext && typeof payload.selectionContext === 'object'
+      ? payload.selectionContext
+      : null;
+    if (!context || String(context.sourceType || '').toLowerCase() !== 'docx') return undefined;
+    const anchorText = String(context.anchor_text || originalText || '').trim();
+    if (!anchorText) return undefined;
+    return {
+      type: 'replace_text',
+      original: anchorText,
+      value: proposedText,
+      anchor_text: anchorText,
+      anchor_start_offset: context.anchor_start_offset,
+      anchor_end_offset: context.anchor_end_offset,
+      anchor_occurrence: context.anchor_occurrence,
+      anchor_context_before: context.anchor_context_before || '',
+      anchor_context_after: context.anchor_context_after || '',
+      optimization_chain: 'docx_selection_v1',
+    };
+  }
+
   function attachActionToDispatcher(action: QuickActionDefinition): QuickActionDefinition {
     if (!attachedDispatcher || !action) return action;
     if (typeof attachedDispatcher.registerQuickActionHandler === 'function') {
@@ -292,8 +311,15 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
       const assistantText = normalizeProposalText(result.assistantText || '');
       if (assistantText) result.assistantText = assistantText;
       if (!hasSelection || !assistantText || typeof options.handleProposals !== 'function') return result;
+      const toolCall = proposalToolCall(payload, selectionText, assistantText);
       options.handleProposals({
-        proposals: [{ id: 'qa_' + Date.now(), original_text: selectionText, proposed_text: assistantText, rationale: action!.label || action!.action }],
+        proposals: [{
+          id: 'qa_' + Date.now(),
+          original_text: selectionText,
+          proposed_text: assistantText,
+          rationale: action!.label || action!.action,
+          ...(toolCall ? { tool_call: toolCall } : {}),
+        }],
         summary: action!.label || action!.action,
       });
       return result;
@@ -345,8 +371,3 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
     },
   };
 }
-
-publishWorkspaceApi({
-  createQuickActionDispatcher,
-  createWorkspaceQuickActionRuntime: createQuickActionDispatcher,
-});

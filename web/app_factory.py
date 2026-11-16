@@ -7,6 +7,7 @@ from pathlib import Path
 
 from flask import Flask, g, jsonify, request, url_for
 from flask_cors import CORS
+from app.core.config.runtime_storage import load_or_create_secret, runtime_secret_path
 try:
     from flask_wtf.csrf import CSRFProtect
 except ImportError:
@@ -45,21 +46,17 @@ def _load_secret_key() -> str:
     if key:
         return key
 
-    key_file = Path(__file__).parent.parent / "config" / "jwt_secret.txt"
-    if key_file.exists():
-        stored = key_file.read_text(encoding="utf-8").strip()
-        if stored:
-            return stored
-
-    generated = _secrets.token_urlsafe(32)
     try:
-        key_file.write_text(generated, encoding="utf-8")
+        return load_or_create_secret(
+            runtime_secret_path("jwt_secret.txt", env_var="KOTO_JWT_SECRET_FILE"),
+            lambda: _secrets.token_urlsafe(32),
+        )
     except Exception as exc:
         logging.getLogger("koto.app").debug(
             "failed to persist generated secret key: %s",
             exc,
         )
-    return generated
+        return _secrets.token_urlsafe(32)
 
 
 def _resolve_cors_origins():

@@ -15,11 +15,13 @@ import tempfile
 import textwrap
 import zlib
 
+import pytest
+
 # 项目根目录
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from web.file_processor import FileProcessor, process_uploaded_file
+from web.files.file_processor import FileProcessor, process_uploaded_file
 
 # ── 颜色输出 ──────────────────────────────────────────────────────────────────
 GREEN = "\033[92m"
@@ -29,6 +31,16 @@ CYAN = "\033[96m"
 RESET = "\033[0m"
 
 RESULTS: list[dict] = []
+
+
+@pytest.fixture
+def d(tmp_path):
+    """Give each file-type case an isolated directory and fail on logged errors."""
+
+    RESULTS.clear()
+    yield str(tmp_path)
+    failures = [item for item in RESULTS if item["status"] == "FAIL"]
+    assert not failures, failures
 
 
 def ok(label, detail=""):

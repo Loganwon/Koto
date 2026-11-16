@@ -9,25 +9,17 @@ WEB_APP = ROOT / "web" / "app.py"
 APP_BLUEPRINTS = ROOT / "web" / "app_blueprints.py"
 KOTO_SPEC = ROOT / "koto.spec"
 EDITOR_AI_BP = ROOT / "web" / "blueprints" / "editor_ai.py"
-FILE_TASK_STREAM = ROOT / "web" / "file_task_stream.py"
+FILE_TASK_STREAM = ROOT / "app" / "core" / "services" / "file_task_stream.py"
 MEMORY_RUNTIME = ROOT / "web" / "memory_runtime.py"
-TASK_ORCHESTRATOR = ROOT / "web" / "task_orchestrator.py"
-TASK_ORCHESTRATOR_RUNTIME = ROOT / "web" / "task_orchestrator_runtime.py"
-TASK_ORCHESTRATOR_FILEGEN = ROOT / "web" / "task_orchestrator_filegen.py"
-TASK_ORCHESTRATOR_STEPS = ROOT / "web" / "task_orchestrator_steps.py"
-TASK_ORCHESTRATOR_PPT = ROOT / "web" / "task_orchestrator_ppt.py"
-TASK_ORCHESTRATOR_SEARCH = ROOT / "web" / "task_orchestrator_search.py"
-TASK_ORCHESTRATOR_QUALITY = ROOT / "web" / "task_orchestrator_quality.py"
-TASK_ORCHESTRATOR_RESULTS = ROOT / "web" / "task_orchestrator_results.py"
 WEB_SERVICE_MIGRATION_CANDIDATES = ROOT / "docs" / "WEB_SERVICE_MIGRATION_CANDIDATES.md"
 WORKFLOW_API_BP = ROOT / "web" / "blueprints" / "workflow_api.py"
 WORKFLOW_CATALOG = ROOT / "app" / "core" / "workflows" / "catalog.py"
 WORKFLOW_EXECUTION = ROOT / "app" / "core" / "workflows" / "execution.py"
 WORKFLOW_EXECUTOR_REGISTRY = ROOT / "app" / "core" / "workflows" / "registry.py"
 WORKFLOW_FILE_STORE = ROOT / "app" / "core" / "workflows" / "file_store.py"
-WORKFLOW_SKILL_MAPPING = ROOT / "app" / "core" / "workflows" / "skill_mapping.py"
-PPT_WORKFLOW_SKILL_MATRIX = ROOT / "docs" / "PPT_WORKFLOW_SKILL_ROUTE_MATRIX.md"
-PPT_PLUGIN = ROOT / "app" / "core" / "agent" / "plugins" / "ppt_plugin.py"
+RETIRED_WORKFLOW_MAPPING = ROOT / "app" / "core" / "workflows" / "skill_mapping.py"
+PPT_WORKFLOW_ROUTE_MATRIX = ROOT / "docs" / "PPT_WORKFLOW_ROUTE_MATRIX.md"
+PPT_PLUGIN = ROOT / "app" / "core" / "agent" / "toolkits" / "builtin" / "ppt_plugin.py"
 PPT_GENERATION_SERVICE = (
     ROOT / "app" / "core" / "services" / "ppt_generation_service.py"
 )
@@ -57,14 +49,11 @@ FILE_EDITOR_BP = ROOT / "web" / "blueprints" / "file_editor.py"
 FILE_ORGANIZE_BP = ROOT / "web" / "blueprints" / "file_organize.py"
 FILE_HUB_ROUTES = ROOT / "app" / "api" / "file_hub_routes.py"
 TASK_ROUTES = ROOT / "app" / "api" / "task_routes.py"
-TRAINING_DATA_BUILDER = ROOT / "app" / "core" / "learning" / "training_data_builder.py"
-TRAINING_ROUTES = ROOT / "app" / "api" / "training_routes.py"
 TEST_WEB_APP_COVERAGE = ROOT / "tests" / "unit" / "test_web_app_coverage.py"
 TEST_WEB_APP_UTILS = ROOT / "tests" / "unit" / "test_web_app.py"
 
 EXPECTED_WEB_APP_ROUTES: set[str] = set()
-WEB_APP_LINE_BUDGET = 1800
-TASK_ORCHESTRATOR_LINE_BUDGET = 199
+WEB_APP_LINE_BUDGET = 1120
 ALLOWED_DIRECT_WEB_APP_IMPORTS: set[str] = set()
 
 
@@ -100,21 +89,57 @@ def test_web_app_keeps_legacy_route_surface_small():
     assert _app_route_paths() == EXPECTED_WEB_APP_ROUTES
 
 
-def test_training_api_routes_live_outside_training_data_builder():
-    """TrainingDataBuilder should remain core logic; Flask routes belong in app.api."""
-    builder_source = _read(TRAINING_DATA_BUILDER)
-    routes_source = _read(TRAINING_ROUTES)
+def test_retired_task_router_training_surface_stays_deleted():
     app_blueprints = _read(APP_BLUEPRINTS)
+    retired = (
+        "app/api/training_routes.py",
+        "app/core/learning/training_data_builder.py",
+        "app/core/learning/training_db.py",
+        "app/core/learning/synthetic_data_generator.py",
+        "app/core/learning/memory_to_training.py",
+        "app/core/agent/file_task_classification/__init__.py",
+        "app/core/routing/ai_router.py",
+    )
 
-    assert "@app.route" not in builder_source
-    assert "register_training_routes" not in builder_source
-    assert "training_bp = Blueprint" in routes_source
-    assert "from app.api.training_routes import training_bp" in app_blueprints
+    assert all(not (ROOT / path).exists() for path in retired)
+    assert "training_routes" not in app_blueprints
+    assert "KOTO_DEV_TRAINING" not in app_blueprints
 
 
 def test_web_app_line_budget_does_not_regress():
     """The app module is still large; keep new work out while migration continues."""
     assert len(_read(WEB_APP).splitlines()) <= WEB_APP_LINE_BUDGET
+
+
+def test_web_app_does_not_restore_dead_prompt_and_shortcut_tables():
+    source = _read(WEB_APP)
+
+    assert "def _get_system_instruction(" not in source
+    assert "def _get_filegen_brief_instruction(" not in source
+    assert "TASK_PROMPTS =" not in source
+    assert "WINDOWS_SHORTCUTS =" not in source
+
+
+def test_web_app_notification_socket_uses_the_core_service_owner():
+    source = _read(WEB_APP)
+
+    assert (
+        "from app.core.services.notification_manager import get_notification_manager"
+        in source
+    )
+
+
+def test_web_app_model_threads_use_the_managed_runtime_lifecycle():
+    app_source = _read(WEB_APP)
+    runtime_source = _read(ROOT / "web" / "app_runtime.py")
+
+    assert "start_model_runtime(" in app_source
+    assert 'name="ModelManagerInit"' not in app_source
+    assert 'name="ModelManagerRefresh"' not in app_source
+    assert "def start_model_runtime(" in runtime_source
+    assert "_background_runtime_disabled()" in runtime_source
+    assert "start_proxy_warmup(" in app_source
+    assert "threading.Thread(" not in app_source
 
 
 def test_proxy_candidate_discovery_is_extracted_from_app_wiring():
@@ -141,7 +166,7 @@ def test_web_app_uses_core_koto_brain_compatibility_alias():
 
 
 def test_koto_brain_uses_explicit_runtime_services_not_web_runtime_context():
-    brain_source = _read(ROOT / "app" / "core" / "brain.py")
+    brain_source = _read(ROOT / "app" / "core" / "brain_pkg" / "__init__.py")
     app_source = _read(WEB_APP)
 
     assert "class BrainRuntimeServices" in brain_source
@@ -150,11 +175,11 @@ def test_koto_brain_uses_explicit_runtime_services_not_web_runtime_context():
     assert "BrainRuntimeServices(" in app_source
 
 
-def test_background_file_tasks_call_the_file_task_stream_owner_directly():
-    """The task API must not route file work through the web.app compatibility bridge."""
+def test_task_api_does_not_restore_the_parallel_background_file_queue():
     source = _read(TASK_ROUTES)
 
-    assert "from web.file_task_stream import stream_file_task_request" in source
+    assert '@task_bp.post("/submit")' not in source
+    assert "app.core.services.task_queue" not in source
     assert "from web.runtime_context import stream_file_task_request" not in source
 
 
@@ -167,14 +192,241 @@ def test_core_llm_provider_helpers_do_not_reflect_through_web_runtime_context():
     assert "web.runtime_context" not in source
 
 
-def test_memory_tools_plugin_uses_the_memory_runtime_owner_directly():
+def test_memory_tools_plugin_uses_the_core_service_owner_directly():
     source = _read(
-        ROOT / "app" / "core" / "agent" / "plugins" / "memory_tools_plugin.py"
+        ROOT
+        / "app"
+        / "core"
+        / "agent"
+        / "toolkits"
+        / "builtin"
+        / "memory_tools_plugin.py"
     )
 
-    assert "from web.memory_runtime import get_memory_manager" in source
-    assert "web.runtime_context" not in source
+    assert "from app.core.services.memory_manager import get_memory_manager" in source
+    assert "web.memory_runtime" not in source
     assert "EnhancedMemoryManager()" not in source
+
+
+def test_retired_app_context_stays_deleted():
+    assert not (ROOT / "app" / "core" / "app_context.py").exists()
+
+    for source_root in (ROOT / "app", ROOT / "web", ROOT / "launcher"):
+        for path in source_root.rglob("*.py"):
+            assert "app.core.app_context" not in _read(path), path
+
+
+def test_production_agent_construction_has_one_owner():
+    owner = ROOT / "app" / "core" / "agent" / "kernel_agent_service.py"
+    assert "create_agent" in _read(owner)
+    assert "create_local_agent" in _read(owner)
+
+    consumers = (
+        ROOT / "web" / "services" / "chat_stream" / "agent_handler.py",
+        ROOT / "app" / "core" / "goal" / "goal_job_handler.py",
+        ROOT / "app" / "core" / "services" / "morning_brief.py",
+        ROOT / "app" / "core" / "jobs" / "job_runner.py",
+    )
+    for path in consumers:
+        source = _read(path)
+        assert "get_kernel_agent" in source, path
+        assert "app.core.agent.factory" not in source, path
+        assert "KernelAgent(" not in source, path
+
+    goal_manager_source = _read(ROOT / "app" / "core" / "goal" / "goal_manager.py")
+    assert "_execute_goal_direct" not in goal_manager_source
+    assert "GoalExec-" not in goal_manager_source
+    assert "get_kernel_agent" not in goal_manager_source
+
+    supervision = _read(ROOT / "app" / "core" / "agent" / "koto_supervision.py")
+    assert "app.core.agent.factory" not in supervision
+    assert "build_tool_registry" in supervision
+
+
+def test_rag_lifecycles_are_owned_by_core_service_factories():
+    rag_source = _read(ROOT / "app" / "core" / "services" / "rag_service.py")
+    indexer_source = _read(ROOT / "app" / "core" / "services" / "file_rag_indexer.py")
+
+    assert "_rag_instances" in rag_source
+    assert "def get_rag_service(" in rag_source
+    assert "def get_file_rag_indexer(" in indexer_source
+    assert "get_rag_service(index_dir=self._index_dir)" in indexer_source
+
+    consumers = (
+        ROOT / "web" / "blueprints" / "rag_api.py",
+        ROOT / "app" / "core" / "services" / "kb_config.py",
+        ROOT / "app" / "core" / "services" / "memory_manager.py",
+        ROOT / "app" / "core" / "file" / "file_registry.py",
+    )
+    for path in consumers:
+        source = _read(path)
+        assert "RAGService(" not in source, path
+        assert "FileRAGIndexer(" not in source, path
+
+
+def test_system_info_service_is_core_owned_and_prompt_uses_tools_on_demand():
+    performance_plugin = _read(
+        ROOT
+        / "app"
+        / "core"
+        / "agent"
+        / "toolkits"
+        / "builtin"
+        / "performance_analysis_plugin.py"
+    )
+    system_info_plugin = _read(
+        ROOT
+        / "app"
+        / "core"
+        / "agent"
+        / "toolkits"
+        / "builtin"
+        / "system_info_plugin.py"
+    )
+    core_service = _read(ROOT / "app" / "core" / "services" / "system_info.py")
+    system_instruction = _read(
+        ROOT / "app" / "core" / "services" / "chat_system_instruction.py"
+    )
+
+    expected_import = (
+        "from app.core.services.system_info import get_system_info_collector"
+    )
+    assert expected_import in performance_plugin
+    assert expected_import in system_info_plugin
+    assert "from web.system_info import" not in performance_plugin
+    assert "from web.system_info import" not in system_info_plugin
+    assert "class SystemInfoCollector:" in core_service
+    assert "get_formatted_system_info" not in system_instruction
+    assert "只有任务需要时才调用工具" in system_instruction
+    assert not (ROOT / "app/core/services/context_injector.py").exists()
+    assert not (ROOT / "web" / "system_info.py").exists()
+
+
+def test_core_to_web_import_debt_does_not_expand():
+    """Forbid transport-layer imports from Core production modules."""
+    allowed = set()
+    offenders = set()
+
+    for path in (ROOT / "app" / "core").rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        imports_web = any(
+            (
+                isinstance(node, ast.Import)
+                and any(
+                    alias.name == "web" or alias.name.startswith("web.")
+                    for alias in node.names
+                )
+            )
+            or (
+                isinstance(node, ast.ImportFrom)
+                and node.module is not None
+                and (node.module == "web" or node.module.startswith("web."))
+            )
+            for node in ast.walk(tree)
+        )
+        if imports_web:
+            offenders.add(path.relative_to(ROOT).as_posix())
+
+    assert offenders == allowed
+
+
+def test_graph_rag_receives_knowledge_graph_at_the_composition_boundary():
+    graph_rag_source = _read(
+        ROOT / "app" / "core" / "services" / "graph_rag_service.py"
+    )
+    app_source = _read(WEB_APP)
+
+    assert "def configure_knowledge_graph_factory(" in graph_rag_source
+    assert "from web." not in graph_rag_source
+    assert "configure_knowledge_graph_factory(KnowledgeGraph)" in app_source
+
+
+def test_settings_manager_is_core_owned_without_web_import_alias():
+    model_selection = _read(ROOT / "app" / "core" / "llm" / "model_selection.py")
+    server = _read(ROOT / "src" / "server.py")
+    diagnostics = _read(ROOT / "src" / "startup_diagnostics.py")
+    spec = _read(ROOT / "koto.spec")
+
+    expected_import = "from app.core.config.user_settings import SettingsManager"
+    assert expected_import in model_selection
+    assert expected_import in server
+    assert '"app.core.config.user_settings",' in diagnostics
+    assert "'web.settings'" not in spec
+    assert not (ROOT / "web" / "settings.py").exists()
+
+
+def test_web_configuration_helpers_have_one_shared_owner():
+    app_source = _read(ROOT / "web" / "app.py")
+    settings_route = _read(ROOT / "web" / "blueprints" / "settings.py")
+
+    assert "from web.shared import (" in app_source
+    assert "from web.shared import invalidate_settings_cache" in settings_route
+    assert not (ROOT / "web" / "runtime_services.py").exists()
+    assert not list((ROOT / "web" / "lazy_loaders").glob("*.py"))
+    assert not (ROOT / "web" / "config" / "__init__.py").exists()
+
+
+def test_duplicate_startup_module_stays_deleted():
+    assert not (ROOT / "web" / "app_startup.py").exists()
+
+
+def test_retired_skill_recorder_stays_removed():
+    assert not (ROOT / "app" / "core" / "skills" / "skill_recorder.py").exists()
+
+
+def test_job_runner_proactive_llm_uses_core_provider_boundary():
+    source = _read(ROOT / "app" / "core" / "jobs" / "job_runner.py")
+
+    assert "from app.core.llm.provider_factory import get_llm_provider" in source
+    assert (
+        "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    )
+    assert "web.runtime_context" not in source
+    assert "get_client_proxy" not in source
+    assert ".models.generate_content(" not in source
+
+
+def test_core_does_not_import_web_runtime_context():
+    offenders = set()
+    for path in (ROOT / "app" / "core").rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        imports_runtime_context = any(
+            (
+                isinstance(node, ast.Import)
+                and any(alias.name == "web.runtime_context" for alias in node.names)
+            )
+            or (
+                isinstance(node, ast.ImportFrom)
+                and (
+                    node.module == "web.runtime_context"
+                    or (
+                        node.module == "web"
+                        and any(alias.name == "runtime_context" for alias in node.names)
+                    )
+                )
+            )
+            for node in ast.walk(tree)
+        )
+        if imports_runtime_context:
+            offenders.add(path.relative_to(ROOT).as_posix())
+
+    assert offenders == set()
+
+
+def test_retired_ppt_orchestration_modules_stay_deleted():
+    retired = (
+        "ppt_pipeline.py",
+        "ppt_synthesizer.py",
+        "ppt_quality.py",
+        "ppt_generator_enhanced.py",
+    )
+
+    for filename in retired:
+        assert not (ROOT / "app" / "core" / "services" / filename).exists()
 
 
 def test_web_app_keeps_executable_lifecycle_outside_application_factory():
@@ -312,10 +564,9 @@ def test_regular_chat_generation_policy_lives_in_core_llm():
 
     assert "from app.core.llm.chat_generation_policy import" in handler_source
     assert "select_regular_model(task_type, MODEL_MAP)" in handler_source
-    assert "should_try_local_chat_fast_path(" in handler_source
+    assert "is_simple_query(" not in handler_source
     assert "first_token_timeout_seconds(task_type)" in handler_source
     assert "def select_regular_model(" in policy_source
-    assert "def should_try_local_chat_fast_path(" in policy_source
     assert "def first_token_timeout_seconds(" in policy_source
 
 
@@ -338,12 +589,13 @@ def test_web_app_does_not_reintroduce_editor_ai_handlers():
 def test_blueprint_registry_is_the_primary_route_extension_point():
     source = _read(APP_BLUEPRINTS)
 
-    assert "_WEB_BLUEPRINT_CONFIGS" in source
+    assert "_BLUEPRINT_SPECS" in source
+    assert "class BlueprintSpec" in source
     assert "web.blueprints.workspace_assistant" in source
     assert "app.api.mcp_routes" in source
     assert "web.blueprints.editor_ai" in source
     assert "web.blueprints.voice" in source
-    assert "register_memory_routes(app, get_memory_manager)" in source
+    assert '"register_memory_routes"' in source
 
 
 def test_compat_route_registrars_use_blueprints_internally():
@@ -357,19 +609,19 @@ def test_compat_route_registrars_use_blueprints_internally():
         assert "Blueprint(" in source
 
 
-def test_editor_ai_blueprint_uses_runtime_context_not_web_app_imports():
+def test_editor_ai_blueprint_uses_stream_boundary_not_runtime_service_locator():
     source = _read(EDITOR_AI_BP)
 
-    assert "from web.runtime_context import" in source
+    assert "from web.runtime_context import" not in source
     assert "import web.app" not in source
     assert "from web.app import" not in source
     assert "get_app_attr(" not in source
     assert "_stream_file_task_request" not in source
     assert (
-        "from web.file_task_stream import safe_editor_sse, stream_file_task_request"
+        "from app.core.services.file_task_stream import stream_file_task_request"
         in source
     )
-    assert "from web.editor_ai_text import clean_selection_text" in source
+    assert "from app.core.services.editor_ai_text import clean_selection_text" in source
     runtime_source = _read(ROOT / "web" / "runtime_context.py")
     assert "def stream_file_task_request(" not in runtime_source
     assert "def safe_editor_sse(" not in runtime_source
@@ -381,11 +633,19 @@ def test_editor_ai_blueprint_uses_runtime_context_not_web_app_imports():
 
 
 def test_file_task_stream_lives_outside_web_app():
-    """File task SSE orchestration belongs in web.file_task_stream, not web/app.py."""
+    """File task SSE orchestration belongs in the Core service, not web/app.py."""
     app_source = _read(WEB_APP)
-    stream_source = _read(FILE_TASK_STREAM)
+    stream_source = _read(ROOT / "app" / "core" / "services" / "file_task_stream.py")
 
     assert "def stream_file_task_request(" in stream_source
+    assert not (ROOT / "web/file_task_stream.py").exists()
+    assert (
+        "from app.core.config.workspace_runtime import get_workspace_root"
+        in stream_source
+    )
+    assert "service_registry" not in stream_source
+    assert "gemini_client" not in stream_source
+    assert "from web." not in stream_source
     assert "def stream_file_task_chat_request(" not in stream_source
     assert "stream_file_task_chat_request" not in app_source
     assert 'payload.get("completed_task", True)' not in stream_source
@@ -404,13 +664,9 @@ def test_ppt_api_handlers_stay_outside_web_app():
 
     assert "def download_ppt():" not in app_source
     assert "def get_ppt_session(" not in app_source
-    assert '@ppt_api_bp.route("/session/<session_id>", methods=["GET"])' in ppt_source
     assert '@ppt_api_bp.route("/download/<session_id>", methods=["GET"])' in ppt_source
-    assert (
-        "from app.core.services.ppt_generation_service import PPTGenerationService"
-        in ppt_source
-    )
-    assert "PPTGenerationService().render_editor_pptx(" in ppt_source
+    assert '@ppt_api_bp.route("/session/<session_id>"' not in ppt_source
+    assert "PPTGenerationService" not in ppt_source
     assert "from app.core.services.ppt_generator import" not in ppt_source
     assert '"/api/ppt/download", methods=["POST"]' not in app_source
 
@@ -435,20 +691,39 @@ def test_orphan_file_operator_stays_removed_from_web_app():
 
 def test_web_searcher_implementation_stays_outside_web_app():
     app_source = _read(WEB_APP)
-    web_searcher_source = _read(ROOT / "web" / "web_searcher.py")
+    web_searcher_source = _read(ROOT / "web" / "knowledge" / "web_searcher.py")
 
     assert "class WebSearcher" not in app_source
-    assert "from web.web_searcher import WebSearcher" in app_source
+    assert "from web.knowledge.web_searcher import WebSearcher" in app_source
     assert "class WebSearcher" in web_searcher_source
 
 
-def test_context_analyzer_implementation_stays_outside_web_app():
+def test_programmatic_free_text_routing_family_stays_deleted():
     app_source = _read(WEB_APP)
-    context_analyzer_source = _read(ROOT / "web" / "context_analyzer.py")
+    retired = (
+        "app/core/services/context_analyzer.py",
+        "app/core/routing/smart_dispatcher.py",
+        "app/core/routing/routing_rule_chain.py",
+        "app/core/routing/rule_router.py",
+        "app/core/routing/routing_config.py",
+        "app/core/routing/task_classifier.py",
+        "app/core/routing/intent_analyzer.py",
+        "app/core/routing/local_model_router.py",
+        "app/core/routing/ai_router.py",
+        "app/api/training_routes.py",
+        "app/core/learning/training_data_builder.py",
+        "app/core/learning/training_db.py",
+        "app/core/learning/synthetic_data_generator.py",
+        "app/core/learning/memory_to_training.py",
+        "scripts/extract_classifier_data.py",
+        "scripts/train_task_classifier.py",
+        "models/task_classifier/clf.pkl",
+        "models/task_classifier/label_encoder.pkl",
+    )
 
-    assert "class ContextAnalyzer" not in app_source
-    assert "from web.context_analyzer import ContextAnalyzer" in app_source
-    assert "class ContextAnalyzer" in context_analyzer_source
+    assert all(not (ROOT / path).exists() for path in retired)
+    assert "SmartDispatcher" not in app_source
+    assert "ContextAnalyzer" not in app_source
 
 
 def test_utils_implementation_stays_outside_web_app():
@@ -465,7 +740,7 @@ def test_session_manager_implementation_stays_outside_web_app():
     session_manager_source = _read(ROOT / "web" / "session_manager.py")
 
     assert "class SessionManager" not in app_source
-    assert "from web.session_manager import SessionManager" in app_source
+    assert "from web.session_manager import SessionManager" not in app_source
     assert "class SessionManager" in session_manager_source
 
 
@@ -482,9 +757,8 @@ def test_memory_api_registration_stays_outside_web_app():
     registry_source = _read(APP_BLUEPRINTS)
 
     assert "memory_api_routes" not in app_source
-    assert "register_memory_routes(app, get_memory_manager)" in registry_source
-    assert 'logger.info("[Memory] ✅ 记忆 API 已注册")' in registry_source
-    assert 'logger.info("[Parallel] ✅ 并行任务 API 已注册")' in registry_source
+    assert '"register_memory_routes"' in registry_source
+    assert '"register_parallel_api"' not in registry_source
     assert "[MemoryAPI]" not in registry_source
 
 
@@ -527,270 +801,113 @@ def test_editor_ai_removes_unconsumed_legacy_routes():
     assert "def _agent_step_events(" not in source
 
 
-def test_task_orchestrator_implementation_stays_outside_web_app():
-    app_source = _read(WEB_APP)
-    orchestrator_source = _read(TASK_ORCHESTRATOR)
-    runtime_source = _read(TASK_ORCHESTRATOR_RUNTIME)
-    results_source = _read(TASK_ORCHESTRATOR_RESULTS)
-
-    assert "class TaskOrchestrator" not in app_source
-    assert "from web.task_orchestrator import TaskOrchestrator" not in app_source
-    assert "class TaskOrchestrator" in orchestrator_source
-    assert "get_app_attr(" not in orchestrator_source
-    assert "call_app_factory(" not in orchestrator_source
-    assert "from web.task_orchestrator_runtime import" not in orchestrator_source
-    assert "class ClientProxy" not in orchestrator_source
-    assert "class SettingsManagerProxy" not in orchestrator_source
-    assert "class ClientProxy" in runtime_source
-    assert "def merge_task_results(" in results_source
-
-
-def test_task_orchestrator_result_merge_is_pure_helper():
-    orchestrator_source = _read(TASK_ORCHESTRATOR)
-    results_source = _read(TASK_ORCHESTRATOR_RESULTS)
-
-    assert (
-        "from web.task_orchestrator_results import merge_task_results"
-        in orchestrator_source
+def test_retired_task_orchestrator_family_stays_deleted():
+    retired_paths = (
+        "web/task_orchestrator.py",
+        "web/task_orchestrator_filegen.py",
+        "web/task_orchestrator_ppt.py",
+        "web/task_orchestrator_quality.py",
+        "web/task_orchestrator_results.py",
+        "web/task_orchestrator_runtime.py",
+        "web/task_orchestrator_search.py",
+        "web/task_orchestrator_steps.py",
+        "web/tasks/task_orchestrator.py",
+        "web/tasks/task_orchestrator_filegen.py",
+        "web/tasks/task_orchestrator_ppt.py",
+        "web/tasks/task_orchestrator_quality.py",
+        "web/tasks/task_orchestrator_results.py",
+        "web/tasks/task_orchestrator_runtime.py",
+        "web/tasks/task_orchestrator_search.py",
+        "web/tasks/task_orchestrator_steps.py",
     )
-    assert "return merge_task_results(subtasks, context)" in orchestrator_source
-    assert 'merged = {"summary": "任务执行完成"' not in orchestrator_source
-    assert "def merge_task_results(subtasks: list" in results_source
-    assert "get_app_attr(" not in results_source
-    assert "call_app_factory(" not in results_source
-    assert "from web.app" not in results_source
+
+    assert all(not (ROOT / path).exists() for path in retired_paths)
 
 
-def test_task_orchestrator_line_budget_does_not_regress():
-    assert len(_read(TASK_ORCHESTRATOR).splitlines()) <= TASK_ORCHESTRATOR_LINE_BUDGET
+def test_retired_background_agent_chain_stays_deleted():
+    assert not (ROOT / "app/api/bg_agent_routes.py").exists()
+    assert not (ROOT / "app/core/agent/background_agent.py").exists()
+
+
+def test_retired_file_task_model_tool_routes_stay_deleted():
+    agent_root = ROOT / "app" / "core" / "agent"
+    retired = (
+        "file_task_execution_loop.py",
+        "file_task_doc_annotate_runner.py",
+        "file_task_docx_stepwise_runner.py",
+        "file_task_doc_annotate_fallback.py",
+        "file_task_readonly_loop_guard.py",
+        "file_task_guard_emission.py",
+        "file_task_evidence_runtime.py",
+        "file_task_intent_adjudicator.py",
+    )
+
+    assert all(not (agent_root / name).exists() for name in retired)
 
 
 def test_web_service_migration_candidates_cover_current_boundaries():
-    source = _read(WEB_SERVICE_MIGRATION_CANDIDATES)
-
-    required_terms = [
-        "web/file_task_stream.py",
-        "web/services/chat_stream/orchestrator.py",
-        "web/services/chat_stream/agent_handler.py",
-        "web/services/chat_stream/langgraph_bridge.py",
-        "web/services/chat_stream/generate/regular_handler.py",
-        "web/services/chat_stream/generate/system_handler.py",
-        "web/services/chat_stream/generate/web_search_handler.py",
-        "FileTaskRuntime",
-        "SmartDispatcher",
-        "LangGraphAgent",
-        "UnifiedAgent",
-        "web.runtime_context",
-        "direct `web.app`",
-    ]
-
-    for term in required_terms:
-        assert term in source
-
-
-def test_task_orchestrator_filegen_lives_outside_orchestrator_class():
-    orchestrator_source = _read(TASK_ORCHESTRATOR)
-    filegen_source = _read(TASK_ORCHESTRATOR_FILEGEN)
-
-    assert (
-        "from web.task_orchestrator_filegen import execute_file_gen"
-        in orchestrator_source
-    )
-    assert "async def execute_file_gen(" in filegen_source
-    assert "from app.core.services.ppt_generation_service import" in filegen_source
-    assert "PPTGenerationService," in filegen_source
-    assert "parse_ppt_outline_markdown(text_out)" in filegen_source
-    assert "choose_ppt_theme(user_input)" in filegen_source
-    assert "PPTGenerationService().generate_from_outline(" in filegen_source
-    assert "from app.core.services.ppt_generator import" not in filegen_source
-    assert "def _clean_filegen_text(" not in orchestrator_source
-    assert "def _extract_markdown_table(" not in orchestrator_source
-    assert "def _parse_ppt_outline(" not in orchestrator_source
-
-
-def test_task_orchestrator_step_executors_live_outside_orchestrator_class():
-    orchestrator_source = _read(TASK_ORCHESTRATOR)
-    steps_source = _read(TASK_ORCHESTRATOR_STEPS)
-
-    for name in ["painter", "research", "coder", "system"]:
-        assert (
-            f"from web.task_orchestrator_steps import execute_{name}"
-            in orchestrator_source
-        )
-        assert f"async def execute_{name}(" in steps_source
-
-    assert "client.models.generate_images(" not in orchestrator_source
-    assert "WebSearcher.deep_research_for_ppt" not in orchestrator_source
-    assert "call_interactions_api_sync" not in orchestrator_source
-    assert "LocalExecutor.execute" not in orchestrator_source
-
-
-def test_task_orchestrator_ppt_multi_step_lives_outside_orchestrator_class():
-    orchestrator_source = _read(TASK_ORCHESTRATOR)
-    ppt_source = _read(TASK_ORCHESTRATOR_PPT)
-
-    assert (
-        "from web.task_orchestrator_ppt import execute_ppt_multi_step"
-        in orchestrator_source
-    )
-    assert "async def execute_ppt_multi_step(" in ppt_source
-    assert (
-        "from app.core.services.ppt_generation_service import PPTGenerationService"
-        in ppt_source
-    )
-    assert "PPTGenerationService(" in ppt_source
-    assert "from app.core.services.ppt_master import" not in ppt_source
-    assert "from app.core.services.ppt_generator import" not in ppt_source
-    assert "PPTContentPlanner" not in orchestrator_source
-    assert "PPTGenerator" not in orchestrator_source
-    assert "FileQualityGate.check_and_fix_ppt_outline" not in orchestrator_source
-    assert "SmartFeedback" not in orchestrator_source
-
-
-def test_task_orchestrator_web_search_lives_outside_orchestrator_class():
-    orchestrator_source = _read(TASK_ORCHESTRATOR)
-    search_source = _read(TASK_ORCHESTRATOR_SEARCH)
-
-    assert (
-        "from web.task_orchestrator_search import execute_web_search"
-        in orchestrator_source
-    )
-    assert "async def execute_web_search(" in search_source
-    assert "WebSearcher.search_with_grounding" not in orchestrator_source
-    assert "await asyncio.sleep" not in orchestrator_source
-    assert "from web.web_searcher import WebSearcher" not in orchestrator_source
-
-
-def test_task_orchestrator_quality_scoring_lives_outside_orchestrator_class():
-    orchestrator_source = _read(TASK_ORCHESTRATOR)
-    quality_source = _read(TASK_ORCHESTRATOR_QUALITY)
-
-    assert (
-        "from web.task_orchestrator_quality import validate_quality"
-        in orchestrator_source
-    )
-    assert "async def validate_quality(" in quality_source
-    assert "client.models.generate_content" not in orchestrator_source
-    assert "GenerateContentConfig" not in orchestrator_source
-    assert "gemini-2.5-flash-lite" not in orchestrator_source
+    assert not WEB_SERVICE_MIGRATION_CANDIDATES.exists()
 
 
 def test_workflow_api_uses_core_executor_registry():
-    workflow_api_source = _read(WORKFLOW_API_BP)
-    execution_source = _read(WORKFLOW_EXECUTION)
-    registry_source = _read(WORKFLOW_EXECUTOR_REGISTRY)
+    assert not WORKFLOW_API_BP.exists()
 
-    assert "from app.core.workflows.execution import" in workflow_api_source
-    assert "prepare_workflow_execution(workflow_id)" in workflow_api_source
-    assert "iter_workflow_events(execution_plan, params)" in workflow_api_source
-    assert (
-        "from app.core.workflows.registry import get_workflow_executor"
-        not in workflow_api_source
+
+def test_retired_parallel_workflow_surface_stays_deleted():
+    retired_paths = (
+        "app/core/workflow/__init__.py",
+        "app/core/workflow/workflow_state.py",
+        "app/core/services/task_queue.py",
+        "web/blueprints/parallel_api.py",
+        "web/parallel_executor.py",
+        "web/static/workflow_dag.html",
     )
-    assert (
-        "from app.core.workflows.registry import get_workflow_executor"
-        in execution_source
+    blueprint_source = _read(APP_BLUEPRINTS)
+
+    assert all(not (ROOT / path).exists() for path in retired_paths)
+    assert "concurrent.futures" not in blueprint_source
+    assert "ThreadPoolExecutor" not in blueprint_source
+    assert "preload" not in blueprint_source
+
+    task_routes = _read(ROOT / "app" / "api" / "task_routes.py")
+    runtime_source = _read(ROOT / "web" / "app_runtime.py")
+    assert '@task_bp.post("/submit")' not in task_routes
+    assert "task_queue" not in runtime_source
+
+
+def test_unreferenced_legacy_vendor_bundles_stay_deleted():
+    retired_assets = (
+        "web/static/vendor/d3/d3.v7.min.js",
+        "web/static/vendor/font-awesome/6.0.0/css/all.min.css",
+        "web/static/vendor/font-awesome/6.0.0/webfonts/fa-brands-400.woff2",
+        "web/static/vendor/font-awesome/6.0.0/webfonts/fa-regular-400.woff2",
+        "web/static/vendor/font-awesome/6.0.0/webfonts/fa-solid-900.woff2",
+        "web/static/vendor/font-awesome/6.0.0/webfonts/fa-v4compatibility.woff2",
+        "web/static/vendor/tailwindcss/tailwind-play-cdn.js",
     )
-    assert "def prepare_workflow_execution(workflow_id: str)" in execution_source
-    assert "def iter_workflow_events(" in execution_source
-    assert (
-        "from app.core.workflows.cross_format_extractor import CrossFormatExtractor"
-        not in workflow_api_source
-    )
-    assert "WorkflowExecutorSpec(" in registry_source
-    assert "def get_workflow_executor(workflow_id: str)" in registry_source
+
+    assert all(not (ROOT / path).exists() for path in retired_assets)
 
 
 def test_workflow_api_uses_core_metadata_catalog():
-    workflow_api_source = _read(WORKFLOW_API_BP)
-    catalog_source = _read(WORKFLOW_CATALOG)
-    execution_source = _read(WORKFLOW_EXECUTION)
-
-    assert "from app.core.workflows.catalog import" in workflow_api_source
-    assert "list_workflow_definitions()" in workflow_api_source
-    assert "get_workflow_definition(workflow_id)" not in workflow_api_source
-    assert "is_chat_workflow(workflow_id)" not in workflow_api_source
-    assert (
-        "from app.core.workflows.catalog import get_workflow_definition, is_chat_workflow"
-        in execution_source
-    )
-    assert "get_workflow_definition(normalized_id)" in execution_source
-    assert "is_chat_workflow(normalized_id)" in execution_source
-    assert "_WORKFLOW_REGISTRY =" not in workflow_api_source
-    assert "WORKFLOW_CATALOG: dict" in catalog_source
-    assert "def list_workflow_definitions()" in catalog_source
-    assert "def get_workflow_definition(workflow_id: str)" in catalog_source
-    assert "def is_chat_workflow(workflow_id: str)" in catalog_source
+    assert not WORKFLOW_API_BP.exists()
 
 
 def test_workflow_api_uses_core_file_store_for_upload_download():
-    workflow_api_source = _read(WORKFLOW_API_BP)
-    file_store_source = _read(WORKFLOW_FILE_STORE)
-
-    assert "from app.core.workflows.file_store import" in workflow_api_source
-    assert "save_workflow_uploads(" in workflow_api_source
-    assert "validate_workflow_download_path(" in workflow_api_source
-    assert "tempfile.gettempdir" not in workflow_api_source
-    assert "WORKFLOW_TEMP_PREFIX" in file_store_source
-    assert "def save_workflow_uploads(" in file_store_source
-    assert "def validate_workflow_download_path(" in file_store_source
+    assert not WORKFLOW_API_BP.exists()
 
 
-def test_workflow_skill_mapping_is_core_owned_and_documented():
-    mapping_source = _read(WORKFLOW_SKILL_MAPPING)
-    matrix_source = _read(PPT_WORKFLOW_SKILL_MATRIX)
-
-    required_terms = [
-        "WorkflowSkillMapping",
-        "WORKFLOW_SKILL_MAPPINGS",
-        "get_workflow_candidates_for_skill",
-        "get_skill_ids_for_workflow",
-        "workflow_has_skill_mapping",
-        "cross_format_extractor",
-        "doc_smart_compare",
-        "questionnaire_filler",
-        "data_format_cleaner",
-        "multi_doc_synthesis",
-        "spreadsheet_analyst",
-        "excel_data_cleaner",
-        "contract_reviewer",
-        "legal_doc_review",
-    ]
-    for term in required_terms:
-        assert term in mapping_source
-        assert term in matrix_source
+def test_retired_workflow_skill_mapping_stays_out_of_runtime():
+    assert not RETIRED_WORKFLOW_MAPPING.exists()
+    assert PPT_WORKFLOW_ROUTE_MATRIX.exists()
 
 
 def test_ppt_plugin_uses_core_generation_service_facade():
-    plugin_source = _read(PPT_PLUGIN)
-    service_source = _read(PPT_GENERATION_SERVICE)
-    contract_source = _read(PPT_GENERATION_CONTRACT)
-
-    assert "from app.core.services.ppt_generation_service import" in plugin_source
-    assert "PPTGenerationService().plan_outline(" in plugin_source
-    assert "PPTGenerationService().generate_from_outline(" in plugin_source
-    assert "from app.core.services.ppt_master import" not in plugin_source
-    assert "from app.core.services.ppt_generator import" not in plugin_source
-    assert "from app.core.services.ppt_generation_contract import" in service_source
-    # Service facade now imports PPTContentPlanner/PPTGenerator directly (legacy adapter removed)
-    assert (
-        "from app.core.services.ppt_master import PPTContentPlanner" in service_source
-    )
-    assert "from app.core.services.ppt_generator import PPTGenerator" in service_source
-    assert "_PPTContentPlanner" in service_source
-    assert "_PPTGenerator" in service_source
-    assert "normalize_generation_result(result, output_path)" in service_source
-    assert "def parse_ppt_outline_markdown(" not in service_source
-    assert "def choose_ppt_theme(" not in service_source
-    assert "def parse_ppt_outline_markdown(" in contract_source
-    assert "def choose_ppt_theme(" in contract_source
-    assert "def normalize_generation_result(" in contract_source
-    assert "from app.core.services.ppt_master import" not in contract_source
-    assert "from app.core.services.ppt_generator import" not in contract_source
+    assert not PPT_PLUGIN.exists()
 
 
 def test_template_library_ppt_generation_uses_service_facade():
-    template_source = _read(TEMPLATE_LIBRARY)
+    template_source = _read(ROOT / "web" / "tasks" / "template_library.py")
 
     assert (
         "from app.core.services.ppt_generation_service import PPTGenerationService"
@@ -820,19 +937,8 @@ def test_ppt_generator_direct_imports_are_limited_to_service_facade():
 
 
 def test_legacy_ppt_pipeline_stays_unwired_from_production_paths():
-    offenders = []
-    for root in [ROOT / "app", ROOT / "web"]:
-        for path in root.rglob("*.py"):
-            if path == ROOT / "web" / "ppt_pipeline.py":
-                continue
-            source = _read(path)
-            if (
-                "app.core.services.ppt_pipeline" in source
-                or "from app.core.services.ppt_pipeline import" in source
-            ):
-                offenders.append(path.relative_to(ROOT).as_posix())
-
-    assert offenders == []
+    assert not (ROOT / "app" / "core" / "services" / "ppt_pipeline.py").exists()
+    assert not (ROOT / "web" / "ppt_pipeline.py").exists()
 
 
 def test_removed_file_hub_open_endpoint_has_no_compatibility_route():
@@ -844,31 +950,23 @@ def test_removed_file_hub_open_endpoint_has_no_compatibility_route():
 
 
 def test_retired_api_aliases_stay_removed():
-    document_source = _read(ROOT / "web" / "blueprints" / "document.py")
-    feedback_source = _read(ROOT / "web" / "document_feedback.py")
-    skill_source = _read(ROOT / "app" / "api" / "skill_routes.py")
-    agent_source = _read(ROOT / "app" / "api" / "agent_routes.py")
-
-    assert "/api/document/analyze-annotations" not in document_source
-    assert "def analyze_annotations_only(" not in feedback_source
-    assert '@skill_bp.route("/<skill_id>/enable"' not in skill_source
-    assert "def process_compat(" not in agent_source
-    assert "def process_stream_compat(" not in agent_source
-    assert "def process():" in agent_source
-    assert "def process_stream():" in agent_source
+    assert not (ROOT / "web" / "blueprints" / "document.py").exists()
+    assert not (ROOT / "web" / "document_feedback.py").exists()
+    assert not (ROOT / "app" / "api" / "skill_routes.py").exists()
+    assert not (ROOT / "app" / "api" / "agent_routes.py").exists()
 
 
-def test_chat_and_session_blueprints_use_explicit_chat_runtime_services():
+def test_chat_and_session_blueprints_use_the_service_registry():
     for path in [CHAT_BP, SESSIONS_BP]:
         source = _read(path)
-        assert "from web.chat_runtime_services import" in source
-        assert "from web.runtime_context import" not in source
+        assert "from web.runtime_context import service_registry" in source
+        assert "chat_runtime_services" not in source
         assert "import web.app" not in source
         assert "from web.app import" not in source
 
     settings_source = _read(SETTINGS_BP)
-    assert "from web.settings_runtime_services import" in settings_source
-    assert "from web.runtime_context import" not in settings_source
+    assert "from web.runtime_context import service_registry" in settings_source
+    assert "settings_runtime_services" not in settings_source
 
 
 def test_session_and_settings_runtime_access_uses_named_helpers():
@@ -877,88 +975,65 @@ def test_session_and_settings_runtime_access_uses_named_helpers():
         assert "get_app_attr(" not in source
 
 
-def test_chat_runtime_services_do_not_reflect_through_web_app():
-    source = _read(ROOT / "web" / "chat_runtime_services.py")
-
-    assert "class ChatRuntimeServices" in source
-    assert "web.runtime_context" not in source
-    assert "web.app" not in source
+def test_retired_chat_runtime_services_stays_deleted():
+    assert not (ROOT / "web" / "chat_runtime_services.py").exists()
 
 
-def test_settings_runtime_services_keep_app_globals_out_of_routes():
+def test_session_storage_owns_an_explicit_directory_not_an_app_callback():
+    source = _read(ROOT / "web" / "session_manager.py")
+
+    assert "def set_chat_dir(" in source
+    assert "def get_chat_dir(" in source
+    assert "_chat_dir_provider" not in source
+    assert "from web.app" not in source
+
+
+def test_workspace_runtime_has_no_mutable_web_path_mirror():
+    shared_source = _read(ROOT / "web" / "shared.py")
+    workspace_source = _read(ROOT / "web" / "blueprints" / "workspace.py")
+    assistant_source = _read(ROOT / "web" / "blueprints" / "workspace_assistant.py")
+
+    assert "WORKSPACE_DIR =" not in shared_source
+    assert "global WORKSPACE_DIR" not in shared_source
+    assert "get_workspace_root" in workspace_source
+    assert "get_workspace_root" in assistant_source
+    assert "from web.shared import WORKSPACE_DIR" not in workspace_source
+    assert "from web.shared import WORKSPACE_DIR" not in assistant_source
+
+
+def test_settings_routes_use_the_single_service_registry():
     route_source = _read(SETTINGS_BP)
-    service_source = _read(ROOT / "web" / "settings_runtime_services.py")
-    bootstrap_source = _read(ROOT / "web" / "settings_runtime_bootstrap.py")
 
-    assert "from web.settings_runtime_services import" in route_source
-    assert "from web.runtime_context import" not in route_source
-    assert "class SettingsRuntimeServices" in service_source
-    assert "web.app" not in service_source
-    assert "web.app" not in bootstrap_source
+    assert "from web.runtime_context import service_registry" in route_source
+    assert "settings_runtime_services" not in route_source
+    assert not (ROOT / "web" / "settings_runtime_services.py").exists()
+    assert not (ROOT / "web" / "settings_runtime_bootstrap.py").exists()
 
 
 def test_service_blueprints_use_named_runtime_services():
-    lazy_service_helpers = [
-        "get_behavior_monitor",
-        "get_suggestion_engine",
-        "get_insight_reporter",
-        "get_notification_manager",
-        "get_proactive_dialogue",
-        "get_context_awareness",
-        "get_trigger_system",
-        "get_auto_execution",
-        "get_knowledge_graph",
-        "get_file_editor",
-        "get_file_indexer",
-        "get_concept_extractor",
-        "get_file_organizer",
-        "get_file_analyzer",
-        "get_batch_ops_manager",
-        "get_organize_root",
-    ]
-    for path in [
-        ANALYTICS_BP,
-        PROACTIVE_BP,
-        EXECUTION_BP,
-        KNOWLEDGE_BP,
-        FILE_EDITOR_BP,
-        FILE_ORGANIZE_BP,
-    ]:
+    for path in [FILE_ORGANIZE_BP]:
         source = _read(path)
-        assert "from web.runtime_services import" in source
+        assert "from web.runtime_context import service_registry" in source
+        assert "service_registry.batch_ops_manager" in source
+        assert "from web.runtime_services import" not in source
         assert "call_app_factory(" not in source
         assert "get_app_attr(" not in source
-        for helper in lazy_service_helpers:
-            assert f"from web.runtime_context import {helper}" not in source
+
+    assert not ANALYTICS_BP.exists()
+    assert not PROACTIVE_BP.exists()
+    assert not EXECUTION_BP.exists()
+    assert not FILE_EDITOR_BP.exists()
+    assert not KNOWLEDGE_BP.exists()
 
 
-def test_runtime_services_keep_lazy_services_out_of_app_bridge():
-    source = _read(ROOT / "web" / "runtime_services.py")
+def test_service_registry_is_the_only_web_service_cache():
     runtime_context = _read(ROOT / "web" / "runtime_context.py")
 
-    assert 'importlib.import_module("web.app")' not in source
-    assert "sys.modules" not in source
-    assert "from web.lazy_loaders." in source
-    for helper in [
-        "get_behavior_monitor",
-        "get_suggestion_engine",
-        "get_insight_reporter",
-        "get_notification_manager",
-        "get_proactive_dialogue",
-        "get_context_awareness",
-        "get_trigger_system",
-        "get_auto_execution",
-        "get_knowledge_graph",
-        "get_file_editor",
-        "get_file_indexer",
-        "get_concept_extractor",
-        "get_file_organizer",
-        "get_file_analyzer",
-        "get_batch_ops_manager",
-        "get_organize_root",
-    ]:
-        assert f"def {helper}(" in source
-        assert f"def {helper}(" not in runtime_context
+    assert "def register_factory(" in runtime_context
+    assert "def resolve(" in runtime_context
+    assert 'service_registry.register_factory("batch_ops_manager"' in runtime_context
+    assert not (ROOT / "web" / "runtime_services.py").exists()
+    assert not list((ROOT / "web" / "lazy_loaders").glob("*.py"))
 
 
 def test_runtime_factory_bridge_has_no_production_callers():
@@ -1008,6 +1083,8 @@ def test_packaging_does_not_reintroduce_removed_shims():
 
 def test_legacy_microphone_voice_stack_stays_removed():
     spec = _read(KOTO_SPEC)
+    assert not (ROOT / "src" / "rth_voice_fallback.py").exists()
+    assert "rth_voice_fallback.py" not in spec
     removed_files = [
         "voice_" + "engine.py",
         "voice_" + "fast.py",
@@ -1094,7 +1171,40 @@ def test_retired_browser_and_system_voice_terms_stay_out_of_production_code():
 
 
 def test_retired_external_planner_config_stays_removed():
-    followups = _read(ROOT / "config" / "file_task_followups.json").lower()
+    assert not (ROOT / "config" / "file_task_followups.json").exists()
 
-    assert "hermes" not in followups
-    assert "prefer_hermes" not in followups
+
+def test_migrated_file_owners_do_not_return_as_web_compatibility_modules():
+    retired_web_owners = [
+        ROOT / "web" / "file_parser.py",
+        ROOT / "web" / "file_watcher.py",
+        ROOT / "web" / "blueprints" / "pptx_editor.py",
+    ]
+    canonical_owners = [
+        ROOT / "app" / "core" / "file" / "file_parser.py",
+        ROOT / "app" / "core" / "file" / "file_watcher.py",
+        ROOT / "app" / "core" / "file" / "pptx_editor.py",
+    ]
+
+    assert all(not path.exists() for path in retired_web_owners)
+    assert all(path.is_file() for path in canonical_owners)
+
+
+def test_tests_and_current_docs_do_not_import_retired_file_entrypoints():
+    forbidden = (
+        "from web." + "file_parser import",
+        "from web." + "file_watcher import",
+        "from web.blueprints." + "pptx_editor import",
+    )
+    offenders = []
+    for root in (ROOT / "tests", ROOT / "docs"):
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in {".py", ".md"}:
+                continue
+            if "archive" in path.parts:
+                continue
+            source = _read(path)
+            if any(term in source for term in forbidden):
+                offenders.append(str(path.relative_to(ROOT)))
+
+    assert offenders == []

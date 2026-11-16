@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentStepType(Enum):
+    STREAM = "stream"
     THOUGHT = "thought"
     ACTION = "action"
     OBSERVATION = "observation"

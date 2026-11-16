@@ -23,7 +23,7 @@ npm run build
 
 1. **Runtime page**: the only supported app entry is `/`
    - The legacy `/editor` entry has been removed
-   - `/workspace-assistant` is a compatibility redirect to `/`
+   - The legacy `/workspace-assistant` and `/workspace` page aliases are removed
    - `web/static/univer-dist/` is retained only for supporting sheet assets
    - `web/static/univer-dist/` intentionally no longer has a standalone homepage
 

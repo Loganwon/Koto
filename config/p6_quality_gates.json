@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "phase": "P6",
+  "current_stage": "P6.0",
+  "retired_test_tokens": [
+    "/skill-marketplace",
+    "skillsPanel",
+    "/api/skills",
+    "/api/skillmarket",
+    "/api/macro",
+    "app.core.skills",
+    "GeminiProvider"
+  ],
+  "truth_roots": [
+    "tests/e2e",
+    "tests/integration",
+    "tests/evaluation"
+  ],
+  "required_current_tokens": {
+    "tests/e2e/test_ui_primitives.py": [
+      "#navCapabilityBtn",
+      "#capabilityPanel",
+      "/addons",
+      ".validation--ok"
+    ],
+    "tests/evaluation/conftest.py": [
+      "create_runtime_llm_gateway",
+      "monkeypatch.setattr(FileTaskModelClient, \"call\", fake_call)"
+    ]
+  }
+}

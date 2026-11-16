@@ -3,7 +3,6 @@ Unit tests for web modules batch 5:
   - ProactiveTriggerSystem (proactive_trigger.py)
   - ParallelExecutor classes (parallel_executor.py)
   - ProcessedFileNetwork (processed_file_network.py)
-  - PPTSynthesizer (ppt_synthesizer.py)
   - FileQualityChecker classes (file_quality_checker.py)
   - SearchEngine (search_engine.py)
 
@@ -30,14 +29,14 @@ import pytest
 
 @pytest.mark.unit
 class TestProactiveTrigger:
-    """Tests for web.proactive_trigger.ProactiveTriggerSystem."""
+    """Tests for app.core.services.proactive_trigger.ProactiveTriggerSystem."""
 
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
         self.db_path = str(tmp_path / "triggers.db")
 
     def _make_system(self, **kwargs):
-        from web.proactive_trigger import ProactiveTriggerSystem
+        from app.core.services.proactive_trigger import ProactiveTriggerSystem
 
         return ProactiveTriggerSystem(db_path=self.db_path, **kwargs)
 
@@ -65,7 +64,7 @@ class TestProactiveTrigger:
 
     def test_register_trigger_custom(self):
         """register_trigger should add custom trigger to registry and db."""
-        from web.proactive_trigger import TriggerCondition, TriggerType
+        from app.core.services.proactive_trigger import TriggerCondition, TriggerType
 
         system = self._make_system()
         cond = TriggerCondition(
@@ -162,7 +161,7 @@ class TestProactiveTrigger:
 
     def test_determine_interaction_type_emergency(self):
         """Emergency trigger type should return ALERT."""
-        from web.proactive_trigger import InteractionType, TriggerType
+        from app.core.services.proactive_trigger import InteractionType, TriggerType
 
         system = self._make_system()
         itype = system._determine_interaction_type(TriggerType.EMERGENCY, 0.5, 0.5)
@@ -170,7 +169,7 @@ class TestProactiveTrigger:
 
     def test_determine_interaction_type_high_urgency(self):
         """High urgency (>=0.8) returns ALERT regardless of trigger type."""
-        from web.proactive_trigger import InteractionType, TriggerType
+        from app.core.services.proactive_trigger import InteractionType, TriggerType
 
         system = self._make_system()
         itype = system._determine_interaction_type(TriggerType.PERIODIC, 0.9, 0.5)
@@ -178,7 +177,7 @@ class TestProactiveTrigger:
 
     def test_determine_interaction_type_pattern(self):
         """Pattern trigger type with medium urgency returns QUESTION."""
-        from web.proactive_trigger import InteractionType, TriggerType
+        from app.core.services.proactive_trigger import InteractionType, TriggerType
 
         system = self._make_system()
         itype = system._determine_interaction_type(TriggerType.PATTERN, 0.4, 0.4)
@@ -186,7 +185,7 @@ class TestProactiveTrigger:
 
     def test_calculate_disturbance_cost_late_night(self):
         """Disturbance cost should increase during late night hours."""
-        from web.proactive_trigger import TriggerCondition, TriggerType
+        from app.core.services.proactive_trigger import TriggerCondition, TriggerType
 
         system = self._make_system()
         trigger = TriggerCondition(
@@ -196,7 +195,7 @@ class TestProactiveTrigger:
             priority=5,
             cooldown_minutes=60,
         )
-        with patch("web.proactive_trigger.datetime") as mock_dt:
+        with patch("app.core.services.proactive_trigger.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 2, 0, 0)  # 2am
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             cost = system._calculate_disturbance_cost("user1", trigger)
@@ -209,314 +208,9 @@ class TestProactiveTrigger:
 
 
 @pytest.mark.unit
-class TestParallelExecutor:
-    """Tests for web.parallel_executor task queue, resource mgmt, and circuit breaker."""
-
-    # --- Task dataclass ---
-
-    def test_task_creation_defaults(self):
-        from web.parallel_executor import Priority, Task, TaskStatus, TaskType
-
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        assert t.status == TaskStatus.PENDING
-        assert t.retry_count == 0
-        assert t.max_retries == 3
-        assert t.elapsed_time == 0
-
-    def test_task_abort(self):
-        from web.parallel_executor import Priority, Task, TaskStatus, TaskType
-
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        t.abort()
-        assert t.is_aborted is True
-        assert t.status == TaskStatus.CANCELLED
-
-    def test_task_to_dict(self):
-        from web.parallel_executor import Priority, Task, TaskType
-
-        t = Task(
-            id="t1",
-            session_id="s1",
-            type=TaskType.CHAT,
-            priority=Priority.NORMAL,
-            user_input="hello world",
-        )
-        d = t.to_dict()
-        assert d["id"] == "t1"
-        assert d["type"] == "chat"
-        assert d["priority"] == "NORMAL"
-        assert d["status"] == "pending"
-
-    def test_task_elapsed_time_running(self):
-        from web.parallel_executor import Priority, Task, TaskStatus, TaskType
-
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        t.started_at = datetime.now() - timedelta(seconds=5)
-        t.status = TaskStatus.RUNNING
-        assert t.elapsed_time >= 4.0
-
-    # --- TaskQueueManager ---
-
-    def test_queue_submit_and_get_next(self):
-        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
-
-        mgr = TaskQueueManager()
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        mgr.submit(t)
-        result = mgr.get_next(timeout=0.1)
-        assert result is not None
-        assert result.id == "t1"
-
-    def test_queue_priority_ordering(self):
-        """CRITICAL tasks should be returned before HIGH/NORMAL."""
-        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
-
-        mgr = TaskQueueManager()
-        t_normal = Task(
-            id="t_n", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL
-        )
-        t_critical = Task(
-            id="t_c", session_id="s1", type=TaskType.CHAT, priority=Priority.CRITICAL
-        )
-        mgr.submit(t_normal)
-        mgr.submit(t_critical)
-        first = mgr.get_next(timeout=0.1)
-        assert first.id == "t_c"
-
-    def test_queue_cancel_task(self):
-        from web.parallel_executor import (
-            Priority,
-            Task,
-            TaskQueueManager,
-            TaskStatus,
-            TaskType,
-        )
-
-        mgr = TaskQueueManager()
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        mgr.submit(t)
-        assert mgr.cancel("t1") is True
-        assert t.status == TaskStatus.CANCELLED
-
-    def test_queue_cancel_nonexistent(self):
-        from web.parallel_executor import TaskQueueManager
-
-        mgr = TaskQueueManager()
-        assert mgr.cancel("nonexistent") is False
-
-    def test_queue_full_raises(self):
-        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
-
-        mgr = TaskQueueManager(max_queue_size=2)
-        for i in range(2):
-            mgr.submit(
-                Task(
-                    id=f"t{i}",
-                    session_id="s1",
-                    type=TaskType.CHAT,
-                    priority=Priority.LOW,
-                )
-            )
-        with pytest.raises(RuntimeError, match="full"):
-            mgr.submit(
-                Task(
-                    id="t_overflow",
-                    session_id="s1",
-                    type=TaskType.CHAT,
-                    priority=Priority.LOW,
-                )
-            )
-
-    def test_queue_get_stats(self):
-        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
-
-        mgr = TaskQueueManager()
-        mgr.submit(
-            Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.HIGH)
-        )
-        stats = mgr.get_stats()
-        assert stats["total_tasks"] == 1
-        assert stats["high"] == 1
-
-    def test_queue_get_session_tasks(self):
-        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
-
-        mgr = TaskQueueManager()
-        mgr.submit(
-            Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        )
-        mgr.submit(
-            Task(id="t2", session_id="s2", type=TaskType.CHAT, priority=Priority.NORMAL)
-        )
-        tasks = mgr.get_session_tasks("s1")
-        assert len(tasks) == 1
-        assert tasks[0].id == "t1"
-
-    # --- ResourceManager ---
-
-    def test_resource_manager_can_start_task(self):
-        from web.parallel_executor import Priority, ResourceManager, Task, TaskType
-
-        rm = ResourceManager()
-        rm.get_memory_usage_mb = lambda: 500.0
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        can_start, reason = rm.can_start_task(t)
-        assert can_start is True
-        assert reason == "OK"
-
-    def test_resource_manager_release(self):
-        from web.parallel_executor import Priority, ResourceManager, Task, TaskType
-
-        rm = ResourceManager()
-        rm.current_concurrent = 2
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        rm.release(t)
-        assert rm.current_concurrent == 1
-
-    def test_resource_manager_max_concurrent_blocks(self):
-        from web.parallel_executor import Priority, ResourceManager, Task, TaskType
-
-        rm = ResourceManager()
-        rm.get_memory_usage_mb = lambda: 100.0
-        rm.current_concurrent = rm.max_concurrent_tasks
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        can_start, reason = rm.can_start_task(t)
-        assert can_start is False
-        assert "Max concurrent" in reason
-
-    def test_resource_manager_get_stats(self):
-        from web.parallel_executor import ResourceManager
-
-        rm = ResourceManager()
-        stats = rm.get_stats()
-        assert "concurrent_tasks" in stats
-        assert "max_concurrent" in stats
-        assert "memory_soft_limit_mb" in stats
-
-    def test_resource_manager_refill_api_tokens(self):
-        from web.parallel_executor import ResourceManager
-
-        rm = ResourceManager()
-        rm.api_call_tokens = 0.0
-        rm.last_api_token_refill = time.time() - 2.0
-        rm.refill_api_tokens()
-        assert rm.api_call_tokens > 0
-
-    # --- RetryPolicy ---
-
-    def test_retry_policy_delay_increases(self):
-        from web.parallel_executor import RetryPolicy
-
-        rp = RetryPolicy(base_delay=1.0)
-        d0 = rp.get_retry_delay(0)
-        d1 = rp.get_retry_delay(1)
-        d2 = rp.get_retry_delay(2)
-        assert d1 > d0
-        assert d2 > d1
-
-    def test_retry_policy_fatal_errors(self):
-        from web.parallel_executor import Priority, RetryPolicy, Task, TaskType
-
-        rp = RetryPolicy()
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        assert rp.should_retry(t, ValueError("bad")) is False
-        assert rp.should_retry(t, RuntimeError("transient")) is True
-
-    # --- CircuitBreaker ---
-
-    def test_circuit_breaker_closed_by_default(self):
-        from web.parallel_executor import CircuitBreaker
-
-        cb = CircuitBreaker(failure_threshold=3)
-        assert cb.can_execute() is True
-        assert cb.state == "CLOSED"
-
-    def test_circuit_breaker_opens_after_failures(self):
-        from web.parallel_executor import CircuitBreaker
-
-        cb = CircuitBreaker(failure_threshold=3)
-        for _ in range(3):
-            cb.record_failure()
-        assert cb.state == "OPEN"
-        assert cb.can_execute() is False
-
-    def test_circuit_breaker_half_open_after_timeout(self):
-        from web.parallel_executor import CircuitBreaker
-
-        cb = CircuitBreaker(failure_threshold=2, timeout=0.1)
-        cb.record_failure()
-        cb.record_failure()
-        assert cb.state == "OPEN"
-        time.sleep(0.15)
-        assert cb.can_execute() is True
-        assert cb.state == "HALF_OPEN"
-
-    def test_circuit_breaker_recovers(self):
-        from web.parallel_executor import CircuitBreaker
-
-        cb = CircuitBreaker(failure_threshold=2, timeout=0.1)
-        cb.record_failure()
-        cb.record_failure()
-        time.sleep(0.15)
-        cb.can_execute()  # moves to HALF_OPEN
-        cb.record_success()
-        assert cb.state == "CLOSED"
-
-    # --- TaskSnapshot ---
-
-    def test_task_snapshot_roundtrip(self):
-        from web.parallel_executor import Priority, Task, TaskSnapshot, TaskType
-
-        t = Task(
-            id="t1",
-            session_id="s1",
-            type=TaskType.CHAT,
-            priority=Priority.NORMAL,
-            user_input="test",
-        )
-        snap = TaskSnapshot.from_task(t)
-        assert snap.task_id == "t1"
-        j = snap.to_json()
-        parsed = json.loads(j)
-        assert parsed["task_id"] == "t1"
-        assert parsed["type"] == "chat"
-
-    # --- TaskMonitor ---
-
-    def test_task_monitor_dashboard(self):
-        from web.parallel_executor import (
-            Priority,
-            ResourceManager,
-            Task,
-            TaskMonitor,
-            TaskQueueManager,
-            TaskStatus,
-            TaskType,
-        )
-
-        qm = TaskQueueManager()
-        rm = ResourceManager()
-        rm.get_memory_usage_mb = lambda: 100.0
-        rm.get_cpu_usage_percent = lambda: 10.0
-        monitor = TaskMonitor(qm, rm)
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        t.started_at = datetime.now() - timedelta(seconds=2)
-        t.completed_at = datetime.now()
-        t.status = TaskStatus.COMPLETED
-        monitor.record_task_complete(t)
-        dash = monitor.get_dashboard()
-        assert dash["completed_tasks"] == 1
-        assert dash["success_rate"] > 0
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ProcessedFileNetwork
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
 @pytest.mark.unit
 class TestProcessedFileNetwork:
-    """Tests for web.processed_file_network.ProcessedFileNetwork."""
+    """Tests for app.core.services.processed_file_network.ProcessedFileNetwork."""
 
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
@@ -526,7 +220,7 @@ class TestProcessedFileNetwork:
         os.makedirs(self.workspace, exist_ok=True)
 
     def _make_network(self):
-        from web.processed_file_network import ProcessedFileNetwork
+        from app.core.services.processed_file_network import ProcessedFileNetwork
 
         return ProcessedFileNetwork(db_path=self.db_path, workspace_dir=self.workspace)
 
@@ -632,7 +326,7 @@ class TestProcessedFileNetwork:
         assert not hasattr(net, "open_file")
 
     def test_dataclass_file_record_defaults(self):
-        from web.processed_file_network import FileRecord
+        from app.core.services.processed_file_network import FileRecord
 
         fr = FileRecord(
             file_id="id1",
@@ -648,7 +342,7 @@ class TestProcessedFileNetwork:
         assert fr.tags == []
 
     def test_dataclass_file_relation_defaults(self):
-        from web.processed_file_network import FileRelation
+        from app.core.services.processed_file_network import FileRelation
 
         rel = FileRelation(
             relation_id="r1",
@@ -660,130 +354,6 @@ class TestProcessedFileNetwork:
         assert rel.metadata == {}
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PPTSynthesizer
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestPptSynthesizer:
-    """Tests for app.core.services.ppt_synthesizer.PPTSynthesizer (non-async helpers and theme logic)."""
-
-    def test_init_default_theme(self):
-        from app.core.services.ppt_synthesizer import PPTSynthesizer
-
-        synth = PPTSynthesizer()
-        assert synth.theme == "business"
-        assert synth.slide_count == 0
-
-    def test_init_custom_theme(self):
-        from app.core.services.ppt_synthesizer import PPTSynthesizer
-
-        synth = PPTSynthesizer(theme="tech")
-        assert synth.theme == "tech"
-
-    def test_get_theme_colors_business(self):
-        from app.core.services.ppt_synthesizer import PPTSynthesizer
-
-        synth = PPTSynthesizer()
-        colors = synth._get_theme_colors("business")
-        assert "primary" in colors
-        assert "accent" in colors
-        assert "background" in colors
-        assert "text" in colors
-        assert len(colors["primary"]) == 3
-
-    def test_get_theme_colors_tech(self):
-        from app.core.services.ppt_synthesizer import PPTSynthesizer
-
-        synth = PPTSynthesizer()
-        colors = synth._get_theme_colors("tech")
-        assert colors["primary"] == (0, 120, 215)
-
-    def test_get_theme_colors_creative(self):
-        from app.core.services.ppt_synthesizer import PPTSynthesizer
-
-        synth = PPTSynthesizer()
-        colors = synth._get_theme_colors("creative")
-        assert colors["primary"] == (156, 39, 176)
-
-    def test_get_theme_colors_unknown_defaults_to_business(self):
-        from app.core.services.ppt_synthesizer import PPTSynthesizer
-
-        synth = PPTSynthesizer()
-        colors = synth._get_theme_colors("nonexistent")
-        business = synth._get_theme_colors("business")
-        assert colors == business
-
-    def test_select_slide_layout_returns_blank(self):
-        """_select_slide_layout always returns the blank layout (index 6)."""
-        from app.core.services.ppt_synthesizer import PPTSynthesizer
-
-        synth = PPTSynthesizer()
-        mock_prs = MagicMock()
-        mock_layout = MagicMock()
-        mock_prs.slide_layouts.__getitem__ = MagicMock(return_value=mock_layout)
-        blueprint = MagicMock()
-        result = synth._select_slide_layout(mock_prs, blueprint)
-        mock_prs.slide_layouts.__getitem__.assert_called_with(6)
-        assert result == mock_layout
-
-    def test_apply_beauty_rules_no_crash(self):
-        """_apply_beauty_rules should not crash with minimal mocks."""
-        from app.core.services.ppt_synthesizer import PPTSynthesizer
-
-        synth = PPTSynthesizer()
-        slide = MagicMock()
-        blueprint = MagicMock()
-        blueprint.layout_config = {}
-        colors = synth._get_theme_colors("business")
-        # Should not raise
-        synth._apply_beauty_rules(slide, blueprint, colors)
-
-    def test_beauty_optimizer_static_methods(self):
-        """PPTBeautyOptimizer static methods should not crash with mock data."""
-        from app.core.services.ppt_synthesizer import PPTBeautyOptimizer
-
-        PPTBeautyOptimizer.add_visual_hierarchy(MagicMock(), {})
-        PPTBeautyOptimizer.optimize_image_placement(MagicMock(), [], "balanced")
-
-    def test_synthesize_from_blueprint_error_handling(self):
-        """When synthesize_from_blueprint encounters an error, it returns error dict."""
-        import asyncio
-
-        from app.core.services.ppt_synthesizer import PPTSynthesizer
-
-        synth = PPTSynthesizer()
-        blueprint = MagicMock()
-        blueprint.slides = [MagicMock()]
-        blueprint.theme = "business"
-
-        async def _run():
-            # pptx is available but slides mock will cause attribute errors
-            # triggering the except branch
-            mock_prs = MagicMock()
-            mock_prs.slide_layouts.__getitem__ = MagicMock(
-                side_effect=RuntimeError("test error")
-            )
-            with patch("pptx.Presentation", return_value=mock_prs):
-                return await synth.synthesize_from_blueprint(
-                    blueprint, "/tmp/test.pptx"
-                )
-
-        result = asyncio.run(_run())
-        assert result["success"] is False
-        assert "error" in result
-
-    def test_optimize_image_placement_no_images(self):
-        """optimize_image_placement with empty images list should not crash."""
-        from app.core.services.ppt_synthesizer import PPTBeautyOptimizer
-
-        slide = MagicMock()
-        PPTBeautyOptimizer.optimize_image_placement(slide, [], "balanced")
-        slide.shapes.add_picture.assert_not_called()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # FileQualityChecker
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -795,13 +365,13 @@ class TestFileQualityChecker:
     # --- strip_markdown_for_export ---
 
     def test_strip_markdown_bold(self):
-        from web.file_quality_checker import strip_markdown_for_export
+        from web.documents.file_quality_checker import strip_markdown_for_export
 
         assert "hello" in strip_markdown_for_export("**hello**")
         assert "**" not in strip_markdown_for_export("**hello**")
 
     def test_strip_markdown_code_block(self):
-        from web.file_quality_checker import strip_markdown_for_export
+        from web.documents.file_quality_checker import strip_markdown_for_export
 
         text = "```python\nprint('hi')\n```"
         result = strip_markdown_for_export(text)
@@ -809,21 +379,21 @@ class TestFileQualityChecker:
         assert "print" in result
 
     def test_strip_markdown_heading(self):
-        from web.file_quality_checker import strip_markdown_for_export
+        from web.documents.file_quality_checker import strip_markdown_for_export
 
         result = strip_markdown_for_export("## My Title")
         assert "##" not in result
         assert "My Title" in result
 
     def test_strip_markdown_link(self):
-        from web.file_quality_checker import strip_markdown_for_export
+        from web.documents.file_quality_checker import strip_markdown_for_export
 
         result = strip_markdown_for_export("[Click here](https://example.com)")
         assert "Click here" in result
         assert "https://example.com" not in result
 
     def test_strip_markdown_empty_input(self):
-        from web.file_quality_checker import strip_markdown_for_export
+        from web.documents.file_quality_checker import strip_markdown_for_export
 
         assert strip_markdown_for_export("") == ""
         assert strip_markdown_for_export(None) is None
@@ -831,12 +401,12 @@ class TestFileQualityChecker:
     # --- strip_markdown_from_cell ---
 
     def test_strip_markdown_from_cell_bold(self):
-        from web.file_quality_checker import strip_markdown_from_cell
+        from web.documents.file_quality_checker import strip_markdown_from_cell
 
         assert strip_markdown_from_cell("**test**") == "test"
 
     def test_strip_markdown_from_cell_empty(self):
-        from web.file_quality_checker import strip_markdown_from_cell
+        from web.documents.file_quality_checker import strip_markdown_from_cell
 
         assert strip_markdown_from_cell("") == ""
         assert strip_markdown_from_cell(None) is None
@@ -844,13 +414,13 @@ class TestFileQualityChecker:
     # --- detect_markdown_in_export ---
 
     def test_detect_markdown_in_export_finds_bold(self):
-        from web.file_quality_checker import detect_markdown_in_export
+        from web.documents.file_quality_checker import detect_markdown_in_export
 
         issues = detect_markdown_in_export("This is **bold** text")
         assert any("加粗" in i for i in issues)
 
     def test_detect_markdown_in_export_clean_text(self):
-        from web.file_quality_checker import detect_markdown_in_export
+        from web.documents.file_quality_checker import detect_markdown_in_export
 
         issues = detect_markdown_in_export("Plain text without markdown")
         assert len(issues) == 0
@@ -858,26 +428,26 @@ class TestFileQualityChecker:
     # --- ContentSanitizer ---
 
     def test_sanitize_removes_ai_noise(self):
-        from web.file_quality_checker import ContentSanitizer
+        from web.documents.file_quality_checker import ContentSanitizer
 
         result = ContentSanitizer.sanitize_text("当然可以！这是内容")
         assert "当然可以" not in result
         assert "内容" in result
 
     def test_sanitize_removes_ai_dialogue(self):
-        from web.file_quality_checker import ContentSanitizer
+        from web.documents.file_quality_checker import ContentSanitizer
 
         result = ContentSanitizer.sanitize_text("数据分析报告 希望这对你有帮助")
         assert "希望这对你有帮助" not in result
 
     def test_sanitize_preserves_normal_text(self):
-        from web.file_quality_checker import ContentSanitizer
+        from web.documents.file_quality_checker import ContentSanitizer
 
         text = "这是一段正常的技术文档内容"
         assert ContentSanitizer.sanitize_text(text) == text
 
     def test_sanitize_ppt_outline(self):
-        from web.file_quality_checker import ContentSanitizer
+        from web.documents.file_quality_checker import ContentSanitizer
 
         outline = [
             {"title": "**第一章**", "points": ["当然可以！要点一", "要点二"]},
@@ -889,7 +459,7 @@ class TestFileQualityChecker:
         assert "**" not in cleaned[0]["title"]
 
     def test_sanitize_document_text(self):
-        from web.file_quality_checker import ContentSanitizer
+        from web.documents.file_quality_checker import ContentSanitizer
 
         text = "当然可以！以下是报告内容：\n第一段正文\n希望这对你有帮助"
         cleaned, fixes = ContentSanitizer.sanitize_document_text(text)
@@ -898,7 +468,7 @@ class TestFileQualityChecker:
     # --- FileQualityEvaluator ---
 
     def test_evaluate_ppt_outline_good(self):
-        from web.file_quality_checker import FileQualityEvaluator
+        from web.documents.file_quality_checker import FileQualityEvaluator
 
         outline = [
             {
@@ -939,14 +509,14 @@ class TestFileQualityChecker:
         assert result["score"] >= 60
 
     def test_evaluate_ppt_outline_empty(self):
-        from web.file_quality_checker import FileQualityEvaluator
+        from web.documents.file_quality_checker import FileQualityEvaluator
 
         result = FileQualityEvaluator.evaluate_ppt_outline([])
         assert result["score"] < 100
         assert "过少" in str(result["issues"])
 
     def test_evaluate_document_text_good(self):
-        from web.file_quality_checker import FileQualityEvaluator
+        from web.documents.file_quality_checker import FileQualityEvaluator
 
         text = (
             "# 报告标题\n\n"
@@ -957,7 +527,7 @@ class TestFileQualityChecker:
         assert result["pass"] is True
 
     def test_evaluate_document_text_empty(self):
-        from web.file_quality_checker import FileQualityEvaluator
+        from web.documents.file_quality_checker import FileQualityEvaluator
 
         result = FileQualityEvaluator.evaluate_document_text("")
         assert result["score"] == 0
@@ -966,7 +536,7 @@ class TestFileQualityChecker:
     # --- FileQualityGate ---
 
     def test_gate_check_ppt_outline_proceed(self):
-        from web.file_quality_checker import FileQualityGate
+        from web.documents.file_quality_checker import FileQualityGate
 
         outline = [
             {
@@ -996,20 +566,20 @@ class TestFileQualityChecker:
         assert "quality" in result
 
     def test_gate_check_document_empty(self):
-        from web.file_quality_checker import FileQualityGate
+        from web.documents.file_quality_checker import FileQualityGate
 
         result = FileQualityGate.check_and_fix_document("")
         assert result["action"] == "regenerate"
 
     def test_gate_check_and_fix_for_export_empty(self):
-        from web.file_quality_checker import FileQualityGate
+        from web.documents.file_quality_checker import FileQualityGate
 
         result = FileQualityGate.check_and_fix_for_export("")
         assert result["stripped_md"] is False
         assert result["quality"]["score"] == 0
 
     def test_gate_check_and_fix_for_export_excel(self):
-        from web.file_quality_checker import FileQualityGate
+        from web.documents.file_quality_checker import FileQualityGate
 
         text = "# 标题\n\n" + "正文内容很长的段落。" * 50 + "\n\n**加粗文字**"
         result = FileQualityGate.check_and_fix_for_export(text, target_format="excel")

@@ -32,7 +32,7 @@ class BehaviorMonitor:
     EVENT_AUDIO_INPUT = "audio_input"
     EVENT_IMAGE_GEN = "image_generation"
 
-    def __init__(self, db_path: str = "config/user_behavior.db"):
+    def __init__(self, db_path: str = "data/db/user_behavior.db"):
         """
         初始化行为监控器
 

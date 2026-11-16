@@ -1,0 +1,65 @@
+{
+  "version": "0.3-design",
+  "date": "2026-10-15",
+  "status": "superseded_by_local_workspace_design",
+  "superseded_by": "local-workspace-interaction.json",
+  "supersedes": "interaction.json",
+  "selected_form": "embedded_right_task_pane",
+  "confirmed_user_behavior": "按快捷键收窄文档区，在同一个 Word / WPS 窗口右侧展开 AI；再按一次收起并恢复原工作区。",
+  "surface": {
+    "default": "隐藏侧栏，保留宿主功能区的 Koto 入口",
+    "open_width": {"preferred": 300, "range": [280, 350], "unit": "px", "actual_limits": "遵循具体宿主的窗格最小宽度与 API 能力"},
+    "visible": ["Koto 标题和关闭按钮", "一行当前范围", "最近一次请求与简短结果", "一个统一输入框"],
+    "review_actions": ["继续或完成", "撤回"],
+    "running_actions": ["停止"],
+    "hidden_by_default": ["模型配置", "事件与运行日志", "文档路径", "上下文全文", "执行计划", "历史对话详情"],
+    "removed": ["独立浮窗", "悬浮小条", "修改与问答模式切换", "独立反馈输入框", "本段与后续范围切换器", "多块状态卡片"]
+  },
+  "input": {
+    "single_entry": "修改、提问和反馈共用一个输入框，当前范围自动来自宿主。",
+    "intent": "Agent 按明确的用户要求选择只读回答或受限修改；含糊时用一句话澄清。不能用关键词分发层代替模型决策。",
+    "feedback": "如“这段再短一点”或“后面先说风险”，由任务内的目标与反馈范围承接；已认可的内容保持不变。",
+    "display": "正文中的实际变化承担修改结果展示，侧栏仅说明“第 1/2 处，已改好”等必要信息。"
+  },
+  "workspace": {
+    "open": "由宿主停靠式窗格分配右侧空间，收窄文档可见区域，不遮挡正文。",
+    "document_layout": "窗格开合不得改动纸张、页边距或实际文档排版；如增加适应宽度缩放，应保存并恢复用户原视图。",
+    "close": "恢复可用编辑区域与文档焦点，保留选区、任务和用户输入。",
+    "background": "关闭侧栏只改变可见性；已发起的任务仍受逐片段检查点与停止规则约束，完成后不自动展开。"
+  },
+  "safety": [
+    "每片段写入前比较预期内容；同一位置有新输入时暂停，侧栏用一句话提示。",
+    "任务目标固定在原文档和范围，用户切换焦点不迁移正在执行的修改。",
+    "问答不写入文档；只有用户明确提出修改要求才调用修改工具。",
+    "撤回只处理当前 AI 记录；片段被用户继续编辑后拒绝直接回滚。",
+    "宿主编辑与保存仍由 Word / WPS 负责。"
+  ],
+  "host_routes": {
+    "word": {
+      "route": "Office task pane add-in",
+      "shortcut": "按宿主版本、SharedRuntime 和 KeyboardShortcuts requirement set 检测；先验证本地旁加载路径。",
+      "show_hide_caveat": "Office.addin.showAsTaskpane 当前对 Microsoft Marketplace 发布的加载项存在限制，不能将本地旁加载成功直接等同于商店部署成功。",
+      "sources": [
+        "https://learn.microsoft.com/en-us/office/dev/add-ins/design/task-pane-add-ins",
+        "https://learn.microsoft.com/en-us/office/dev/add-ins/design/keyboard-shortcuts",
+        "https://learn.microsoft.com/en-us/office/dev/add-ins/develop/show-hide-add-in"
+      ]
+    },
+    "wps": {
+      "route": "WPS JS 加载项，通过 CreateTaskPane 创建右侧任务窗格",
+      "shortcut": "需在目标 WPS 文字版本实测加载项动作的快捷键绑定；文档里的 KeyBindings 宏或内置命令绑定不等同于已验证 JS 回调。",
+      "deployment": "按当前官方加载项发布方式验证，不依赖修改 oem.ini。",
+      "platform": "公开加载项概述列明 Windows/Linux；Mac WPS 路线仍需独立验证。",
+      "sources": [
+        "https://open.wps.cn/documents/app-integration-dev/wps365/client/wpsoffice/jsapi/addin-api/TaskPane/task-pane-overview",
+        "https://open.wps.cn/documents/app-integration-dev/wps365/client/wpsoffice/wps-integration-mode/wps-addin-development/addin-overview"
+      ]
+    }
+  },
+  "next_implementation_checkpoint": [
+    "在真实 Word 和 WPS 中分别加载空白右侧窗格，验证开合确实改变文档可用空间。",
+    "绑定一组可配置快捷键，验证宿主编辑焦点与窗格焦点下均能开合，且不覆盖已有快捷键。",
+    "保留原选区，接上独立 Agent 的读取、单片段写入和反馈检查点。",
+    "用统一输入区替换原浮窗的模式与反馈面板，再执行真实文档和表格验收。"
+  ]
+}

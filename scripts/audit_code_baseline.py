@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import datetime as dt
 import json
 import re
 from pathlib import Path
@@ -33,11 +34,37 @@ CODE_SCAN_ROOTS = ("app", "web", "src")
 VENDOR_REFERENCE_ROOTS = ("app", "web")
 PRODUCTION_AGENT_SCAN_ROOTS = ("app", "web")
 AGENT_ENTRYPOINT_TARGETS = {
-    "LangGraphAgent": "LangGraphAgent",
-    "UnifiedAgent": "UnifiedAgent",
+    "KernelAgent": "KernelAgent",
     "FileTaskRuntime": "FileTaskRuntime",
 }
-DELETED_AGENT_ENTRYPOINTS = ("KotoAgentLoop", "app.core.agent.agent_loop", "agent_loop.py")
+DELETED_AGENT_ENTRYPOINTS = (
+    "UnifiedAgent",
+    "app.core.agent.unified_agent",
+    "unified_agent.py",
+    "TaskAgent",
+    "app.core.agent.task_agent",
+    "task_agent.py",
+    "app.core.skills.skill_runner",
+    "skill_runner.py",
+    "app.core.agent.doc_agent",
+    "doc_agent.py",
+    "app.core.agent.doc_event_emitter",
+    "doc_event_emitter.py",
+    "KotoAgentLoop",
+    "app.core.agent.agent_loop",
+    "agent_loop.py",
+    "DeepResearchAgent",
+    "app.core.agent.deep_research",
+    "deep_research.py",
+    "LangGraphAgent",
+    "app.core.agent.langgraph_agent",
+    "langgraph_agent.py",
+    "MultiAgentOrchestrator",
+    "app.core.agent.multi_agent",
+    "multi_agent.py",
+    "app.core.agent.lifecycle",
+    "agent/lifecycle.py",
+)
 TEXT_SUFFIXES = {
     ".css",
     ".html",
@@ -62,6 +89,35 @@ BUNDLE_PATHS = (
 )
 
 ASSET_BUDGETS_PATH = "config/frontend_asset_budgets.json"
+ARCHITECTURE_BUDGETS_PATH = "config/architecture_debt_budget.json"
+COMPATIBILITY_DEBT_PATH = "config/compatibility_debt.json"
+FEATURE_OWNERSHIP_PATH = "config/feature_ownership.json"
+ROUTE_OWNERSHIP_PATH = "config/route_ownership.json"
+FRONTEND_TEMPLATE_PATH = "web/templates/index.html"
+PRODUCT_TEMPLATE_ROOT = "web/templates"
+FRONTEND_SOURCE_PATH = "web/src"
+
+INLINE_EVENT_RE = re.compile(
+    r"\bon(?:click|mousedown|mouseup|keydown|keyup|change|input|submit|focus|blur|wheel|scroll)\s*=\s*(?:\"[^\"]*\"|'[^']*')",
+    re.IGNORECASE,
+)
+INLINE_SCRIPT_RE = re.compile(r"<script\b(?![^>]*\bsrc\s*=)[^>]*>", re.IGNORECASE)
+EXTERNAL_SCRIPT_RE = re.compile(r"<script\b[^>]*\bsrc\s*=", re.IGNORECASE)
+WA_METHOD_RE = re.compile(r"\bWA\.([A-Za-z_$][\w$]*)")
+WINDOW_ASSIGNMENT_RE = re.compile(
+    r"(?:\bwindow|\(window\s+as\s+any\))\.[A-Za-z_$][\w$]*\s*=(?!=)",
+)
+WINDOW_ASSIGNMENT_NAME_RE = re.compile(
+    r"(?:\bwindow|\(window\s+as\s+any\))\.([A-Za-z_$][\w$]*)\s*=(?!=)",
+)
+APPROVED_BROWSER_GLOBALS = frozenset(
+    {
+        "KotoDocxReviewEngineModule",
+        "KotoRenderSurface",
+        "KotoUiScale",
+        "fetch",
+    }
+)
 
 
 def _is_excluded(path: Path) -> bool:
@@ -113,6 +169,268 @@ def _asset_budget_status() -> dict[str, dict[str, int | bool]]:
             "budget": budget,
             "remaining": budget - size,
             "over_budget": size > budget,
+        }
+    return status
+
+
+def _load_json_object(relative_path: str) -> dict:
+    path = ROOT / relative_path
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {}
+
+
+def _frontend_source_files() -> list[Path]:
+    root = ROOT / FRONTEND_SOURCE_PATH
+    if not root.exists():
+        return []
+    return sorted(
+        path
+        for path in root.rglob("*.ts")
+        if path.is_file() and not path.name.endswith(".test.ts")
+    )
+
+
+def _frontend_runtime_debt() -> dict[str, object]:
+    template_path = ROOT / FRONTEND_TEMPLATE_PATH
+    html = (
+        template_path.read_text(encoding="utf-8", errors="ignore")
+        if template_path.exists()
+        else ""
+    )
+    inline_events = [match.group(0) for match in INLINE_EVENT_RE.finditer(html)]
+    product_template_inline_events: list[str] = []
+    product_template_root = ROOT / PRODUCT_TEMPLATE_ROOT
+    product_templates = (
+        sorted(product_template_root.rglob("*.html"))
+        if product_template_root.exists()
+        else []
+    )
+    for product_template in product_templates:
+        product_source = product_template.read_text(encoding="utf-8", errors="ignore")
+        product_template_inline_events.extend(
+            match.group(0) for match in INLINE_EVENT_RE.finditer(product_source)
+        )
+    inline_wa_events = [event for event in inline_events if "WA." in event]
+    wa_methods = sorted(set(WA_METHOD_RE.findall(html)))
+
+    window_assignments = 0
+    window_assignment_names: set[str] = set()
+    generated_inline_events: list[str] = []
+    publish_workspace_api_calls = 0
+    window_state_writes = 0
+    source_files_over_1000: list[dict[str, int | str]] = []
+    for path in _frontend_source_files():
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        window_assignments += len(WINDOW_ASSIGNMENT_RE.findall(source))
+        window_assignment_names.update(WINDOW_ASSIGNMENT_NAME_RE.findall(source))
+        generated_inline_events.extend(
+            match.group(0) for match in INLINE_EVENT_RE.finditer(source)
+        )
+        publish_workspace_api_calls += source.count("publishWorkspaceApi(")
+        window_state_writes += len(
+            re.findall(
+                r"(?:\bwindow|\(window\s+as\s+any\))\.state\s*=",
+                source,
+            )
+        )
+        lines = len(source.splitlines())
+        if lines > 1000:
+            source_files_over_1000.append(
+                {"path": path.relative_to(ROOT).as_posix(), "lines": lines}
+            )
+
+    source_files_over_1000.sort(
+        key=lambda item: (-int(item["lines"]), str(item["path"]))
+    )
+    return {
+        "inline_script_tags": len(INLINE_SCRIPT_RE.findall(html)),
+        "external_script_tags": len(EXTERNAL_SCRIPT_RE.findall(html)),
+        "inline_event_handlers": len(inline_events),
+        "product_template_inline_event_handlers": len(
+            product_template_inline_events
+        ),
+        "inline_wa_event_handlers": len(inline_wa_events),
+        "inline_wa_method_count": len(wa_methods),
+        "inline_wa_methods": wa_methods,
+        "window_global_assignments": window_assignments,
+        "window_global_assignment_names": sorted(window_assignment_names),
+        "unapproved_window_global_assignment_count": len(
+            window_assignment_names - APPROVED_BROWSER_GLOBALS
+        ),
+        "unapproved_window_global_assignments": sorted(
+            window_assignment_names - APPROVED_BROWSER_GLOBALS
+        ),
+        "generated_inline_event_handlers": len(generated_inline_events),
+        "window_state_writes": window_state_writes,
+        "publish_workspace_api_calls": publish_workspace_api_calls,
+        "frontend_source_files_over_1000_count": len(source_files_over_1000),
+        "frontend_source_files_over_1000": source_files_over_1000,
+    }
+
+
+def _validate_compatibility_debt(reference_date: dt.date | None = None) -> list[str]:
+    data = _load_json_object(COMPATIBILITY_DEBT_PATH)
+    errors: list[str] = []
+    if data.get("schema_version") != 1:
+        errors.append("compatibility debt schema_version must be 1")
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        return [*errors, "compatibility debt entries must be a list"]
+
+    required_text = (
+        "id",
+        "category",
+        "owner",
+        "reason",
+        "replacement",
+        "target_phase",
+        "remove_by",
+        "delete_when",
+    )
+    seen: set[str] = set()
+    today = reference_date or dt.date.today()
+    for index, entry in enumerate(entries):
+        label = f"entries[{index}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{label} must be an object")
+            continue
+        entry_id = str(entry.get("id") or "").strip()
+        if entry_id in seen:
+            errors.append(f"duplicate compatibility debt id: {entry_id}")
+        if entry_id:
+            seen.add(entry_id)
+        for field in required_text:
+            if not str(entry.get(field) or "").strip():
+                errors.append(f"{label}.{field} must be non-empty")
+        for field in ("paths", "callers", "tests"):
+            value = entry.get(field)
+            if not isinstance(value, list) or not value:
+                errors.append(f"{label}.{field} must be a non-empty list")
+        if not re.fullmatch(r"P[1-6]", str(entry.get("target_phase") or "")):
+            errors.append(f"{label}.target_phase must be P1..P6")
+        try:
+            remove_by = dt.date.fromisoformat(str(entry.get("remove_by") or ""))
+        except ValueError:
+            errors.append(f"{label}.remove_by must use YYYY-MM-DD")
+        else:
+            if remove_by < today:
+                errors.append(f"compatibility debt is overdue: {entry_id}")
+        for path in entry.get("paths") or []:
+            if not (ROOT / str(path)).exists():
+                errors.append(f"{label}.paths missing: {path}")
+        for path in entry.get("tests") or []:
+            if not (ROOT / str(path)).exists():
+                errors.append(f"{label}.tests missing: {path}")
+    return errors
+
+
+def _compatibility_debt_status() -> dict[str, object]:
+    data = _load_json_object(COMPATIBILITY_DEBT_PATH)
+    entries = data.get("entries") if isinstance(data.get("entries"), list) else []
+    by_phase: dict[str, int] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        phase = str(entry.get("target_phase") or "unassigned")
+        by_phase[phase] = by_phase.get(phase, 0) + 1
+    return {
+        "count": len(entries),
+        "by_phase": dict(sorted(by_phase.items())),
+        "validation_errors": _validate_compatibility_debt(),
+    }
+
+
+def _validate_route_ownership() -> list[str]:
+    data = _load_json_object(ROUTE_OWNERSHIP_PATH)
+    errors: list[str] = []
+    if data.get("schema_version") != 1:
+        errors.append("route ownership schema_version must be 1")
+    families = data.get("families")
+    if not isinstance(families, dict) or not families:
+        return [*errors, "route ownership families must be a non-empty object"]
+    for family, entry in sorted(families.items()):
+        label = f"families.{family}"
+        if not str(family or "").strip():
+            errors.append("route ownership family names must be non-empty")
+        if not isinstance(entry, dict):
+            errors.append(f"{label} must be an object")
+            continue
+        if not str(entry.get("feature") or "").strip():
+            errors.append(f"{label}.feature must be non-empty")
+        if entry.get("tier") not in {"core", "bundled", "optional"}:
+            errors.append(f"{label}.tier must be core, bundled or optional")
+        owner = str(entry.get("owner") or "").strip()
+        if not owner:
+            errors.append(f"{label}.owner must be non-empty")
+        elif not (ROOT / owner).is_file():
+            errors.append(f"{label}.owner missing: {owner}")
+    return errors
+
+
+def _validate_feature_ownership() -> list[str]:
+    data = _load_json_object(FEATURE_OWNERSHIP_PATH)
+    errors: list[str] = []
+    if data.get("schema_version") != 1:
+        errors.append("feature ownership schema_version must be 1")
+    features = data.get("features")
+    if not isinstance(features, list):
+        return [*errors, "feature ownership features must be a list"]
+    seen: set[str] = set()
+    for index, feature in enumerate(features):
+        label = f"features[{index}]"
+        if not isinstance(feature, dict):
+            errors.append(f"{label} must be an object")
+            continue
+        feature_id = str(feature.get("id") or "").strip()
+        if not feature_id:
+            errors.append(f"{label}.id must be non-empty")
+        elif feature_id in seen:
+            errors.append(f"duplicate feature id: {feature_id}")
+        else:
+            seen.add(feature_id)
+        if feature.get("release_status") not in {"stable", "beta", "disabled"}:
+            errors.append(f"{label}.release_status must be stable, beta, or disabled")
+        for field in ("frontend_owners", "backend_owners", "entrypoints", "tests"):
+            values = feature.get(field)
+            if not isinstance(values, list) or not values:
+                errors.append(f"{label}.{field} must be a non-empty list")
+                continue
+            if field in {"frontend_owners", "backend_owners", "tests"}:
+                for path in values:
+                    if not (ROOT / str(path)).exists():
+                        errors.append(f"{label}.{field} missing: {path}")
+        acceptance = feature.get("acceptance")
+        if not isinstance(acceptance, list) or not acceptance:
+            errors.append(f"{label}.acceptance must be a non-empty list")
+        if feature.get("release_status") == "beta":
+            known_gaps = feature.get("known_gaps")
+            if not isinstance(known_gaps, list) or not known_gaps:
+                errors.append(f"{label}.known_gaps must explain beta status")
+    return errors
+
+
+def _architecture_budget_status() -> dict[str, dict[str, int | bool]]:
+    config = _load_json_object(ARCHITECTURE_BUDGETS_PATH)
+    budgets = config.get("budgets") if isinstance(config.get("budgets"), dict) else {}
+    frontend = _frontend_runtime_debt()
+    large_summary = _large_file_summary(_large_production_files())
+    current = {
+        **{key: int(value) for key, value in frontend.items() if isinstance(value, int)},
+        **large_summary,
+    }
+    status: dict[str, dict[str, int | bool]] = {}
+    for metric, raw_budget in budgets.items():
+        if metric not in current:
+            continue
+        budget = int(raw_budget)
+        value = int(current[metric])
+        status[str(metric)] = {
+            "value": value,
+            "budget": budget,
+            "remaining": budget - value,
+            "over_budget": value > budget,
         }
     return status
 
@@ -301,6 +619,11 @@ def collect_baseline() -> dict:
         "web_node_modules_bytes": _dir_size(ROOT / "web" / "node_modules"),
         "web_static_vendor_bytes": _dir_size(ROOT / "web" / "static" / "vendor"),
         "asset_budget_status": _asset_budget_status(),
+        "architecture_budget_status": _architecture_budget_status(),
+        "frontend_runtime_debt": _frontend_runtime_debt(),
+        "compatibility_debt": _compatibility_debt_status(),
+        "feature_ownership_validation_errors": _validate_feature_ownership(),
+        "route_ownership_validation_errors": _validate_route_ownership(),
         "vendor_reference_graph": _vendor_reference_graph(),
         "web_app_top_level_exports": _web_app_exports(),
         "agent_entrypoint_hits": _agent_entrypoint_hits(),
@@ -309,14 +632,35 @@ def collect_baseline() -> dict:
     }
 
 
+def _governance_failures(baseline: dict) -> list[str]:
+    """Return architecture conditions that must make the audit command fail."""
+    failures: list[str] = []
+    architecture_budgets = baseline["architecture_budget_status"]
+    if not architecture_budgets:
+        failures.append("architecture debt budgets are missing or empty")
+    failures.extend(
+        f"architecture budget exceeded: {metric}"
+        for metric, status in architecture_budgets.items()
+        if status["over_budget"]
+    )
+    failures.extend(baseline["compatibility_debt"]["validation_errors"])
+    failures.extend(baseline["feature_ownership_validation_errors"])
+    failures.extend(baseline["route_ownership_validation_errors"])
+    for symbol, paths in baseline["deleted_agent_entrypoint_hits"].items():
+        if paths:
+            failures.append(f"retired Agent entrypoint returned: {symbol}")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     args = parser.parse_args()
     baseline = collect_baseline()
+    failures = _governance_failures(baseline)
     if args.json:
         print(json.dumps(baseline, ensure_ascii=False, indent=2, sort_keys=True))
-        return 0
+        return 1 if failures else 0
 
     print("# Koto Code Audit Baseline")
     print()
@@ -339,6 +683,25 @@ def main() -> int:
     for rel, item in baseline["asset_budget_status"].items():
         state = "OVER" if item["over_budget"] else "ok"
         print(f"  - {rel}: {item['size']} / {item['budget']} ({state})")
+    print("- frontend runtime debt:")
+    for key, value in baseline["frontend_runtime_debt"].items():
+        if not isinstance(value, list):
+            print(f"  - {key}: {value}")
+    print("- architecture debt budgets:")
+    for metric, item in baseline["architecture_budget_status"].items():
+        state = "OVER" if item["over_budget"] else "ok"
+        print(f"  - {metric}: {item['value']} / {item['budget']} ({state})")
+    compatibility = baseline["compatibility_debt"]
+    print(f"- compatibility debt entries: {compatibility['count']}")
+    print(f"- compatibility debt validation errors: {len(compatibility['validation_errors'])}")
+    print(
+        "- feature ownership validation errors: "
+        f"{len(baseline['feature_ownership_validation_errors'])}"
+    )
+    print(
+        "- route ownership validation errors: "
+        f"{len(baseline['route_ownership_validation_errors'])}"
+    )
     print("- vendor reference graph:")
     for package, item in baseline["vendor_reference_graph"].items():
         state = "referenced" if item["referenced"] else "unreferenced"
@@ -353,6 +716,11 @@ def main() -> int:
     print("- deleted agent entrypoint hit files:")
     for name, files in baseline["deleted_agent_entrypoint_hits"].items():
         print(f"  - {name}: {len(files)}")
+    if failures:
+        print("- governance failures:")
+        for failure in failures:
+            print(f"  - {failure}")
+        return 1
     return 0
 
 

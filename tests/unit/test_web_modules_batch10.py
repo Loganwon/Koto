@@ -1,5 +1,5 @@
 """
-Batch 10 – unit tests for 12 web modules at 0 % or low coverage.
+Batch 10 – regression tests for active file, knowledge and workspace modules.
 Each class contains 5-8 focused tests covering __init__, key public methods,
 and error paths.  All external deps are mocked.
 """
@@ -18,14 +18,14 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# 1. BatchFileProcessor  (web/batch_processor.py)
+# 1. BatchFileProcessor  (web/files/batch_processor.py)
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestBatchFileProcessor:
-    """Tests for web.batch_processor.BatchFileProcessor"""
+    """Tests for web.files.batch_processor.BatchFileProcessor"""
 
     def _make(self, **kw):
-        from web.batch_processor import BatchFileProcessor
+        from web.files.batch_processor import BatchFileProcessor
 
         return BatchFileProcessor(**kw)
 
@@ -115,101 +115,19 @@ class TestBatchFileProcessor:
 
 
 # ---------------------------------------------------------------------------
-# 2. CodeGenerator  (web/code_generator.py)
-# ---------------------------------------------------------------------------
-@pytest.mark.unit
-class TestCodeGenerator:
-    """Tests for web.code_generator.CodeGenerator"""
-
-    def _make(self):
-        from web.code_generator import CodeGenerator
-
-        return CodeGenerator()
-
-    def test_init_has_templates(self):
-        gen = self._make()
-        assert len(gen.templates) > 0
-        assert "c_hello" in gen.templates
-
-    def test_list_templates_all(self):
-        gen = self._make()
-        all_t = gen.list_templates()
-        assert len(all_t) >= 3
-        assert all("name" in t for t in all_t)
-
-    def test_list_templates_by_language(self):
-        gen = self._make()
-        c_templates = gen.list_templates(language="c")
-        assert len(c_templates) >= 1
-        assert all(t["language"] == "c" for t in c_templates)
-
-    def test_generate_known_template(self):
-        gen = self._make()
-        result = gen.generate("c_hello")
-        assert result["success"] is True
-        assert "Hello, World!" in result["code"]
-        assert result["language"] == "c"
-
-    def test_generate_unknown_template(self):
-        gen = self._make()
-        result = gen.generate("nonexistent_template")
-        assert result["success"] is False
-
-    def test_generate_with_output_path(self, tmp_path):
-        gen = self._make()
-        out = str(tmp_path / "out.c")
-        result = gen.generate("c_hello", output_path=out)
-        assert result["success"] is True
-        assert os.path.exists(out)
-
-    def test_generate_template_with_params(self):
-        gen = self._make()
-        result = gen.generate("c_file_io", filename="test.txt", content="data")
-        assert result["success"] is True
-        assert "test.txt" in result["code"]
-
-    def test_generate_from_description_no_model(self):
-        gen = self._make()
-        result = gen.generate_from_description("sort a list", ai_model=None)
-        assert result["success"] is False
-
-
-# ---------------------------------------------------------------------------
-# 3. CodeTemplate  (web/code_generator.py)
-# ---------------------------------------------------------------------------
-@pytest.mark.unit
-class TestCodeTemplate:
-    """Tests for web.code_generator.CodeTemplate"""
-
-    def test_render_substitutes(self):
-        from web.code_generator import CodeTemplate
-
-        t = CodeTemplate("test", "python", "Hello {name}!", "desc")
-        assert t.render(name="World") == "Hello World!"
-
-    def test_attributes(self):
-        from web.code_generator import CodeTemplate
-
-        t = CodeTemplate("n", "js", "tpl", "d")
-        assert t.name == "n"
-        assert t.language == "js"
-        assert t.description == "d"
-
-
-# ---------------------------------------------------------------------------
-# 4. ClipboardOCRAssistant  (web/clipboard_ocr_assistant.py)
+# 4. ClipboardOCRAssistant  (web/files/clipboard_ocr_assistant.py)
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestClipboardOCRAssistant:
-    """Tests for web.clipboard_ocr_assistant.ClipboardOCRAssistant"""
+    """Tests for web.files.clipboard_ocr_assistant.ClipboardOCRAssistant"""
 
-    @patch("web.clipboard_ocr_assistant.os.makedirs")
+    @patch("web.files.clipboard_ocr_assistant.os.makedirs")
     @patch(
-        "web.clipboard_ocr_assistant.ClipboardOCRAssistant._init_ocr_engine",
+        "web.files.clipboard_ocr_assistant.ClipboardOCRAssistant._init_ocr_engine",
         return_value=None,
     )
     def _make(self, mock_engine, mock_mkdirs, **kw):
-        from web.clipboard_ocr_assistant import ClipboardOCRAssistant
+        from web.files.clipboard_ocr_assistant import ClipboardOCRAssistant
 
         return ClipboardOCRAssistant(**kw)
 
@@ -234,7 +152,7 @@ class TestClipboardOCRAssistant:
         result = a.ocr_image("/nonexistent/img.png")
         assert result["success"] is False
 
-    @patch("web.clipboard_ocr_assistant.ImageGrab")
+    @patch("web.files.clipboard_ocr_assistant.ImageGrab")
     def test_capture_screenshot_success(self, mock_grab):
         mock_img = MagicMock()
         mock_img.size = (1920, 1080)
@@ -244,7 +162,7 @@ class TestClipboardOCRAssistant:
         assert result["success"] is True
         assert result["size"] == (1920, 1080)
 
-    @patch("web.clipboard_ocr_assistant.ImageGrab")
+    @patch("web.files.clipboard_ocr_assistant.ImageGrab")
     def test_capture_clipboard_no_image(self, mock_grab):
         mock_grab.grabclipboard.return_value = None
         a = self._make()
@@ -256,7 +174,7 @@ class TestClipboardOCRAssistant:
         result = a.auto_index_to_knowledge_base({"ocr_success": False})
         assert result["success"] is False
 
-    @patch("web.clipboard_ocr_assistant.ImageGrab")
+    @patch("web.files.clipboard_ocr_assistant.ImageGrab")
     def test_capture_and_ocr_screenshot_fail(self, mock_grab):
         mock_grab.grab.side_effect = RuntimeError("no display")
         a = self._make()
@@ -269,42 +187,44 @@ class TestClipboardOCRAssistant:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestFileFieldsExtractor:
-    """Tests for web.file_fields_extractor functions"""
+    """Tests for app.core.services.file_fields_extractor functions"""
 
     def test_normalize_date_standard(self):
-        from web.file_fields_extractor import _normalize_date
+        from app.core.services.file_fields_extractor import _normalize_date
 
         assert _normalize_date("2026-03-01") == "2026-03-01"
 
     def test_normalize_date_chinese(self):
-        from web.file_fields_extractor import _normalize_date
+        from app.core.services.file_fields_extractor import _normalize_date
 
         assert _normalize_date("2026年3月1日") == "2026-03-01"
 
     def test_normalize_date_empty(self):
-        from web.file_fields_extractor import _normalize_date
+        from app.core.services.file_fields_extractor import _normalize_date
 
         assert _normalize_date("") == ""
 
     def test_normalize_date_invalid_returns_stripped(self):
-        from web.file_fields_extractor import _normalize_date
+        from app.core.services.file_fields_extractor import _normalize_date
 
         assert _normalize_date("  unknown  ") == "unknown"
 
-    @patch("web.file_fields_extractor._ollama_available", return_value=False)
+    @patch(
+        "app.core.services.file_fields_extractor._ollama_available", return_value=False
+    )
     def test_extract_fields_ollama_unavailable(self, _):
-        from web.file_fields_extractor import extract_fields
+        from app.core.services.file_fields_extractor import extract_fields
 
         assert extract_fields("test.docx", "some content") is None
 
     def test_extract_fields_empty_content(self):
-        from web.file_fields_extractor import extract_fields
+        from app.core.services.file_fields_extractor import extract_fields
 
         assert extract_fields("test.docx", "") is None
         assert extract_fields("test.docx", "   ") is None
 
     def test_fields_to_markdown_basic(self):
-        from web.file_fields_extractor import fields_to_markdown
+        from app.core.services.file_fields_extractor import fields_to_markdown
 
         fields = {
             "summary": "A test summary",
@@ -322,7 +242,7 @@ class TestFileFieldsExtractor:
         assert "张三" in md
 
     def test_fields_to_markdown_empty(self):
-        from web.file_fields_extractor import fields_to_markdown
+        from app.core.services.file_fields_extractor import fields_to_markdown
 
         md = fields_to_markdown({})
         assert md == ""
@@ -336,103 +256,74 @@ class TestFileParser:
     """Tests for web.file_parser.FileParser"""
 
     def test_parse_file_not_found(self):
-        from web.file_parser import FileParser
+        from app.core.file.file_parser import parse_file
 
-        result = FileParser.parse_file("/nonexistent_abc.txt")
+        result = parse_file("/nonexistent_abc.txt")
         assert result["success"] is False
 
     def test_parse_file_unsupported_format(self, tmp_path):
-        from web.file_parser import FileParser
+        from app.core.file.file_parser import parse_file
 
         f = tmp_path / "test.xyz"
         f.write_text("data")
-        result = FileParser.parse_file(str(f))
+        result = parse_file(str(f))
         assert result["success"] is False
 
     def test_parse_text_file(self, tmp_path):
-        from web.file_parser import FileParser
+        from app.core.file.file_parser import parse_file
 
         f = tmp_path / "readme.txt"
         f.write_text("Hello World", encoding="utf-8")
-        result = FileParser.parse_file(str(f))
+        result = parse_file(str(f))
         assert result["success"] is True
         assert result["content"] == "Hello World"
         assert result["format"] == "txt"
 
     def test_parse_markdown_file(self, tmp_path):
-        from web.file_parser import FileParser
+        from app.core.file.file_parser import parse_file
 
         f = tmp_path / "doc.md"
         f.write_text("# Title\nBody", encoding="utf-8")
-        result = FileParser.parse_file(str(f))
+        result = parse_file(str(f))
         assert result["success"] is True
         assert "# Title" in result["content"]
 
     def test_parse_file_too_large(self, tmp_path):
-        from web.file_parser import FileParser
+        from app.core.file.file_parser import parse_file
 
         f = tmp_path / "big.txt"
         f.write_text("x")
         with patch("os.path.getsize", return_value=60 * 1024 * 1024):
-            result = FileParser.parse_file(str(f))
+            result = parse_file(str(f))
         assert result["success"] is False
-
-    def test_batch_parse(self, tmp_path):
-        from web.file_parser import FileParser
-
-        f1 = tmp_path / "a.txt"
-        f1.write_text("aaa", encoding="utf-8")
-        f2 = tmp_path / "b.txt"
-        f2.write_text("bbb", encoding="utf-8")
-        results = FileParser.batch_parse([str(f1), str(f2)])
-        assert len(results) == 2
-        assert all(r["success"] for r in results)
-
-    def test_merge_contents(self):
-        from web.file_parser import FileParser
-
-        results = [
-            {"success": True, "filename": "a.txt", "format": "txt", "content": "AAA"},
-            {"success": False, "error": "fail"},
-        ]
-        merged = FileParser.merge_contents(results)
-        assert "a.txt" in merged
-        assert "AAA" in merged
-
-    def test_sanitize_file_path_relative(self):
-        from web.file_parser import FileParser
-
-        result = FileParser.sanitize_file_path("web/file_parser.py")
-        # Should return an absolute path or None depending on safety check
-        assert result is None or os.path.isabs(result)
 
 
 # ---------------------------------------------------------------------------
-# 7. file_qa  (web/file_qa.py)
+# 7. file_qa  (web/files/file_qa.py)
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestFileQA:
-    """Tests for web.file_qa module functions"""
+    """Tests for web.files.file_qa module functions"""
 
-    @patch("web.file_qa._ollama_available", return_value=False)
+    @patch("web.files.file_qa._ollama_available", return_value=False)
     def test_answer_question_ollama_unavailable(self, _):
-        from web.file_qa import answer_file_question
+        from web.files.file_qa import answer_file_question
 
         result = answer_file_question("What is in these files?")
         assert result["success"] is False
         assert "Ollama" in result["error"]
 
-    @patch("web.file_qa._ollama_available", return_value=True)
+    @patch("web.files.file_qa._ollama_available", return_value=True)
     def test_answer_question_no_files_found(self, _):
-        from web.file_qa import answer_file_question
+        from web.files.file_qa import answer_file_question
 
         result = answer_file_question("question", file_paths=[])
         assert result["success"] is False
 
-    @patch("web.file_qa._ollama_available", return_value=True)
-    @patch("web.file_qa._extract_content_local", return_value="some content")
+    @patch("web.files.file_qa._ollama_available", return_value=True)
+    @patch("web.files.file_qa._extract_content_local", return_value="some content")
     def test_answer_question_with_files(self, mock_extract, mock_oll, tmp_path):
-        from web.file_qa import answer_file_question
+        from web.files.file_qa import answer_file_question
 
         f = tmp_path / "test.txt"
         f.write_text("hello")
@@ -444,154 +335,39 @@ class TestFileQA:
         assert result["success"] is True
         assert "42" in result["answer"]
 
-    @patch("web.file_qa._ollama_available", return_value=True)
-    @patch("web.file_qa._extract_content_local", return_value="")
+    @patch("web.files.file_qa._ollama_available", return_value=True)
+    @patch("web.files.file_qa._extract_content_local", return_value="")
     def test_answer_question_empty_content(self, mock_extract, mock_oll, tmp_path):
-        from web.file_qa import answer_file_question
+        from web.files.file_qa import answer_file_question
 
         f = tmp_path / "empty.txt"
         f.write_text("")
         result = answer_file_question("what?", file_paths=[str(f)])
         assert result["success"] is False
 
-    @patch("web.file_qa._ollama_available", return_value=False)
+    @patch("web.files.file_qa._ollama_available", return_value=False)
     def test_filter_files_ollama_unavailable(self, _):
-        from web.file_qa import filter_files_by_criterion
+        from web.files.file_qa import filter_files_by_criterion
 
         result = filter_files_by_criterion("合同", "/tmp")
         assert result["success"] is False
 
     def test_search_files_in_dirs_nonexistent(self):
-        from web.file_qa import _search_files_in_dirs
+        from web.files.file_qa import _search_files_in_dirs
 
         result = _search_files_in_dirs(["test"], ["/nonexistent_xyz"])
         assert result == []
 
 
 # ---------------------------------------------------------------------------
-# 8. FileWatcher  (web/file_watcher.py)
-# ---------------------------------------------------------------------------
-@pytest.mark.unit
-class TestFileWatcher:
-    """Tests for web.file_watcher.FileWatcher"""
-
-    def _make(self):
-        from web.file_watcher import FileWatcher
-
-        return FileWatcher()
-
-    def test_init(self):
-        fw = self._make()
-        assert fw._watches == {}
-        assert fw._analyzer is None
-
-    def test_configure(self):
-        fw = self._make()
-        analyzer = MagicMock()
-        organizer = MagicMock()
-        fw.configure(analyzer, organizer, "/root")
-        assert fw._analyzer is analyzer
-        assert fw._organizer is organizer
-        assert fw._organize_root == "/root"
-
-    @patch("web.file_watcher._WATCHDOG_OK", False)
-    def test_start_watch_no_watchdog(self):
-        fw = self._make()
-        result = fw.start_watch("/some/dir")
-        assert result["success"] is False
-        assert "watchdog" in result["error"]
-
-    def test_stop_watch_not_watching(self):
-        fw = self._make()
-        result = fw.stop_watch("/not/watched")
-        assert result["success"] is False
-
-    def test_stop_all_empty(self):
-        fw = self._make()
-        fw.stop_all()  # should not raise
-
-    def test_list_watches_empty(self):
-        fw = self._make()
-        assert fw.list_watches() == []
-
-    def test_handle_new_file_no_configure(self):
-        fw = self._make()
-        fw._handle_new_file("/some/file.txt")  # should not raise
-
-    def test_get_file_watcher_singleton(self):
-        import web.file_watcher as mod
-
-        old = mod._watcher_instance
-        mod._watcher_instance = None
-        try:
-            w1 = mod.get_file_watcher()
-            w2 = mod.get_file_watcher()
-            assert w1 is w2
-        finally:
-            mod._watcher_instance = old
-
-
-# ---------------------------------------------------------------------------
-# 9. CatalogEventHandler  (web/file_watcher.py)
-# ---------------------------------------------------------------------------
-@pytest.mark.unit
-class TestCatalogEventHandler:
-    """Tests for web.file_watcher._CatalogEventHandler"""
-
-    def _make(self, callback=None):
-        from web.file_watcher import _CatalogEventHandler
-
-        cb = callback or MagicMock()
-        return _CatalogEventHandler("/tmp/watch", cb), cb
-
-    def test_on_created_ignores_directories(self):
-        handler, cb = self._make()
-        event = MagicMock()
-        event.is_directory = True
-        handler.on_created(event)
-        cb.assert_not_called()
-
-    def test_on_created_ignores_unsupported_ext(self):
-        handler, cb = self._make()
-        event = MagicMock()
-        event.is_directory = False
-        event.src_path = "/tmp/watch/test.exe"
-        handler.on_created(event)
-        cb.assert_not_called()
-
-    def test_on_created_ignores_temp_files(self):
-        handler, cb = self._make()
-        event = MagicMock()
-        event.is_directory = False
-        event.src_path = "/tmp/watch/~$temp.docx"
-        handler.on_created(event)
-        cb.assert_not_called()
-
-    def test_on_created_schedules_callback(self):
-        handler, cb = self._make()
-        event = MagicMock()
-        event.is_directory = False
-        event.src_path = "/tmp/watch/report.pdf"
-        handler.on_created(event)
-        assert len(handler._pending) == 1
-
-    def test_process_calls_callback(self):
-        cb = MagicMock()
-        handler, _ = self._make(callback=cb)
-        handler._pending["test.txt"] = MagicMock()
-        handler._process("test.txt")
-        cb.assert_called_once_with("test.txt")
-
-
-# ---------------------------------------------------------------------------
-# 10. FileEditor  (web/file_editor.py)
+# 10. FileEditor  (web/files/file_editor.py)
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestFileEditor:
-    """Tests for web.file_editor.FileEditor"""
+    """Tests for web.files.file_editor.FileEditor"""
 
     def _make(self, tmp_path, backup=False):
-        from web.file_editor import FileEditor
+        from web.files.file_editor import FileEditor
 
         return FileEditor(workspace_dir=str(tmp_path), backup_enabled=backup)
 

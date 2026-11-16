@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any
 
 from .deepseek_config import DEEPSEEK_DEFAULT_MODEL
@@ -46,7 +47,7 @@ def get_configured_cloud_provider(default: str = DEFAULT_CLOUD_PROVIDER) -> str:
     if env_provider:
         return normalize_cloud_provider(env_provider, default=default)
     try:
-        from web.settings import SettingsManager
+        from app.core.config.user_settings import SettingsManager
 
         configured = SettingsManager().get("ai", "cloud_provider")
         return normalize_cloud_provider(configured, default=default)
@@ -83,7 +84,7 @@ def get_configured_cloud_model(
         return env_model.strip()
 
     try:
-        from web.settings import SettingsManager
+        from app.core.config.user_settings import SettingsManager
 
         settings = SettingsManager()
         configured = settings.get("ai", f"{provider_name}_model") or settings.get(
@@ -99,5 +100,70 @@ def get_configured_cloud_model(
     )
 
 
+def select_task_model(
+    task_type: str,
+    *,
+    model_map: Mapping[str, str] | None = None,
+    has_image: bool = False,
+    complexity: str = "normal",
+) -> str:
+    """Select a configured model without classifying the user's text.
+
+    Task type is an explicit transport/runtime contract supplied by the caller.
+    This function deliberately contains no keywords, corpora, similarity model,
+    history continuation, or free-form intent inference.
+    """
+    task = str(task_type or "CHAT").strip().upper() or "CHAT"
+    mapping = dict(model_map or {})
+    lookup_task = "VISION" if has_image and task != "PAINTER" else task
+    if str(complexity or "normal").strip().lower() == "complex":
+        preferred = mapping.get("COMPLEX") or mapping.get(lookup_task)
+    else:
+        preferred = mapping.get(lookup_task)
+    preferred = preferred or mapping.get("CHAT") or "deepseek-chat"
+    configured = get_configured_cloud_model(
+        task_type=lookup_task,
+        fallback_model=preferred,
+    )
+    selected = configured or preferred
+
+    try:
+        from app.core.llm.model_fallback import get_fallback_executor
+
+        fallback = get_fallback_executor()
+        if fallback and not fallback.is_available(selected):
+            alternative = fallback.get_best_available(
+                task_type=lookup_task,
+                preferred=selected,
+            )
+            if alternative:
+                selected = alternative
+    except Exception:
+        pass
+    return selected
+
+
 def is_deepseek_model(model_id: str) -> bool:
     return str(model_id or "").strip().lower().startswith("deepseek")
+
+
+def resolve_requested_model_id(
+    requested_model: str,
+    fallback_model: str = "",
+    task_type: str = "CHAT",
+) -> str:
+    """Resolve a public model choice against current provider policy."""
+
+    normalized = str(requested_model or "").strip().lower()
+    if not normalized or normalized in {"auto", "cloud"}:
+        configured = get_configured_cloud_model(
+            task_type=task_type,
+            fallback_model=fallback_model,
+        )
+        return configured or fallback_model or "deepseek-chat"
+
+    from app.core.llm.provider_boundary import normalize_public_model
+
+    return normalize_public_model(
+        str(requested_model or "").strip() or fallback_model or "deepseek-chat"
+    )

@@ -5,8 +5,8 @@
 Koto LLM Provider Factory
 ==========================
 Single entry point to get the appropriate LLMProvider based on:
-  1. Explicit `provider` argument ("deepseek" | "openai" | "anthropic" | "ollama")
-  2. `model` prefix  (deepseek-* → deepseek, gpt-* → openai, claude-* → anthropic)
+  1. Explicit `provider` argument ("deepseek" | "ollama")
+  2. `model` prefix  (deepseek-* → deepseek, → → anthropic)
   3. Available API keys in environment
 
 Usage:
@@ -54,12 +54,6 @@ def _load_deepseek() -> LLMProvider:
     return DeepSeekProvider()
 
 
-def _load_anthropic() -> LLMProvider:
-    from .anthropic_provider import AnthropicProvider
-
-    return AnthropicProvider()
-
-
 def _load_ollama() -> LLMProvider:
     try:
         from .ollama_llm_provider import OllamaLLMProvider
@@ -74,17 +68,14 @@ def _load_ollama() -> LLMProvider:
 _LOADERS = {
     "openai": _load_openai,
     "deepseek": _load_deepseek,
-    "anthropic": _load_anthropic,
     "ollama": _load_ollama,
 }
 
 # Model-name prefix → provider name
 _MODEL_PREFIX_MAP = (
     ("gpt-", "openai"),
-    ("o1", "openai"),
-    ("o3", "openai"),
-    ("o4", "openai"),
-    ("claude-", "anthropic"),
+    ("o1-", "openai"),
+    ("o3-", "openai"),
     ("deepseek-", "deepseek"),
     ("llama", "ollama"),
     ("qwen", "ollama"),
@@ -105,7 +96,7 @@ def get_llm_provider(
     1. `provider` argument (explicit override)
     2. `model` string prefix
     3. Per-request API key in flask.g (set by auth middleware)
-    4. Available cloud API keys: DEEPSEEK_API_KEY → OPENAI_API_KEY → ANTHROPIC_API_KEY
+    4. Available cloud API keys: DEEPSEEK_API_KEY → DEEPSEEK_API_KEY→ ANTHROPIC_API_KEY
     5. Local fallback only when explicitly allowed
     """
     # Collect per-request key from Flask g (if inside a request context)
@@ -122,7 +113,7 @@ def get_llm_provider(
         name = provider.lower().strip()
         if name == "gemini":
             raise CloudProviderUnavailableError(
-                "Gemini cloud provider has been archived and is no longer available."
+                "Gemini cloud provider has been archived"
             )
         if name in _LOADERS:
             if name == "deepseek" and not has_deepseek_api_key():
@@ -142,9 +133,9 @@ def get_llm_provider(
     # 2. Infer from model name prefix
     if model:
         m = model.lower()
-        if m.startswith("gemini"):
+        if m.startswith("gemini-"):
             raise CloudProviderUnavailableError(
-                f"Gemini model '{model}' has been archived and is no longer available."
+                "Gemini cloud provider has been archived"
             )
         for prefix, pname in _MODEL_PREFIX_MAP:
             if m.startswith(prefix):
@@ -164,10 +155,6 @@ def get_llm_provider(
         return _load_deepseek()
     if has_deepseek_api_key():
         return _load_deepseek()
-    if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
-        return _load_openai()
-    if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
-        return _load_anthropic()
 
     # 5. Local fallback is opt-in; keep cloud/local systems separated by default.
     if allow_local_fallback:
@@ -191,15 +178,21 @@ def get_local_model_tag() -> str:
     return get_configured_local_model_tag()
 
 
-def list_available_providers() -> list[str]:
-    """Return names of providers whose API keys are present in the environment."""
+def list_available_providers(*, probe_local: bool = True) -> list[str]:
+    """Return configured cloud providers and, optionally, live local runtime.
+
+    Local probing opens a socket and must not be used by high-frequency liveness
+    endpoints. Callers that need an exact Ollama state keep the default; cheap
+    health checks explicitly opt out and use ``/api/ping/models`` for diagnostics.
+    """
     available = []
-    if get_deepseek_api_key():
-        available.append("deepseek")
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         available.append("openai")
-    if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
-        available.append("anthropic")
+    if get_deepseek_api_key():
+        available.append("deepseek")
+    if not probe_local:
+        return available
+
     # Ollama is always potentially available (check runtime)
     try:
         import socket

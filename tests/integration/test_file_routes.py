@@ -2,11 +2,8 @@
 """
 Integration tests for file-related endpoints in web/app.py:
 - POST /api/chat/file — file upload with chat
-- POST /api/notebook/upload — notebook file upload
 - GET  /api/files/download — file download proxy
-- POST /api/file-editor/read — read file content
-- POST /api/file-editor/write — write file content
-- POST /api/file-editor/replace — replace text in file
+- POST /api/file-editor/* — retired compatibility surface remains unavailable
 """
 
 from __future__ import annotations
@@ -84,44 +81,23 @@ class TestChatFileUpload:
         assert resp.content_type is not None
 
 
-# ── POST /api/notebook/upload ────────────────────────────────────────────────
+# ── Retired Notebook endpoints ───────────────────────────────────────────────
 
 
 @pytest.mark.integration
-class TestNotebookUpload:
-    def test_no_file_part_returns_400(self, client):
-        resp = client.post("/api/notebook/upload", data={})
-        assert resp.status_code == 400
-        data = resp.get_json()
-        assert data["success"] is False
-
-    def test_empty_filename_returns_400(self, client):
-        data = {"file": (io.BytesIO(b""), "")}
-        resp = client.post(
-            "/api/notebook/upload", data=data, content_type="multipart/form-data"
-        )
-        assert resp.status_code == 400
-        body = resp.get_json()
-        assert body["success"] is False
-
-    def test_upload_txt_file_succeeds(self, client):
-        """A simple .txt file should be parsed successfully."""
-        content = b"This is a test document for notebook upload."
-        data = {"file": (io.BytesIO(content), "test_notebook.txt")}
-        resp = client.post(
-            "/api/notebook/upload", data=data, content_type="multipart/form-data"
-        )
-        # txt parsing should succeed
-        body = resp.get_json()
-        if resp.status_code == 200:
-            assert body["success"] is True
-            assert body["filename"] == "test_notebook.txt"
-            assert body["char_count"] > 0
-
-    def test_method_not_allowed_get(self, client):
-        """GET /api/notebook/upload should return 405."""
-        resp = client.get("/api/notebook/upload")
-        assert resp.status_code == 405
+class TestRetiredNotebookRoutes:
+    @pytest.mark.parametrize(
+        "path",
+        (
+            "/api/notebook/overview",
+            "/api/notebook/qa",
+            "/api/notebook/study_guide",
+            "/api/notebook/upload",
+        ),
+    )
+    def test_notebook_routes_are_not_registered(self, client, path):
+        resp = client.post(path, json={})
+        assert resp.status_code == 404
 
 
 # ── GET /api/files/download ──────────────────────────────────────────────────
@@ -143,60 +119,46 @@ class TestFileDownload:
             tmp.write("download test content")
             tmp_path = tmp.name
         try:
-            resp = client.get(f"/api/files/download?path={tmp_path}")
+            resp = client.get("/api/files/download", query_string={"path": tmp_path})
             assert resp.status_code == 200
             assert b"download test content" in resp.data
+            resp.close()
         finally:
             try:
                 os.unlink(tmp_path)
             except PermissionError:
                 pass  # Windows file locking — temp dir will clean up
 
-
-# ── POST /api/file-editor/* ──────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestFileEditorRead:
-    def test_missing_file_path_returns_400(self, client):
-        resp = client.post("/api/file-editor/read", json={})
-        assert resp.status_code == 400
-
-    def test_read_existing_file(self, client):
-        """Reading an existing file should return content."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
-            tmp.write("editor read test")
-            tmp_path = tmp.name
+    def test_filename_with_url_delimiters_returns_exact_content(self, client, tmp_path):
+        target = tmp_path / "download # report & data.txt"
+        target.write_bytes(b"exact URL-encoded file content")
+        response = client.get("/api/files/download", query_string={"path": str(target)})
         try:
-            resp = client.post("/api/file-editor/read", json={"file_path": tmp_path})
-            # Should return 200 with content or error gracefully
-            assert resp.status_code in (200, 500)
+            assert response.status_code == 200
+            assert response.data == b"exact URL-encoded file content"
         finally:
-            os.unlink(tmp_path)
+            response.close()
 
-
-@pytest.mark.integration
-class TestFileEditorWrite:
-    def test_missing_params_returns_400(self, client):
-        resp = client.post("/api/file-editor/write", json={})
-        assert resp.status_code == 400
-
-    def test_missing_content_returns_400(self, client):
-        resp = client.post(
-            "/api/file-editor/write", json={"file_path": "/tmp/test.txt"}
+    def test_directory_is_not_downloadable(self, client, tmp_path):
+        response = client.get(
+            "/api/files/download", query_string={"path": str(tmp_path)}
         )
-        assert resp.status_code == 400
+        assert response.status_code == 404
+
+
+# ── Retired /api/file-editor/* endpoints ─────────────────────────────────────
 
 
 @pytest.mark.integration
-class TestFileEditorReplace:
-    def test_missing_params_returns_400(self, client):
-        resp = client.post("/api/file-editor/replace", json={})
-        assert resp.status_code == 400
-
-    def test_missing_old_text_returns_400(self, client):
-        resp = client.post(
+class TestRetiredFileEditorRoutes:
+    @pytest.mark.parametrize(
+        "path",
+        (
+            "/api/file-editor/read",
+            "/api/file-editor/write",
             "/api/file-editor/replace",
-            json={"file_path": "/tmp/test.txt", "new_text": "replacement"},
-        )
-        assert resp.status_code == 400
+        ),
+    )
+    def test_legacy_file_editor_routes_are_not_registered(self, client, path):
+        resp = client.post(path, json={})
+        assert resp.status_code == 404

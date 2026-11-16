@@ -1,4 +1,5 @@
 import tsParser from '@typescript-eslint/parser';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
 import globals from 'globals';
 
 export default [
@@ -21,6 +22,9 @@ export default [
         ...globals.es2024,
       },
     },
+    plugins: {
+      '@typescript-eslint': tsPlugin,
+    },
     rules: {
       // Type safety
       'eqeqeq': ['error', 'always', { null: 'ignore' }],
@@ -30,7 +34,8 @@ export default [
 
       // Code quality
       'no-duplicate-imports': 'warn',
-      'no-unused-vars': ['warn', {
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['warn', {
         argsIgnorePattern: '^_',
         caughtErrorsIgnorePattern: '^_|^e$',
         varsIgnorePattern: '^_',

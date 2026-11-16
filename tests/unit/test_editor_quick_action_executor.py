@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.core.agent.editor_quick_action_executor import EditorQuickActionExecutor
-from app.core.agent.lifecycle import AgentRequest
+from app.core.agent.kernel import AgentRequest
 
 
 class _FakeProvider:

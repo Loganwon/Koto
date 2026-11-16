@@ -10,12 +10,18 @@
 #      code_result event with stdout, stderr, and base64-encoded output files.
 # ══════════════════════════════════════════════════════════════
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 from app.core.agent import llm_provider_helpers
 from app.core.llm.model_mode import is_explicit_model_mode, normalize_model_mode
 from app.core.security.output_validator import sanitize_user_visible_text
 from app.core.shared import llm_helpers
+
+if TYPE_CHECKING:
+    from app.core.agent.kernel import AgentRequest
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +66,9 @@ def register_socket_events(socketio):
         _req_local = requested_mode == "local"
         if not _req_local and not is_explicit_model_mode(requested_mode_raw):
             try:
-                _req_local = bool(_SM().get("ai", "use_local_only"))
+                from app.core.config.user_settings import SettingsManager
+
+                _req_local = bool(SettingsManager().get("ai", "use_local_only"))
             except Exception:
                 pass
 
@@ -122,45 +130,9 @@ def register_socket_events(socketio):
         if not prompt:
             return
 
-        # ── Agent Loop path (unified agent) ─────────
-        _use_agent_loop = data.get("_use_agent_loop", True)
-        if not _use_agent_loop:
-            try:
-                from app.core.config.user_settings import SettingsManager as _SM
-
-                _use_agent_loop = bool(_SM().get("ai", "use_agent_loop"))
-            except Exception:
-                pass
-
-        # ── DocAgent path (new multi-file document processor) ─────────
-        _use_doc_agent = data.get("_use_doc_agent", False)
-        if not _use_doc_agent:
-            try:
-                from app.core.config.user_settings import SettingsManager as _SM
-
-                _use_doc_agent = bool(_SM().get("ai", "use_doc_agent"))
-            except Exception:
-                pass
-
-        # DocAgent takes priority if enabled
-        if _use_doc_agent:
-
-            def _doc_agent_task():
-                try:
-                    _run_doc_agent(socketio, sid, data)
-                except Exception as _da_exc:
-                    logger.exception("[DocAI] DocAgent error: %s", _da_exc)
-                    socketio.emit(
-                        "agent_task_complete",
-                        {"full_text": "", "error": f"DocAgent 错误：{_da_exc}"},
-                        namespace="/doc",
-                        to=sid,
-                    )
-
-            socketio.start_background_task(_doc_agent_task)
-            return
-
-        # agent_loop is the standard path; always active unless DocAgent took over
+        # The document transport has one production execution path. File-format
+        # policy remains in its adapters; model execution must not be selected
+        # through hidden client flags or persisted legacy settings.
         def _agent_loop_task():
             try:
                 _run_agent_loop(socketio, sid, data)
@@ -543,14 +515,14 @@ def _run_agent_loop(socketio, sid, data: dict) -> None:
     """
     from app.core.agent.doc_websocket_loop_executor import DocWebSocketLoopExecutor
 
-    request = _build_doc_agent_request(sid, data)
+    request = _build_doc_request(sid, data)
     for event in DocWebSocketLoopExecutor().iter_events(request, _get_session_queue()):
         _emit_agent_event(socketio, sid, event)
 
 
-def _build_doc_agent_request(sid: str, data: dict) -> "AgentRequest":
+def _build_doc_request(sid: str, data: dict) -> "AgentRequest":
     """Build an AgentRequest from raw WebSocket data."""
-    from app.core.agent.lifecycle import AgentRequest
+    from app.core.agent.kernel import AgentRequest
 
     return AgentRequest(
         prompt=str(data.get("prompt") or ""),
@@ -593,293 +565,3 @@ def _get_session_queue():
 
 
 # ══════════════════════════════════════════════════════════════
-# DocAgent Integration — document processing
-# ══════════════════════════════════════════════════════════════
-
-
-def _run_doc_agent(socketio, sid, data: dict) -> None:
-    """
-    Run a doc_ai_request through the new DocAgent.
-
-    DocAgent provides:
-    - LLM-driven task planning with multi-file context
-    - Step-by-step execution with progress streaming
-    - File change tracking for frontend highlighting
-    - Task completion verification
-    """
-    from app.core.agent.doc_agent import DocAgent, DocEventType, DocTask, FileHandle
-    from app.core.agent.doc_event_emitter import DocEventEmitter
-
-    # Build FileHandle objects from data
-    files = []
-
-    # Add main file context
-    file_path = data.get("file_path", "")
-    file_type = data.get("file_type", "unknown")
-    file_name = data.get("file_name", "")
-    context = data.get("context", "")
-    selection = data.get("selection", "")
-
-    if file_path or context:
-        files.append(
-            FileHandle(
-                path=file_path or file_name or "document",
-                file_type=file_type,
-                content_snapshot=context[:5000] if context else "",
-                selection=selection if selection else None,
-            )
-        )
-
-    # Add additional files from open_tabs
-    open_tabs = data.get("open_tabs", [])
-    for tab in open_tabs[:5]:  # Limit to 5 files
-        tab_path = tab.get("path", tab.get("name", ""))
-        if tab_path and tab_path != file_path:
-            files.append(
-                FileHandle(
-                    path=tab_path,
-                    file_type=tab.get("type", ""),
-                    content_snapshot=(
-                        tab.get("content", "")[:2000] if tab.get("content") else ""
-                    ),
-                )
-            )
-
-    # Build DocTask
-    task = DocTask(
-        id=data.get("task_id", ""),
-        prompt=data.get("prompt", ""),
-        files=files,
-        permissions={"read", "write", "annotate"},
-        session_id=sid,
-        history=data.get("history", []),
-        options={
-            "model_mode": normalize_model_mode(data.get("model_mode"), default="auto"),
-            "output_mode": data.get("output_mode", "inline"),
-        },
-    )
-
-    # Create emitter and agent
-    emitter = DocEventEmitter(socketio, sid, namespace="/doc")
-    emitter.set_task_id(task.id)
-
-    agent = DocAgent(emitter=emitter)
-
-    # Run and emit events
-    for event in agent.run(task):
-        _emit_doc_agent_event(socketio, sid, event, emitter)
-
-
-def _emit_doc_agent_event(socketio, sid, event, emitter) -> None:
-    """Map DocAgent events to WebSocket emit calls."""
-    from app.core.agent.doc_agent import DocEventType
-
-    etype = event.event_type
-    data = event.data
-    ns = "/doc"
-
-    if etype == DocEventType.PLAN_START:
-        socketio.emit(
-            "doc_plan_start",
-            {
-                "task_id": event.task_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.PLAN_CREATED:
-        socketio.emit(
-            "doc_plan_created",
-            {
-                "task_id": event.task_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.STEP_START:
-        socketio.emit(
-            "doc_step_start",
-            {
-                "task_id": event.task_id,
-                "step_id": event.step_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.STEP_PROGRESS:
-        socketio.emit(
-            "doc_step_progress",
-            {
-                "task_id": event.task_id,
-                "step_id": event.step_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.STEP_DONE:
-        socketio.emit(
-            "doc_step_done",
-            {
-                "task_id": event.task_id,
-                "step_id": event.step_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.STEP_ERROR:
-        socketio.emit(
-            "doc_step_error",
-            {
-                "task_id": event.task_id,
-                "step_id": event.step_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.TOOL_CALL:
-        socketio.emit(
-            "doc_tool_call",
-            {
-                "task_id": event.task_id,
-                "step_id": event.step_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.TOOL_RESULT:
-        socketio.emit(
-            "doc_tool_result",
-            {
-                "task_id": event.task_id,
-                "step_id": event.step_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.FILE_CHANGE:
-        socketio.emit(
-            "doc_file_change",
-            {
-                "task_id": event.task_id,
-                "step_id": event.step_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.HIGHLIGHT:
-        socketio.emit(
-            "doc_highlight",
-            {
-                "task_id": event.task_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.USER_CONFIRM:
-        socketio.emit(
-            "doc_user_confirm",
-            {
-                "task_id": event.task_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.REPLAN:
-        socketio.emit(
-            "doc_replan",
-            {
-                "task_id": event.task_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.THOUGHT:
-        # Stream to chat area
-        text = data.get("text", "")
-        if text:
-            socketio.emit(
-                "agent_stream_chunk",
-                {
-                    "chunk": text,
-                },
-                namespace=ns,
-                to=sid,
-            )
-
-    elif etype == DocEventType.STREAM_CHUNK:
-        socketio.emit(
-            "agent_stream_chunk",
-            {
-                "chunk": data.get("chunk", ""),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.VERIFICATION:
-        socketio.emit(
-            "doc_verification",
-            {
-                "task_id": event.task_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.TASK_COMPLETE:
-        socketio.emit(
-            "agent_task_complete",
-            {
-                "task_id": event.task_id,
-                "full_text": data.get("summary", ""),
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == DocEventType.ERROR:
-        socketio.emit(
-            "doc_error",
-            {
-                "task_id": event.task_id,
-                **data,
-            },
-            namespace=ns,
-            to=sid,
-        )
-        # Also emit task_complete with error for frontend compatibility
-        socketio.emit(
-            "agent_task_complete",
-            {
-                "full_text": "",
-                "error": data.get("message", "未知错误"),
-            },
-            namespace=ns,
-            to=sid,
-        )

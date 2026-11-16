@@ -14,12 +14,12 @@ project_root = os.path.dirname(test_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from web.file_quality_checker import (
+from web.documents.file_quality_checker import (
     ContentSanitizer,
     FileQualityEvaluator,
     FileQualityGate,
 )
-from web.smart_feedback import SmartFeedback
+from web.proactive.smart_feedback import SmartFeedback
 
 # ══════════════════════════════════════════════════════════
 # TEST 1: ContentSanitizer — 文本清洗

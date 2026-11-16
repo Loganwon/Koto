@@ -52,33 +52,32 @@ class TestPageRoutes:
         resp = client.get("/app")
         assert resp.status_code in (200, 302, 404, 500)
 
-    def test_file_network(self, client):
-        resp = client.get("/file-network")
-        assert resp.status_code in (200, 302, 404, 500)
-
-    def test_knowledge_graph(self, client):
-        resp = client.get("/knowledge-graph")
-        assert resp.status_code in (200, 302, 404, 500)
-
-    def test_skills(self, client):
-        resp = client.get("/skills")
-        assert resp.status_code in (200, 302, 404, 500)
-
-    def test_monitoring_dashboard(self, client):
-        resp = client.get("/monitoring-dashboard")
+    def test_addon_center(self, client):
+        resp = client.get("/addons")
         assert resp.status_code in (200, 302, 404, 500)
 
     def test_mini_page(self, client):
         resp = client.get("/mini")
         assert resp.status_code in (200, 302, 404, 500)
 
-    def test_mobile_page(self, client):
-        resp = client.get("/mobile")
-        assert resp.status_code in (200, 302, 404, 500)
-
-    def test_mobile_shortcut(self, client):
-        resp = client.get("/m")
-        assert resp.status_code in (200, 302, 404, 500)
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/file-network",
+            "/knowledge-graph",
+            "/skills",
+            "/skill-marketplace",
+            "/skill-community",
+            "/monitoring-dashboard",
+            "/mobile",
+            "/m",
+            "/doc-compare",
+            "/edit-ppt/retired",
+            "/pptx-editor/retired",
+        ],
+    )
+    def test_retired_parallel_pages_stay_removed(self, client, path):
+        assert client.get(path).status_code == 404
 
     def test_test_upload_page_stays_removed(self, client):
         resp = client.get("/test_upload")
@@ -294,6 +293,57 @@ class TestNotesRoutes:
     def test_delete_note(self, client):
         resp = client.delete("/api/notes/nonexistent_id")
         assert resp.status_code in (200, 404, 500)
+
+    def test_update_missing_note(self, client):
+        resp = client.put(
+            "/api/notes/nonexistent_id",
+            json={"title": "Updated", "content": "Updated content"},
+        )
+        assert resp.status_code in (404, 500)
+
+    def test_update_note_uses_update_contract(self, client, monkeypatch):
+        class NoteManager:
+            def update_note(self, note_id, content, **metadata):
+                return {"id": note_id, "content": content, **metadata}
+
+        monkeypatch.setattr(
+            "note_manager.get_note_manager",
+            lambda: NoteManager(),
+        )
+        resp = client.put(
+            "/api/notes/note-1",
+            json={
+                "title": "Updated",
+                "content": "Updated content",
+                "category": "work",
+                "tags": ["important"],
+            },
+        )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["success"] is True
+        assert payload["note"]["id"] == "note-1"
+        assert payload["note"]["content"] == "Updated content"
+
+    def test_list_notes_returns_hydrated_note_content(self, client, monkeypatch):
+        class NoteManager:
+            def get_recent_notes(self, _limit):
+                return [{"id": "note-1"}]
+
+            def get_note(self, _note_id):
+                return {"id": "note-1", "content": "First line\nBody"}
+
+        monkeypatch.setattr(
+            "note_manager.get_note_manager",
+            lambda: NoteManager(),
+        )
+        resp = client.get("/api/notes/list?limit=5")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["notes"] == [
+            {"id": "note-1", "title": "First line", "content": "First line\nBody"}
+        ]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -569,7 +619,8 @@ class TestAnalyzeRoute:
         assert resp.status_code in (200, 500)
         data = resp.get_json()
         if resp.status_code == 200:
-            assert "task" in data
+            assert data["task"] == "AGENT"
+            assert data["route_method"] == "🤖 Kernel Default"
             assert "model" in data
 
     def test_analyze_empty_message(self, client):
@@ -586,6 +637,8 @@ class TestAnalyzeRoute:
             },
         )
         assert resp.status_code in (200, 500)
+        if resp.status_code == 200:
+            assert resp.get_json()["task"] == "CODER"
 
     def test_analyze_with_image(self, client):
         resp = _json_post(
@@ -598,6 +651,42 @@ class TestAnalyzeRoute:
             },
         )
         assert resp.status_code in (200, 500)
+        if resp.status_code == 200:
+            assert resp.get_json()["task"] == "VISION"
+
+
+@pytest.mark.unit
+class TestWorkspaceRouteIntent:
+    def test_ambiguous_request_enters_file_task_runtime(self, client):
+        resp = _json_post(
+            client,
+            "/api/workspace/ai/route-intent",
+            {"text": "帮我处理一下"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["task_type"] == "FILE_TASK"
+        assert data["route"] == "file_task"
+        assert data["route_source"] == "kernel_default"
+        assert data["performance"]["route_path"] == "kernel_default"
+
+    def test_explicit_file_context_uses_deterministic_boundary(self, client):
+        resp = _json_post(
+            client,
+            "/api/workspace/ai/route-intent",
+            {
+                "text": "总结当前文档",
+                "current_file": {"path": "workspace/report.docx"},
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["task_type"] == "FILE_TASK"
+        assert data["route_source"] == "deterministic:file_context"
+        assert data["skip_ai_intent_adjudicator"] is True
+        assert data["performance"]["route_path"] == "deterministic"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -626,10 +715,7 @@ class TestMiniChatRoute:
 
     def test_mini_chat_with_mock(self, client):
         mock_result = {"response": "Hi from mini", "model": "mock", "task": "CHAT"}
-        with patch("web.app.brain") as mock_brain, patch(
-            "web.app.SmartDispatcher"
-        ) as mock_disp:
-            mock_disp.analyze.return_value = ("CHAT", "mock-route", {})
+        with patch("web.app.brain") as mock_brain:
             mock_brain.chat.return_value = mock_result
             resp = _json_post(client, "/api/mini/chat", {"message": "Hello"})
         assert resp.status_code in (200, 500)
@@ -644,37 +730,8 @@ class TestPPTRoutes:
         resp = client.get("/api/ppt/download/nonexistent_xyz")
         assert resp.status_code in (404, 400, 500)
 
-    def test_ppt_session_nonexistent(self, client):
-        resp = client.get("/api/ppt/session/nonexistent_xyz")
-        assert resp.status_code in (404, 500)
-
-    def test_edit_ppt_page(self, client):
-        resp = client.get("/edit-ppt/test_session_123")
-        assert resp.status_code in (200, 302, 404, 500)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 22. Skills routes
-# ═══════════════════════════════════════════════════════════════════════════════
-@pytest.mark.unit
-class TestSkillsRoutes:
-    def test_skill_toggle(self, client):
-        resp = _json_post(client, "/api/skills/test_skill/toggle", {"enabled": True})
-        assert resp.status_code in (200, 404, 500)
-
-    def test_skill_prompt_update(self, client):
-        resp = _json_post(
-            client, "/api/skills/test_skill/prompt", {"prompt": "Be concise"}
-        )
-        assert resp.status_code in (200, 404, 500)
-
-    def test_skill_prompt_reset(self, client):
-        resp = _json_post(client, "/api/skills/test_skill/reset")
-        assert resp.status_code in (200, 404, 500)
-
-    def test_skill_marketplace_page(self, client):
-        resp = client.get("/skill-marketplace")
-        assert resp.status_code in (200, 302, 404, 500)
+    def test_parallel_ppt_session_editor_stays_removed(self, client):
+        assert client.get("/api/ppt/session/nonexistent_xyz").status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

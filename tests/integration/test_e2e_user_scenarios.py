@@ -19,15 +19,14 @@ import textwrap
 import uuid
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
+
+from tests.source_graph import read_frontend_partitions
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
-
-_WORKSPACE_PATCH_TARGET = "web.shared.WORKSPACE_DIR"
 
 
 @pytest.fixture()
@@ -40,14 +39,18 @@ def workspace_dir(tmp_path: Path):
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path: Path, workspace_dir: Path):
-    """Return a Flask test client with WORKSPACE_DIR patched to *workspace_dir*."""
+    """Return a Flask test client bound to an isolated Core workspace."""
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
+
+    previous_root = get_workspace_root()
     settings_path = tmp_path / "user_settings.json"
     settings_path.write_text(
         json.dumps({"storage": {"workspace_dir": str(workspace_dir)}}),
         encoding="utf-8",
     )
     monkeypatch.setenv("KOTO_USER_SETTINGS_PATH", str(settings_path))
-    with patch(_WORKSPACE_PATCH_TARGET, str(workspace_dir)):
+    set_workspace_root(str(workspace_dir))
+    try:
         import web.shared as _shared
         from web.app import app
 
@@ -57,6 +60,8 @@ def client(monkeypatch, tmp_path: Path, workspace_dir: Path):
         with app.test_client() as c:
             yield c
         _shared.clear_user_settings_cache()
+    finally:
+        set_workspace_root(previous_root)
 
 
 def _json_body(resp) -> dict:
@@ -1526,9 +1531,7 @@ class TestJavaScriptSourceChecks:
                 (root / "web" / "src" / "workspace" / "save.ts").read_text(
                     encoding="utf-8"
                 ),
-                (root / "web" / "src" / "workspace" / "fs-tree.ts").read_text(
-                    encoding="utf-8"
-                ),
+                read_frontend_partitions("web/src/workspace/fs-tree.ts"),
             ]
         )
 
@@ -1557,7 +1560,11 @@ class TestJavaScriptSourceChecks:
 
     def test_do_save_sends_explicit_true(self):
         """Both saveFile and autoSave should send explicit: true."""
-        assert "await _postAutoSave(tab, true);" in self.js
+        import re
+
+        assert re.search(
+            r"await\s+_postAutoSave\(\s*tab\s*,\s*true\s*(?:,|\))", self.js
+        ), "Normal save must pass explicit=true even when receipt options are supplied"
 
     def test_open_workspace_file_uses_open_file_by_path(self):
         assert "open_file_by_path" in self.js
@@ -1577,7 +1584,7 @@ class TestJavaScriptSourceChecks:
 
     def test_auto_save_timer_exists(self):
         assert "_autoSaveTimer" in self.js
-        assert "publishWorkspaceApi({" in self.js
+        assert "registerFeatures({" in self.js
         assert "scheduleAutoSave," in self.js
         assert "autoSave().catch(() => {});" in self.js
 

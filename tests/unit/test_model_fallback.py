@@ -46,6 +46,18 @@ def _fresh_executor() -> ModelFallbackExecutor:
 SHORT_CHAIN = ["model-a", "model-b", "model-c"]
 
 
+@pytest.fixture(autouse=True)
+def _disable_machine_local_ollama(monkeypatch):
+    """Fallback unit tests must not depend on a developer's Ollama daemon."""
+    from app.core.llm.local_model_runtime import OllamaRuntime
+
+    monkeypatch.setattr(
+        OllamaRuntime,
+        "is_available",
+        classmethod(lambda cls: False),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------

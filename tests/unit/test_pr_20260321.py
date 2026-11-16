@@ -5,7 +5,6 @@ Unit tests for PR Logan/20260320 (merged 2026-03-21).
 Covers new modules:
   - app.core.llm.provider_factory  (get_llm_provider, list_available_providers)
   - app.core.hooks.hook_manager    (HookManager, HookContext, fire_* methods)
-  - app.core.skills.skill_permissions (SkillPermissionManager, PERMISSION_META)
   - app.core.tasks.task_planner    (Plan, PlanStep, PlanTemplates, StepStatus)
   - app.core.context.context_provider (ContextBlock, ContextProvider)
   - app.core.tools.user_tool_loader   (koto_tool, get_registered_tools)
@@ -83,13 +82,6 @@ class TestProviderFactoryListProviders(unittest.TestCase):
             providers = list_available_providers()
         self.assertIn("openai", providers)
 
-    def test_anthropic_detected_via_claude_key(self):
-        from app.core.llm.provider_factory import list_available_providers
-
-        with patch.dict(os.environ, {"CLAUDE_API_KEY": "test-key"}):
-            providers = list_available_providers()
-        self.assertIn("anthropic", providers)
-
     def test_deepseek_detected_via_api_key(self):
         from app.core.llm.provider_factory import list_available_providers
 
@@ -133,16 +125,6 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
             "app.core.llm.provider_factory._LOADERS", {"openai": lambda: mock_inst}
         ):
             result = get_llm_provider(model="gpt-4o")
-        self.assertIs(result, mock_inst)
-
-    def test_model_prefix_claude_selects_anthropic(self):
-        from app.core.llm.provider_factory import get_llm_provider
-
-        mock_inst = MagicMock()
-        with patch.dict(
-            "app.core.llm.provider_factory._LOADERS", {"anthropic": lambda: mock_inst}
-        ):
-            result = get_llm_provider(model="claude-3-sonnet-20240229")
         self.assertIs(result, mock_inst)
 
     def test_model_prefix_gemini_is_rejected(self):
@@ -262,8 +244,7 @@ class TestHookContext(unittest.TestCase):
         ctx = HookContext()
         self.assertEqual(ctx.session_id, "")
         self.assertEqual(ctx.task_type, "")
-        self.assertEqual(ctx.skill_id, "")
-        self.assertEqual(ctx.active_skills, [])
+        self.assertEqual(ctx.extra, {})
 
     def test_custom_fields(self):
         from app.core.hooks.hook_manager import HookContext
@@ -271,11 +252,10 @@ class TestHookContext(unittest.TestCase):
         ctx = HookContext(
             session_id="s1",
             task_type="CHAT",
-            skill_id="sk1",
-            active_skills=["divination"],
+            extra={"source": "test"},
         )
         self.assertEqual(ctx.session_id, "s1")
-        self.assertIn("divination", ctx.active_skills)
+        self.assertEqual(ctx.extra["source"], "test")
 
 
 class TestHookManagerNoHooks(unittest.TestCase):
@@ -323,9 +303,6 @@ class TestHookManagerNoHooks(unittest.TestCase):
     def test_summary_returns_dict(self):
         s = self._hm.summary()
         self.assertIsInstance(s, dict)
-
-    def test_fire_on_skill_change_does_not_raise(self):
-        self._hm.fire_on_skill_change("divination", True, self._ctx())
 
     def test_fire_on_session_start_does_not_raise(self):
         self._hm.fire_on_session_start("sess-99", self._ctx())
@@ -384,125 +361,6 @@ class TestHookManagerWithHook(unittest.TestCase):
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. Skill Permissions
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-class TestSkillPermissions(unittest.TestCase):
-
-    def setUp(self):
-        from app.core.skills import skill_permissions as sp
-
-        self._tmpdir = tempfile.mkdtemp()
-        self._orig_cache = sp.SkillPermissionManager._cache
-        sp.SkillPermissionManager._cache = None
-        # Point _config_dir to tmpdir
-        self._patcher = patch(
-            "app.core.skills.skill_permissions._config_dir",
-            return_value=Path(self._tmpdir),
-        )
-        self._patcher.start()
-
-    def tearDown(self):
-        from app.core.skills import skill_permissions as sp
-
-        sp.SkillPermissionManager._cache = self._orig_cache
-        self._patcher.stop()
-        import shutil
-
-        shutil.rmtree(self._tmpdir, ignore_errors=True)
-
-    def test_get_granted_empty_by_default(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        SkillPermissionManager._cache = None
-        result = SkillPermissionManager.get_granted("nonexistent_skill")
-        self.assertEqual(result, [])
-
-    def test_grant_valid_permission(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        SkillPermissionManager._cache = None
-        granted = SkillPermissionManager.grant("my_skill", ["storage"])
-        self.assertIn("storage", granted)
-
-    def test_grant_invalid_permission_ignored(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        SkillPermissionManager._cache = None
-        granted = SkillPermissionManager.grant("my_skill", ["totally_fake_perm"])
-        self.assertNotIn("totally_fake_perm", granted)
-
-    def test_is_granted_after_grant(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        SkillPermissionManager._cache = None
-        SkillPermissionManager.grant("skill_a", ["clipboard_read"])
-        self.assertTrue(SkillPermissionManager.is_granted("skill_a", "clipboard_read"))
-
-    def test_is_not_granted_before_grant(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        SkillPermissionManager._cache = None
-        self.assertFalse(SkillPermissionManager.is_granted("skill_a", "autorun"))
-
-    def test_get_missing_returns_ungrant(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        SkillPermissionManager._cache = None
-        SkillPermissionManager.grant("skill_b", ["storage"])
-        missing = SkillPermissionManager.get_missing("skill_b", ["storage", "autorun"])
-        self.assertNotIn("storage", missing)
-        self.assertIn("autorun", missing)
-
-    def test_revoke_removes_permission(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        SkillPermissionManager._cache = None
-        SkillPermissionManager.grant("skill_c", ["notifications", "clipboard_write"])
-        SkillPermissionManager.revoke("skill_c", ["notifications"])
-        self.assertFalse(SkillPermissionManager.is_granted("skill_c", "notifications"))
-        self.assertTrue(SkillPermissionManager.is_granted("skill_c", "clipboard_write"))
-
-    def test_revoke_all_when_no_list(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        SkillPermissionManager._cache = None
-        SkillPermissionManager.grant("skill_d", ["storage", "autorun"])
-        SkillPermissionManager.revoke("skill_d")
-        self.assertEqual(SkillPermissionManager.get_granted("skill_d"), [])
-
-    def test_permission_meta_has_known_keys(self):
-        from app.core.skills.skill_permissions import ALL_PERMISSIONS, PERMISSION_META
-
-        for key in (
-            "ui_style",
-            "ui_interactive",
-            "notifications",
-            "clipboard_read",
-            "clipboard_write",
-            "storage",
-            "autorun",
-        ):
-            self.assertIn(key, ALL_PERMISSIONS)
-            self.assertIn(key, PERMISSION_META)
-
-    def test_get_permission_info_returns_list(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        info = SkillPermissionManager.get_permission_info(["storage", "autorun"])
-        self.assertIsInstance(info, list)
-        self.assertEqual(len(info), 2)
-
-    def test_invalidate_cache_clears_cache(self):
-        from app.core.skills.skill_permissions import SkillPermissionManager
-
-        SkillPermissionManager._cache = {"x": ["storage"]}
-        SkillPermissionManager.invalidate_cache()
-        self.assertIsNone(SkillPermissionManager._cache)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 4. Task Planner — Plan, PlanStep, StepStatus
 # ══════════════════════════════════════════════════════════════════════════════
 
 
