@@ -15,10 +15,32 @@ dist/
 
 # Virtual environment
 .venv/
+.venv-agent/
+.venv-agent-bench/
+.nodeenv/
 venv/
 env/
 
 # Secrets & API keys
+# Local credentials and generated state stay on disk, outside source publication.
+**/.env
+**/*.env
+**/.env.*
+**/*.env.*
+!**/.env.example
+!**/*.env.example
+config/.builtin_key
+config/jwt_secret.txt
+config/email_accounts.json
+config/context/user_background.json
+config/memory_summaries.json
+config/file_task_plans.json
+config/file_task_followups.json
+/.claude/settings.json
+/web/workspace/test_edit_demo.txt
+/uploads/
+/.koto/
+config/tests/suite_*.json
 **/gemini_config.env
 config/deepseek_config.env
 app/core/config/user_settings.json
@@ -46,6 +68,9 @@ config/insights.db
 config/context_awareness.db
 config/knowledge_graph.db
 config/concepts.db
+config/suggestions.db
+config/user_behavior.db
+/config/kb_config.json
 
 # IDE
 .vscode/
@@ -90,8 +115,13 @@ build_log.txt
 /app/core/workspace/images/
 /app/core/workspace/uploads/
 /app/core/workspace/clipboard/history.json
+/app/core/workspace/calendar/events.json
+/app/core/workspace/reminders/reminders.json
+/app/core/workspace/tasks/scheduled_tasks.json
 config/auto_execution.db
 config/user_settings.json
+config/user_settings.json.lock
+config/user_settings.json.corrupt-*
 
 # One-off local diagnostics captured during the 2026-07 worktree inventory.
 # These are deliberately exact names, rather than broad patterns, so fixtures
@@ -109,6 +139,15 @@ config/user_settings.json
 /unit_test_results.txt
 /create_test.py
 /temp_fix4.py
+
+# Local migration/build evidence classified during the 2026-08 release freeze.
+# Preserve these files on disk; exact rules prevent hiding real source assets.
+/_test_screenshots/
+/_col.txt
+/deleted_files.txt
+/fix_rag.py
+/fix_rag_panel.py
+/web/_npm_build.txt
 
 # Models (large binary files)
 models/
@@ -134,7 +173,8 @@ archive/installer_backup/
 config/users.json
 
 # User uploads
-web/uploads/
+web/uploads/*
+!web/uploads/.gitkeep
 
 # Node modules (if any)
 node_modules/
@@ -145,6 +185,9 @@ node_modules/
 # pytest local temp dirs
 .pytest_tmp/
 .pytest_cache_local/
+/.pytest_*.xml
+/.codex-runtime/
+/.codex_tmp/
 
 # Hypothesis test data
 .hypothesis/
@@ -186,12 +229,15 @@ app/core/llm/_license.py
 *.faiss
 config/file_rag_index/
 config/memory_rag_index/
+/config/rag_index/
 
 # Training data (large, generated)
 config/training_data/
 
 # Database files
 config/work_file_library.db
+/web/config/work_file_library.db
+/web/workspace/_index/
 
 # Cython build cache
 /build/cython_cache/
@@ -205,3 +251,21 @@ coverage.xml
 # Server logs
 server_*.log
 srv_*.log
+
+# Runtime data (moved from config/)
+data/*.json
+/data/*.json.bak
+/data/calendar/
+/data/auth/
+/data/reminders/
+/data/secrets/
+/data/tasks/
+data/db/*.db
+/data/db/*.sqlite*
+/data/file_rag_index/
+/data/rag_index/
+!data/README.md
+
+# SQLite WAL/SHM (runtime artifacts)
+*.sqlite-wal
+*.sqlite-shm
